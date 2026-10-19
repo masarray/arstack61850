@@ -498,8 +498,15 @@ ApplicationWindow {
     function applyAllSignals() {
         if (!workflowBar.session || !workflowBar.session.liveControlReady) return false
         var ok = workflowBar.session.requestSetFrequency(signalFrequency)
-        for (var group = 0; group < 2; ++group)
-            for (var row = 0; row < 4; ++row) ok = sendSignal(group, row) && ok
+        for (var group = 0; group < 2; ++group) {
+            for (var row = 0; row < 4; ++row) {
+                var signal = groupModel(group).get(row)
+                ok = sendSignal(group, row) && ok
+                // Enable flags are part of the visible 4I+4V table and must
+                // not silently retain values from an earlier START.
+                ok = workflowBar.session.requestSetEnabled(signal.signalId, signal.enabled) && ok
+            }
+        }
         ok = workflowBar.session.requestSetCtSaturation(ctSaturationEnabled, ctDcOffsetPercent,
                  ctHarmonicPercent, ctHarmonicOrder, ctClipPercent) && ok
         pendingApply = !ok
@@ -524,6 +531,17 @@ ApplicationWindow {
         return draft
     }
 
+    function queueLiveDraft(sendCommand, errorMessage) {
+        // markScenarioDirty() always sets pendingApply=true. Checking
+        // !pendingApply here would make every LIVE edit silently do nothing.
+        if (!workflowBar.injectionRunning || !workflowBar.session ||
+                !workflowBar.session.liveControlReady) return false
+        var queued = sendCommand()
+        pendingApply = !queued // QUEUED only, never independent wire proof
+        if (!queued) showMessage(errorMessage, true)
+        return queued
+    }
+
     function setFrequencyValue(value) {
         if (!validFrequency(value)) return false
         signalFrequency = value
@@ -532,8 +550,8 @@ ApplicationWindow {
         frequencyField.invalidInput = false
         refreshPreview()
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
-            workflowBar.session.requestSetFrequency(value)
+        queueLiveDraft(function() { return workflowBar.session.requestSetFrequency(value) },
+                       "Frequency not queued; press Stop/Start to restore the GUI scenario.")
         return true
     }
 
@@ -557,9 +575,10 @@ ApplicationWindow {
         ctSaturationEnabled = enabled
         refreshPreview()
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
-            workflowBar.session.requestSetCtSaturation(enabled, ctDcOffsetPercent,
-                                                       ctHarmonicPercent, ctHarmonicOrder, ctClipPercent)
+        queueLiveDraft(function() {
+            return workflowBar.session.requestSetCtSaturation(enabled, ctDcOffsetPercent,
+                                                               ctHarmonicPercent, ctHarmonicOrder, ctClipPercent)
+        }, "CT shaping not queued; press Stop/Start to restore the GUI scenario.")
         showMessage(enabled
             ? "CT saturation stress enabled · DC offset + 2nd harmonic + clipping approximation."
             : "CT saturation stress disabled.", false)
@@ -575,11 +594,10 @@ ApplicationWindow {
         for (var i = 0; i < 3; ++i) model.setProperty(i, "magnitude", value)
         selectSignal(group, row)
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply && !sendLinkedGroup(group)) {
-            showMessage("ABC update was not accepted; inspect device diagnostics.", true)
-            return
-        }
-        showMessage((pendingApply ? "Local experiment: " : "Device queue: ") + "ABC magnitude queued from " + model.get(row).signalId, false)
+        var queued = queueLiveDraft(function() { return sendLinkedGroup(group) },
+                                    "ABC magnitude update not queued; retry or Stop/Start.")
+        if (queued) showMessage("Device queue: ABC magnitude queued from " + model.get(row).signalId, false)
+        else if (!workflowBar.injectionRunning) showMessage("Local draft: ABC magnitude changed.", false)
     }
 
     function equalGroupAngles(group, row) {
@@ -590,11 +608,10 @@ ApplicationWindow {
         for (var i = 0; i < 3; ++i) model.setProperty(i, "phase", value)
         selectSignal(group, row)
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply && !sendLinkedGroup(group)) {
-            showMessage("ABC update was not accepted; inspect device diagnostics.", true)
-            return
-        }
-        showMessage((pendingApply ? "Local experiment: " : "Device queue: ") + "ABC angles queued from " + model.get(row).signalId, false)
+        var queued = queueLiveDraft(function() { return sendLinkedGroup(group) },
+                                    "ABC angles not queued; retry or Stop/Start.")
+        if (queued) showMessage("Device queue: ABC angles queued from " + model.get(row).signalId, false)
+        else if (!workflowBar.injectionRunning) showMessage("Local draft: ABC angles changed.", false)
     }
 
     function balanceGroupAngles(group, row) {
@@ -608,11 +625,10 @@ ApplicationWindow {
         model.setProperty(2, "phase", normalizedAngle(base + 120))
         selectSignal(group, row)
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply && !sendLinkedGroup(group)) {
-            showMessage("ABC update was not accepted; inspect device diagnostics.", true)
-            return
-        }
-        showMessage((pendingApply ? "Local experiment: " : "Device queue: ") + "Balanced ABC angles queued from " + model.get(row).signalId, false)
+        var queued = queueLiveDraft(function() { return sendLinkedGroup(group) },
+                                    "Balanced ABC angles not queued; retry or Stop/Start.")
+        if (queued) showMessage("Device queue: balanced ABC angles queued from " + model.get(row).signalId, false)
+        else if (!workflowBar.injectionRunning) showMessage("Local draft: balanced ABC angles changed.", false)
     }
 
     function balanced() {
@@ -628,7 +644,8 @@ ApplicationWindow {
         selectSignal(activeGroup, activeRow)
         refreshPreview()
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply) applyAllSignals()
+        if (workflowBar.injectionRunning && workflowBar.session && workflowBar.session.liveControlReady)
+            applyAllSignals()
     }
 
     function zeroAll() {
@@ -639,8 +656,8 @@ ApplicationWindow {
         selectSignal(activeGroup, activeRow)
         refreshPreview()
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
-            workflowBar.session.requestZero()
+        queueLiveDraft(function() { return workflowBar.session.requestZero() },
+                       "Zero not queued; press Stop/Start to restore the GUI scenario.")
     }
 
     function setActiveQuality(value) {
@@ -648,8 +665,9 @@ ApplicationWindow {
         groupModel(activeGroup).setProperty(activeRow, "quality", unsignedValue)
         activeQuality = unsignedValue
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
-            workflowBar.session.requestSetQuality(activeSignal, unsignedValue)
+        queueLiveDraft(function() {
+            return workflowBar.session.requestSetQuality(activeSignal, unsignedValue)
+        }, "Quality not queued; press Stop/Start to restore the GUI scenario.")
     }
 
     Shortcut { sequence: "Ctrl+B"; enabled: !workflowBar.startQueued; onActivated: root.balanced() }
@@ -1043,8 +1061,9 @@ ApplicationWindow {
                                             if (value > 0) root.previousAcFrequency = value
                                             root.refreshPreview()
                                             root.markScenarioDirty()
-                                            if (workflowBar.session && workflowBar.session.liveControlReady && !root.pendingApply)
-                                                workflowBar.session.requestSetFrequency(value)
+                                            root.queueLiveDraft(function() {
+                                                return workflowBar.session.requestSetFrequency(value)
+                                            }, "Frequency not queued; press Stop/Start to restore the GUI scenario.")
                                         } else invalidInput = true
                                     }
                                     onEditingFinished: {
@@ -1052,7 +1071,7 @@ ApplicationWindow {
                                         if (!root.validFrequency(value)) {
                                             text = root.signalFrequency.toFixed(3)
                                             invalidInput = false
-                                            root.showMessage("Frequency must be within 0..1000 Hz (0 = DC).", true)
+                                            root.showMessage("Frequency must be 0 Hz (DC) or 1..1000 Hz (AC).", true)
                                         } else text = value.toFixed(3)
                                     }
                                 }
