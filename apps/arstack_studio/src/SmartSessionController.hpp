@@ -166,6 +166,7 @@ public:
     // can mutate device connection, output, live values, profile state or PTP.
     Q_INVOKABLE bool requestStart();
     Q_INVOKABLE bool requestStartWithScenario(const QVariantMap& scenario);
+    Q_INVOKABLE bool requestApplyLiveScenario(const QVariantMap& scenario);
     Q_INVOKABLE bool requestStop();
     Q_INVOKABLE bool requestConnect();
     Q_INVOKABLE void requestRefreshPorts();
