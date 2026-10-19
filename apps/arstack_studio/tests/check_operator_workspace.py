@@ -93,6 +93,14 @@ def main() -> None:
             and "FIRMWARE RECOVERY" in session_cpp
             and "Firmware recovery" in ribbon_qml,
             "never infer missing firmware from USB timeout; retry identification and prioritize semantic-verified ports")
+    matrix_qml = source("SignalMatrix.qml")
+    require('const liveNow = matrix.session && matrix.session.liveControlReady' in matrix_qml
+            and 'matrix.session.state === "RUNNING"' in matrix_qml
+            and 'matrix.session.requestSetEnabled(signalRow.sid, checked)' in matrix_qml
+            and 'matrix.controller.pendingApply = false' in matrix_qml
+            and 'const liveNow = workflowBar.injectionRunning' in source("Main.qml")
+            and 'workflowBar.session.requestSetFrequency(value)' in source("Main.qml"),
+            "Live GUI frequency and ENABLE edits must queue device updates after draft-marking")
     main_qml = source("Main.qml")
     preview = source("SignalPreview.qml")
     tray = source("StudioTimingTray.qml")
