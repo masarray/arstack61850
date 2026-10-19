@@ -133,6 +133,7 @@ public:
     [[nodiscard]] DeviceIdentity deviceIdentity() const;
     [[nodiscard]] bool connected() const noexcept;
     [[nodiscard]] bool running() const noexcept;
+    [[nodiscard]] bool scenarioApplying() const noexcept;
     [[nodiscard]] QString portName() const;
     [[nodiscard]] QString lastError() const;
     [[nodiscard]] QString logText() const;
@@ -287,6 +288,7 @@ signals:
     void profileDeploymentProgress();
     void ptpStateChanged();
     void deviceMessage(const QString& message);
+    void scenarioApplicationFinished();
     void portReleased(quint64 generation, const QString& portName);
 
 protected:
