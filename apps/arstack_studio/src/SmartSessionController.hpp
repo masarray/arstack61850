@@ -123,8 +123,12 @@ public:
         const QString& recommendedPort,
         const QStringList& visiblePorts);
 
-    [[nodiscard]] static constexpr int profileSyncMaxAttempts() noexcept { return 2; }
+    [[nodiscard]] static constexpr int profileSyncMaxAttempts() noexcept { return 3; }
     [[nodiscard]] static constexpr int profileSyncTimeoutMs() noexcept { return 4500; }
+    [[nodiscard]] static constexpr int profileSyncHardDeadlineMs() noexcept { return 30000; }
+    [[nodiscard]] static constexpr int profileSyncBackoffMs(const int attempts) noexcept {
+        return attempts <= 1 ? 650 : 1450;
+    }
     [[nodiscard]] static constexpr bool profileSyncRetryAllowed(const int attemptsStarted) noexcept {
         return attemptsStarted >= 0 && attemptsStarted < profileSyncMaxAttempts();
     }
@@ -378,6 +382,8 @@ private:
     QTimer prepareTimer_;
     QTimer reconnectTimer_;
     QTimer profileSyncTimer_;
+    QTimer profileRetryTimer_;
+    QTimer profileSyncTotalTimer_;
     QString state_{QStringLiteral("WAITING FOR DEVICE")};
     QString statusText_{QStringLiteral("Connect ESP32-P4; ARStack Studio will detect it automatically.")};
     QString deviceFirmwareVersion_;
