@@ -106,5 +106,36 @@ int main() {
         check(!tx.readback_matches(bank, 601, 105), "unexpected bank generation revokes ticket");
         check(!tx.can_start(bank, 601, hash, 105), "unexpected live edit refuses START");
     }
+    {
+        SvLiveSignalBank bank;
+        SvScenarioTransaction tx;
+        const auto before = bank.snapshot();
+        check(populate(tx, 701, bank, 100), "running snapshot staged");
+        // BEGIN on a running publisher carries an explicit live-mode flag.
+        check(tx.begin(702, before, 101, true), "RUNNING scenario transaction allowed");
+        auto& live = tx.draft();
+        live.frequency_millihz = 60000U;
+        tx.mark_frequency();
+        for (std::size_t i = 0; i < live.channels.size(); ++i) {
+            live.channels[i].rms_counts = static_cast<std::int32_t>(300 + i);
+            live.channels[i].phase_millidegrees = static_cast<std::int32_t>(i * 12000);
+            live.channels[i].enabled = i != 7;
+            live.channels[i].quality = static_cast<std::uint32_t>(100 + i);
+            tx.mark_set(i);
+            tx.mark_enabled(i);
+        }
+        live.current_shape = {true, 0, 210, 2, 890};
+        tx.mark_shape();
+        const auto liveHash = sv_scenario_hash(live);
+        check(bank.snapshot() == before, "RUNNING stage does not leak partial channel state");
+        check(tx.commit(bank, 702, liveHash, 102) == SvScenarioTransaction::Result::accepted,
+              "RUNNING complete transaction commits atomically");
+        check(bank.snapshot().frequency_millihz == 60000U &&
+              bank.snapshot().channels[7].quality == 107U &&
+              bank.snapshot().channels[7].enabled == false,
+              "all 4I4V live values published in one generation");
+        check(tx.confirm_readback(bank, 702, 103), "RUNNING transaction independent readback");
+        check(!tx.can_start(bank, 702, liveHash, 103), "RUNNING ticket cannot ever become START ticket");
+    }
     return failures == 0 ? 0 : 1;
 }
