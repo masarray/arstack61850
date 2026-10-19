@@ -108,7 +108,7 @@ Rectangle {
             text: "Stop"
             tone: bar.workflow.injectionRunning ? "danger" : "neutral"
             iconSource: Qt.resolvedUrl("../assets/material/stop.svg")
-            enabled: (bar.workflow.injectionRunning || bar.controller.offlinePreviewRunning)
+            enabled: (bar.workflow.injectionRunning || bar.workflow.startQueued || bar.controller.offlinePreviewRunning)
                 && !bar.session.updatingFirmware
             toolTipText: ""
             onClicked: {
