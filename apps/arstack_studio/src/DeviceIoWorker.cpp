@@ -246,6 +246,7 @@ bool DeviceIoWorker::openPortInternal(const QString& portName, const bool automa
     pendingRx_.clear();
     commandQueue_.clear();
     ptpStopPending_ = false;
+    svStopPending_ = false;
     exclusiveCommandsRemaining_ = 0;
     writeActive_ = false;
     activeCommand_ = {};
@@ -294,6 +295,7 @@ void DeviceIoWorker::closePortInternal(const bool emitRelease) {
     pendingRx_.clear();
     commandQueue_.clear();
     ptpStopPending_ = false;
+    svStopPending_ = false;
     exclusiveCommandsRemaining_ = 0;
     writeActive_ = false;
     activeCommand_ = {};
