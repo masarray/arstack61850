@@ -655,7 +655,7 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+B"; enabled: !workflowBar.startQueued; onActivated: root.balanced() }
     Shortcut { sequence: "Ctrl+0"; enabled: !workflowBar.startQueued; onActivated: root.zeroAll() }
     Shortcut { sequence: "F5"; enabled: workflowBar.session && workflowBar.session.state !== "RUNNING"; onActivated: workflowBar.requestStart() }
-    Shortcut { sequence: "F6"; enabled: workflowBar.session && workflowBar.session.state === "RUNNING"; onActivated: workflowBar.requestStop() }
+    Shortcut { sequence: "F6"; enabled: workflowBar.session && (workflowBar.session.state === "RUNNING" || workflowBar.startQueued); onActivated: workflowBar.requestStop() }
 
     Dialog {
         id: diagnosticsDialog
