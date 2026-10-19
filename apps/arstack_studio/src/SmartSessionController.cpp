@@ -318,7 +318,9 @@ bool SmartSessionController::requestStartWithScenario(const QVariantMap& scenari
 
 bool SmartSessionController::requestStop() {
     if (device_ == nullptr) return false;
-    if (!device_->running()) return true;
+    // STOP is a cancellation authority even before SV RUNNING telemetry: an
+    // ACKed staging transaction may still be advancing toward START.
+    if (!device_->running() && !device_->scenarioApplying()) return true;
     if (portOwner_ != PortOwner::deviceSession || updateRequested_) return false;
     return device_->stop();
 }
