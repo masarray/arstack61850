@@ -1026,6 +1026,12 @@ bool DeviceController::sendNextBinaryProfileChunk() {
 
 bool DeviceController::processBinaryProfileLine(const QString& line) {
     if (!profileDeploying_ || binaryProfileStage_ == BinaryProfileStage::idle) return false;
+    if (!binaryProfile_.bootId.isEmpty() &&
+        binaryProfile_.bootId.compare(identity_.bootId, Qt::CaseInsensitive) != 0) {
+        failBinaryProfileDeployment(QStringLiteral(
+            "Firmware boot changed during binary profile transaction; stale ACK refused."));
+        return true;
+    }
 
     auto match = kBinaryStatusExpression.match(line);
     if (match.hasMatch() && binaryProfileStage_ == BinaryProfileStage::waiting_status) {
