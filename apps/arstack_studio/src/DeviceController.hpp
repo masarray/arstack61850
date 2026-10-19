@@ -187,6 +187,8 @@ public:
         return activeGeneration != 0 && eventGeneration == activeGeneration;
     }
 
+    // Exactly match SvLiveSignalBank::validate: 0 Hz is DC, AC is 1..1000 Hz.
+    [[nodiscard]] static bool frequencyWithinFirmwareContract(double hz) noexcept;
     [[nodiscard]] static bool parseIdentityLine(const QString& line, DeviceIdentity& identity);
     [[nodiscard]] static bool identitySupportsCurrentContract(
         const DeviceIdentity& identity,
