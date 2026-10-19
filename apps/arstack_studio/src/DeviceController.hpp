@@ -331,6 +331,7 @@ private:
     struct BinaryProfileTransfer final {
         QByteArray bytes;
         QString svId;
+        QString bootId;
         QString committedGeneration;
         QString reusedReadbackGeneration;
         std::uint64_t recordHash{};
