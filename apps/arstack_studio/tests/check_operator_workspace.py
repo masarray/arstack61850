@@ -147,11 +147,14 @@ def main() -> None:
             and "device.deviceVerified" in main_qml,
             "default PTP must reuse verified session ownership")
     device_cpp = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
-    require('commands << QStringLiteral("FREQ %1")' in device_cpp
+    require('commands << QStringLiteral("CFG FREQ %1")' in device_cpp
             and "const double phase = row.at(1).toDouble(&phaseOk);" in device_cpp
             and "const double angleMdeg = phaseDegrees * 1000.0;" in device_cpp
-            and "commands << QStringLiteral(\"START\");" in device_cpp,
-            "START must send actual eight model phases as millidegree SET commands before START")
+            and 'commands << QStringLiteral("CFG COMMIT %1 %2")' in device_cpp
+            and 'scenarioStage_ = ScenarioStage::awaiting_commit;' in device_cpp
+            and 'scenarioStage_ = ScenarioStage::awaiting_readback;' in device_cpp
+            and 'scenarioStage_ = ScenarioStage::awaiting_start_ack;' in device_cpp,
+            "START requires signed millidegree setpoints, firmware commit ACK and readback")
     matrix = source("SignalMatrix.qml")
     require("Layout.fillHeight: true" in matrix
             and "Layout.minimumHeight: 34" in matrix
@@ -183,9 +186,10 @@ def main() -> None:
             and 'QStringLiteral("IC"), QStringLiteral("IN")' in device_controller
             and 'QStringLiteral("UA"), QStringLiteral("UB")' in device_controller
             and 'QStringLiteral("UC"), QStringLiteral("UN")' in device_controller
-            and 'commands << QStringLiteral("START");' in device_controller
-            and 'const auto phaseMdeg = std::llround(angleMdeg);' in device_controller,
-            "START transaction must retain every channel and signed millidegree")
+            and 'commands << QStringLiteral("CFG COMMIT %1 %2")' in device_controller
+            and 'const auto phaseMdeg = std::llround(angleMdeg);' in device_controller
+            and 'sv_scenario_hash(normalized)' in device_controller,
+            "START transaction must retain every channel and signed millidegree with encoded hash")
     require("anchors.centerIn: parent" in source("CalmButton.qml")
             and "Text.AlignHCenter" in source("RibbonAction.qml"),
             "control captions must center on both axes")
@@ -347,11 +351,13 @@ def main() -> None:
     assert "Layout.preferredHeight: 78" in main_qml
     device_src = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
     session_src = (STUDIO / "src/SmartSessionController.cpp").read_text(encoding="utf-8")
-    require('commands << QStringLiteral("START")' in device_src
+    require('commands << QStringLiteral("CFG COMMIT %1 %2")' in device_src
             and "sendCommandBatch(commands, false, true)" in device_src
             and "formatSignalCommand(ids.at(i)" in device_src
+            and 'sendCommand(QStringLiteral("CFG SHOW %1")' in device_src
+            and 'sendCommand(QStringLiteral("START %1 %2 %3")' in device_src
             and "requestStartWithScenario(const QVariantMap& scenario)" in session_src,
-            "one-click physical Start must validate and exclusively enqueue all SETs before START")
+            "physical START must follow exclusive staged SETs, commit ACK, and verified readback")
     require("assets/material_dark/play_arrow.svg" in cmake,
             "light-hover Material icons must have bundled dark variants")
     require(matrix.count("StudioActionMenu {") == 2
