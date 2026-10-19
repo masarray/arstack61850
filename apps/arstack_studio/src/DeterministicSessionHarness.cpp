@@ -689,7 +689,7 @@ private:
         Fixture f;
         if (!f.profileReady) return false;
         seedVerified(f, identity(), QStringLiteral("COM15"), false);
-        return !f.device.start() &&
+        return !f.device.DeviceController::start() &&
             f.device.lastError().contains(QStringLiteral("Bare START refused")) &&
             !f.session.requestStart() &&
             !f.device.running();
