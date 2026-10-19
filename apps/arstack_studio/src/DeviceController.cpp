@@ -1144,9 +1144,13 @@ bool DeviceController::processBinaryProfileLine(const QString& line) {
         return true;
     }
 
-    if (line.contains(QStringLiteral("PROFILE"), Qt::CaseInsensitive) &&
-        line.contains(QStringLiteral("rejected"), Qt::CaseInsensitive)) {
-        failBinaryProfileDeployment(QStringLiteral("Device rejected the canonical binary profile transaction."));
+    if (line.contains(QStringLiteral("Unknown command"), Qt::CaseInsensitive) ||
+        line.contains(QStringLiteral("Discarded invalid"), Qt::CaseInsensitive) ||
+        (line.contains(QStringLiteral("PROFILE"), Qt::CaseInsensitive) &&
+         line.contains(QStringLiteral("rejected"), Qt::CaseInsensitive))) {
+        failBinaryProfileDeployment(
+            QStringLiteral("Firmware console rejected a command during binary profile transfer "
+                           "(possible serial line corruption): ") + line.right(180));
         return true;
     }
 
