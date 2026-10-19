@@ -115,7 +115,11 @@ def analyze(path, expected_appid, expected_svid, modulus, min_seconds, expected_
     counts = collections.Counter()
     previous = None
     first_ts = last_ts = None
-    samples = [[] for _ in range(8)]
+    # Constant-space streaming aggregates: 14.4 million frames/hour at 4 kfps.
+    minimums = [None] * 8
+    maximums = [None] * 8
+    squared_sums = [0] * 8
+    sample_counts = [0] * 8
     quality = [collections.Counter() for _ in range(8)]
     sources = collections.Counter()
     gaps = duplicates = reversals = malformed = 0
@@ -150,7 +154,10 @@ def analyze(path, expected_appid, expected_svid, modulus, min_seconds, expected_
         previous = current
         counts["smpSynch_" + str(record["synch"])] += 1
         for i, (value, q) in enumerate(record["channels"]):
-            samples[i].append(value)
+            minimums[i] = value if minimums[i] is None else min(minimums[i], value)
+            maximums[i] = value if maximums[i] is None else max(maximums[i], value)
+            squared_sums[i] += value * value
+            sample_counts[i] += 1
             quality[i][q] += 1
     duration = 0 if first_ts is None else last_ts - first_ts
     rate = (counts["matched"] - 1) / duration if duration > 0 else 0
@@ -167,11 +174,12 @@ def analyze(path, expected_appid, expected_svid, modulus, min_seconds, expected_
         "streams_seen": [{"appid": appid, "svID": svid, "frames": n}
                          for (appid, svid), n in sorted(sources.items())],
         "channels": [
-            {"name": NAMES[i], "min": min(x) if x else None,
-             "max": max(x) if x else None,
-             "rms_wire_counts": round((sum(v * v for v in x) / len(x)) ** 0.5, 3) if x else None,
+            {"name": NAMES[i], "min": minimums[i],
+             "max": maximums[i],
+             "rms_wire_counts": round((squared_sums[i] / sample_counts[i]) ** 0.5, 3)
+             if sample_counts[i] else None,
              "qualities": {f"0x{q:08X}": n for q, n in quality[i].items()}}
-            for i, x in enumerate(samples)],
+            for i in range(8)],
     }
     issues = []
     if duration < min_seconds:
@@ -184,7 +192,7 @@ def analyze(path, expected_appid, expected_svid, modulus, min_seconds, expected_
         issues.append("smpCnt sequence discontinuity")
     if rate < expected_fps * .98 or rate > expected_fps * 1.02:
         issues.append("average frame rate outside ±2%")
-    if len(samples[0]) < 2 or any(not x for x in samples):
+    if sample_counts[0] < 2 or any(n == 0 for n in sample_counts):
         issues.append("incomplete 8-channel wire payload")
     report["blocking_findings"] = issues
     report["status"] = "PASS_PCAPPARSER_ONLY" if not issues else "FAIL"
