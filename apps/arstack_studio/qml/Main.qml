@@ -56,7 +56,7 @@ ApplicationWindow {
         // Never label a visible draft as proven transmitted waveform data.
         pendingApply = true
         scenarioRevision += 1
-        if (workflowBar.injectionRunning)
+        if (workflowBar.injectionRunning && liveApplyArmed)
             Qt.callLater(root.submitLiveScenario)
     }
     function restoreLocalScenario() {
@@ -119,6 +119,8 @@ ApplicationWindow {
     property bool pendingApply: true
     property int scenarioRevision: 0
     property int liveInFlightRevision: -1
+    property bool liveApplyJustSucceeded: false
+    property bool liveApplyArmed: true
     // Session-only operator intent. Never persist across application launches:
     // an explicit PTP ON can be restored after a firmware reflash/reconnect
     // without introducing an uncontrolled power-on publisher.
@@ -200,12 +202,24 @@ ApplicationWindow {
         function onDeviceMessage(message) {
             root.showMessage(message, false)
         }
+        function onRunningChanged() {
+            if (device.running) {
+                root.liveApplyArmed = true
+                if (root.pendingApply) Qt.callLater(root.submitLiveScenario)
+            } else {
+                root.liveApplyArmed = false
+            }
+        }
+        function onLastErrorChanged() {
+            if (root.liveInFlightRevision >= 0) root.liveApplyArmed = false
+        }
         function onDeviceVerifiedChanged() {
             root.pendingApply = true
             root.liveInFlightRevision = -1
             root.offlinePreviewRunning = false
         }
         function onLiveScenarioApplied() {
+            root.liveApplyJustSucceeded = true
             // Commit/readback ACK precedes this signal. No optimistic QUEUED=APPLIED.
             if (root.liveInFlightRevision >= 0 &&
                     root.liveInFlightRevision === root.scenarioRevision)
@@ -215,7 +229,9 @@ ApplicationWindow {
             const newerDraft = root.liveInFlightRevision >= 0 &&
                                root.scenarioRevision > root.liveInFlightRevision
             root.liveInFlightRevision = -1
-            if (newerDraft && workflowBar.injectionRunning)
+            const accepted = root.liveApplyJustSucceeded
+            root.liveApplyJustSucceeded = false
+            if (accepted && newerDraft && workflowBar.injectionRunning && root.liveApplyArmed)
                 Qt.callLater(root.submitLiveScenario)
         }
     }
@@ -509,8 +525,14 @@ ApplicationWindow {
         return true
     }
 
+    function cancelLiveAutoApply() {
+        liveApplyArmed = false
+        liveInFlightRevision = -1
+        liveApplyJustSucceeded = false
+    }
+
     function submitLiveScenario() {
-        if (!pendingApply || !workflowBar.injectionRunning ||
+        if (!pendingApply || !liveApplyArmed || !workflowBar.injectionRunning ||
                 !workflowBar.session || !workflowBar.session.liveControlReady)
             return false
         // A newer edit is retained in the GUI. Completion of the previous
