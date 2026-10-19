@@ -160,6 +160,11 @@ def main() -> None:
             and "Layout.minimumHeight: 34" in matrix
             and "Item { Layout.fillHeight: true }" not in matrix,
             "editable channel rows must consume vertical space without a blank filler")
+    require('bar.workflow.injectionRunning || bar.workflow.startQueued || bar.controller.offlinePreviewRunning'
+            in ribbon_qml
+            and '!ribbon.injectionRunning && !ribbon.startQueued' in workflow
+            and 'startWatchdog.stop()' in workflow,
+            "SV STOP must remain actionable while the acknowledged scenario transaction is pending")
     require("function flushPendingEdits()" in matrix
             and "magnitudeApplyTimer.stop()" in matrix
             and "phaseApplyTimer.stop()" in matrix
