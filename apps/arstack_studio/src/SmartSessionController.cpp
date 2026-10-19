@@ -426,7 +426,9 @@ bool SmartSessionController::requestZero() {
 
 bool SmartSessionController::requestPtpRefresh() {
     // A guided START owns its ACK/readback order; do not interleave SHOWs.
-    if (!deviceControlAvailable() || device_ == nullptr || device_->ptpStarting()) return false;
+    if (!deviceControlAvailable() || device_ == nullptr || device_->ptpStarting() ||
+        device_->profileDeploying() || profileSyncStage_ == ProfileSyncStage::deploying ||
+        device_->scenarioApplying()) return false;
     const bool ptp = device_->sendPtpShow();
     const bool sync = device_->sendSmpSynchShow();
     return ptp && sync;
