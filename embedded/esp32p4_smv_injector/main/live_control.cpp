@@ -156,7 +156,7 @@ void record_control_heartbeat() noexcept {
 bool arm_control_lease_if_fresh() noexcept {
     if (!heartbeat_is_fresh()) {
         g_control_lease_active.store(false, std::memory_order_release);
-        return true;
+        return false;
     }
     if (!start_control_lease_timer(kControlLeaseTimeoutUs)) {
         g_control_lease_active.store(false, std::memory_order_release);
