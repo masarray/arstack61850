@@ -124,7 +124,7 @@ public:
         const QStringList& visiblePorts);
 
     [[nodiscard]] static constexpr int profileSyncMaxAttempts() noexcept { return 2; }
-    [[nodiscard]] static constexpr int profileSyncTimeoutMs() noexcept { return 2500; }
+    [[nodiscard]] static constexpr int profileSyncTimeoutMs() noexcept { return 4500; }
     [[nodiscard]] static constexpr bool profileSyncRetryAllowed(const int attemptsStarted) noexcept {
         return attemptsStarted >= 0 && attemptsStarted < profileSyncMaxAttempts();
     }
