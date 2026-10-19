@@ -21,10 +21,10 @@ def packet(seq=0, change=0, quality=0):
     asdu = tlv(0x30,
                tlv(0x80, b"ARSTACK_SV01") +
                tlv(0x82, seq.to_bytes(2, "big")) +
-               tlv(0x83, b"\\x01") +
-               tlv(0x85, b"\\x01") +
+               tlv(0x83, b"\x01") +
+               tlv(0x85, b"\x01") +
                tlv(0x87, payload))
-    pdu = tlv(0x60, tlv(0x80, b"\\x01") + tlv(0xa2, asdu))
+    pdu = tlv(0x60, tlv(0x80, b"\x01") + tlv(0xa2, asdu))
     eth = bytes.fromhex("011ccd04000102000000000188ba")
     return eth + struct.pack(">HHHH", 0x4000, len(pdu) + 8, 0, 0) + pdu
 
