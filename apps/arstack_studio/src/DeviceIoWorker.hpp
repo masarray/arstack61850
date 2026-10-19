@@ -165,6 +165,7 @@ private:
         bool exclusive,
         bool reportRejection);
     void queuePriorityPtpStop();
+    void queuePrioritySvStop();
     void pumpWriteQueue();
     void completeActiveWrite();
     void processReadyRead();
@@ -193,6 +194,7 @@ private:
     bool genericProbeActive_{false};
     bool identityConfirmed_{false};
     bool writeActive_{false};
-    bool ptpStopPending_{false}; // reserved bounded emergency STOP slot
+    bool ptpStopPending_{false}; // reserved bounded emergency PTP STOP slot
+    bool svStopPending_{false};  // independent reserved emergency SV STOP slot
     bool heartbeatEnabled_{false};
 };

@@ -632,7 +632,12 @@ void DeviceController::handlePortClosed(const QString& portName) {
 }
 
 bool DeviceController::sendShow() { return sendCommand(QStringLiteral("SHOW")); }
-bool DeviceController::start() { return sendCommand(QStringLiteral("START")); }
+bool DeviceController::start() {
+    // A bare START has no source-of-truth snapshot. The only operator
+    // entrance is startWithScenario(), which serializes all eight channels.
+    setError(QStringLiteral("Bare START refused: provide the current 4I+4V scenario."));
+    return false;
+}
 
 bool DeviceController::startWithScenario(const QVariantMap& scenario) {
     if (!deviceVerified_ || running_) return false;

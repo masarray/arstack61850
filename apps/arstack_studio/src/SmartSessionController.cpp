@@ -306,8 +306,9 @@ void SmartSessionController::start() {
 }
 
 bool SmartSessionController::requestStart() {
-    if (!startReady_ || !deviceControlAvailable() || device_ == nullptr || device_->running()) return false;
-    return device_->start();
+    // Retain the QML method for compatibility, but never let an indirect
+    // caller bypass startScenarioSnapshot()/requestStartWithScenario().
+    return false;
 }
 
 bool SmartSessionController::requestStartWithScenario(const QVariantMap& scenario) {
@@ -316,9 +317,11 @@ bool SmartSessionController::requestStartWithScenario(const QVariantMap& scenari
 }
 
 bool SmartSessionController::requestStop() {
-    if (device_ == nullptr) return false;
-    if (!device_->running()) return true;
-    if (portOwner_ != PortOwner::deviceSession || updateRequested_) return false;
+    if (device_ == nullptr || portOwner_ != PortOwner::deviceSession || updateRequested_)
+        return false;
+    // STOP is also a cancellation request while START is queued but the
+    // asynchronous firmware RUNNING acknowledgement has not arrived.
+    if (!device_->connected() || !device_->deviceVerified()) return false;
     return device_->stop();
 }
 

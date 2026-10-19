@@ -301,8 +301,14 @@ SurfacePanel {
     }
 
     function requestStop() {
-        if (ribbon.injectionRunning && !smartSession.requestStop())
-            controller.showMessage("Studio could not stop the current device session.", true)
+        if (!ribbon.injectionRunning && !ribbon.startQueued) return
+        if (!smartSession.requestStop()) {
+            controller.showMessage("Studio could not queue safety STOP; device state is unverified.", true)
+            return
+        }
+        ribbon.startQueued = false
+        startWatchdog.stop()
+        controller.pendingApply = true
     }
 
     function openEngineeringDialog() {

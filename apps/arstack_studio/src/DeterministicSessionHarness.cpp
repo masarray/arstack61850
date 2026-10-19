@@ -49,6 +49,8 @@ public:
             {"PTP rejected config never starts", ptpGuidedRejectedConfigStops()},
             {"PTP STOP cancels pending start after verified readback", ptpGuidedStopCancelsStart()},
             {"ABC live SET encoder remains consistent and bounded", abcSetpointBatchContract()},
+            {"bare SV START cannot bypass full 4I+4V scenario", bareSvStartIsRejected()},
+            {"SV STOP cancels queued START despite full queue", svSafetyStopBypassesFullQueue()},
             {"PTP STOP full queue uses bounded priority slot", ptpSafetyStopBypassesFullQueue()},
             {"PTP STOP requires firmware ACK and stopped readback", ptpStopConfirmationCannotBeGuessed()},
             {"PTP STOP timeout blocks restart pending manual recovery", ptpUnverifiedStopBlocksRestart()},
@@ -681,6 +683,40 @@ private:
                icOperator == QStringLiteral("SET IC 1000 90000 0") &&
                badId.isEmpty() && overflow.isEmpty() &&
                dcNegative == QStringLiteral("SET IA -1000 0 0");
+    }
+
+    static bool bareSvStartIsRejected() {
+        Fixture f;
+        if (!f.profileReady) return false;
+        seedVerified(f, identity(), QStringLiteral("COM15"), false);
+        return !f.device.start() &&
+            f.device.lastError().contains(QStringLiteral("Bare START refused")) &&
+            !f.session.requestStart() &&
+            !f.device.running();
+    }
+
+    static bool svSafetyStopBypassesFullQueue() {
+        DeviceIoWorker worker;
+        for (int i = 0; i < DeviceIoWorker::commandQueueCapacity(); ++i) {
+            const QString command = i == 5 ? QStringLiteral("START") :
+                (i == 10 ? QStringLiteral("SCENARIO START 7") :
+                 QStringLiteral("PROFILE SHOW"));
+            worker.commandQueue_.enqueue(DeviceIoWorker::PendingCommand{
+                command, command.toUtf8() + '\n', false, i == 5 || i == 10});
+        }
+        worker.exclusiveCommandsRemaining_ = 2;
+        worker.queuePrioritySvStop(); // no COM: check bounded queue mutation
+        if (!worker.svStopPending_ ||
+            worker.commandQueue_.size() != DeviceIoWorker::commandQueueCapacity() - 2 ||
+            worker.exclusiveCommandsRemaining_ != 0) return false;
+        for (const auto& command : worker.commandQueue_) {
+            if (command.text == QStringLiteral("START") ||
+                command.text.startsWith(QStringLiteral("SCENARIO START "))) return false;
+        }
+        worker.queuePrioritySvStop();
+        worker.queuePriorityPtpStop();
+        return worker.svStopPending_ && worker.ptpStopPending_ &&
+            worker.commandQueue_.size() == DeviceIoWorker::commandQueueCapacity() - 2;
     }
 
     static bool ptpSafetyStopBypassesFullQueue() {
