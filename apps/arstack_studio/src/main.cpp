@@ -342,7 +342,7 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         !DeviceController::identityRetryAllowed(-1);
 
     const bool boundedProfileSyncPolicy =
-        SmartSessionController::profileSyncMaxAttempts() == 2 &&
+        SmartSessionController::profileSyncMaxAttempts() == 3 &&
         SmartSessionController::profileSyncTimeoutMs() == 4500 &&
         SmartSessionController::profileSyncRetryAllowed(0) &&
         SmartSessionController::profileSyncRetryAllowed(1) &&
