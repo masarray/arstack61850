@@ -72,7 +72,7 @@ def decode_frame(frame):
         values = [struct.unpack_from(">iI", payload, i * 8) for i in range(8)]
         records.append({"appid": appid, "sv_id": fields[0x80].decode("ascii"),
                         "count": int.from_bytes(fields[0x82], "big"),
-                        "synch": int.from_bytes(fields.get(0x85, b"\\x00"), "big"),
+                        "synch": int.from_bytes(fields.get(0x85, b"\x00"), "big"),
                         "channels": values})
     if len(records) != 1:
         raise ValueError("9-2LE acceptance expects exactly one ASDU per SV Ethernet frame")
