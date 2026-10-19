@@ -279,6 +279,13 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_warnings(ariec61850_live_signal_tests)
     ariec61850_apply_sanitizers(ariec61850_live_signal_tests)
     add_test(NAME ariec61850_live_signal_tests COMMAND ariec61850_live_signal_tests)
+    add_executable(ariec61850_sv_scenario_transaction_tests tests/test_sv_scenario_transaction.cpp)
+    target_link_libraries(ariec61850_sv_scenario_transaction_tests PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_sv_scenario_transaction_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_sv_scenario_transaction_tests)
+    ariec61850_apply_sanitizers(ariec61850_sv_scenario_transaction_tests)
+    add_test(NAME ariec61850_sv_scenario_transaction_tests
+             COMMAND ariec61850_sv_scenario_transaction_tests)
 
     add_executable(ariec61850_goose_runtime_tests tests/test_goose_runtime.cpp)
     target_link_libraries(ariec61850_goose_runtime_tests PRIVATE ARIEC61850::core)
