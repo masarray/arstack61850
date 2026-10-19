@@ -60,6 +60,8 @@ public:
             {"App teardown must stop PTP without SV output", ptpOnlyShutdownIntent()},
             {"PTP role mismatch and new session revoke pending start", ptpGuidedRoleAndGenerationGuards()},
             {"profile timeout -> bounded terminal error", profileTimeoutIsTerminal()},
+            {"profile failure waits visible bounded cooldown before retry", profileRetryCooldownIsVisible()},
+            {"absolute deadline prevents indefinite PREPARING", profileHardDeadlineTerminates()},
             {"profile rejection -> bounded terminal error", profileRejectionIsTerminal()},
             {"binary stale ACK identity -> fail closed", binaryProfileStaleAckFailsClosed()},
             {"identical canonical PROFILE digest + readback reuses active", canonicalProfileReuseRequiresMatchingReadback()},
@@ -932,6 +934,49 @@ private:
             session.profileSyncStage_ == SmartSessionController::ProfileSyncStage::failed &&
             session.state() == QStringLiteral("PROFILE SYNC ERROR") &&
             session.profileSyncRetryAvailable() &&
+            !session.startReady();
+    }
+
+    static bool profileRetryCooldownIsVisible() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
+        auto& session = fixture.session;
+        session.needsProfileSync_ = true;
+        session.profileSyncStage_ = SmartSessionController::ProfileSyncStage::deploying;
+        session.profileSyncAttempts_ = 1;
+        fixture.device.profileDeploying_ = false;
+        fixture.device.profileArmed_ = false;
+        session.handleProfileSyncAttemptFailure(QStringLiteral("timed out at BINCHUNK"));
+        const bool waiting = session.profileRetryTimer_.isActive() &&
+            session.profileRetryTimer_.interval() ==
+                SmartSessionController::profileSyncBackoffMs(1) &&
+            session.state() == QStringLiteral("RECOVERING PROFILE") &&
+            session.statusText().contains(QStringLiteral("BINCHUNK")) &&
+            session.profileSyncAttempts_ == 1 &&
+            !session.startReady();
+        session.profileRetryTimer_.stop();
+        return waiting;
+    }
+
+    static bool profileHardDeadlineTerminates() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
+        auto& session = fixture.session;
+        session.needsProfileSync_ = true;
+        session.profileSyncStage_ = SmartSessionController::ProfileSyncStage::deploying;
+        session.profileSyncAttempts_ = SmartSessionController::profileSyncMaxAttempts();
+        fixture.device.profileDeploying_ = false;
+        fixture.device.profileArmed_ = false;
+        session.profileSyncTotalTimer_.start();
+        // Deterministic simulated timer signal uses production timeout lambda.
+        emit session.profileSyncTotalTimer_.timeout();
+        return !session.profileSyncTotalTimer_.isActive() &&
+            !session.profileRetryTimer_.isActive() &&
+            session.profileSyncStage_ == SmartSessionController::ProfileSyncStage::failed &&
+            session.state() == QStringLiteral("PROFILE SYNC ERROR") &&
+            session.statusText().contains(QStringLiteral("absolute")) &&
             !session.startReady();
     }
 
