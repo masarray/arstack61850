@@ -3,6 +3,7 @@
 #include "live_control.hpp"
 #include "ethernet_port.h"
 #include "profile_control.hpp"
+#include "ariec61850/sampled_values/live_signal_transaction.hpp"
 
 #include "esp_app_desc.h"
 #include "esp_log.h"
@@ -32,6 +33,7 @@ namespace {
 
 using ar::iec61850::sampled_values::SvLiveSignalBank;
 using ar::iec61850::sampled_values::SvLiveSignalState;
+using ar::iec61850::sampled_values::SvScenarioTransaction;
 using ar::iec61850::sampled_values::live_channel_index;
 
 constexpr char kTag[] = "ar_smv_ctrl";
@@ -43,6 +45,7 @@ constexpr std::uint64_t kControlLeaseTimeoutUs =
     static_cast<std::uint64_t>(kControlLeaseTimeoutMs) * 1000ULL;
 
 SvLiveSignalBank g_signal_bank;
+SvScenarioTransaction g_scenario_txn;
 std::atomic<bool> g_running{false};
 std::atomic<bool> g_start_request{false};
 std::atomic<TaskHandle_t> g_publisher_task{nullptr};
@@ -215,9 +218,21 @@ bool parse_u32(const char* text, std::uint32_t& value) noexcept {
     return true;
 }
 
+bool parse_u64(const char* text, std::uint64_t& out, const int base) noexcept {
+    if (text == nullptr || *text == '\0' || *text == '-') return false;
+    errno = 0;
+    char* end{};
+    const auto value = std::strtoull(text, &end, base);
+    if (errno || end == text || *end != '\0') return false;
+    out = static_cast<std::uint64_t>(value);
+    return true;
+}
+
 void print_help() noexcept {
     ESP_LOGI(kTag, "Live control commands (bench serial transport):");
-    ESP_LOGI(kTag, "  IDENTIFY | START | STOP | SHOW | ZERO | HELP");
+    ESP_LOGI(kTag, "  IDENTIFY | STOP | SHOW | ZERO | HELP");
+    ESP_LOGI(kTag, "  CFG BEGIN <token> <boot_hex> | CFG FREQ/SET/ENABLE/SHAPE ...");
+    ESP_LOGI(kTag, "  CFG COMMIT <token> <hash_hex> | CFG SHOW <token> | START <token> <boot_hex> <hash_hex>");
     ESP_LOGI(kTag, "  FREQ <millihertz>");
     ESP_LOGI(kTag, "  SET <IA|IB|IC|IN|UA|UB|UC|UN> <rms_wire_counts> <phase_mdeg> [quality]");
     ESP_LOGI(kTag, "  ENABLE <channel> <0|1>");
@@ -407,6 +422,72 @@ void handle_line(char* line) noexcept {
     char* command = strtok_r(line, kTokenDelimiters.data(), &save);
     if (command == nullptr) return;
     uppercase_ascii(command);
+    bool staged = false;
+    if (std::strcmp(command, "CFG") == 0) {
+        command = strtok_r(nullptr, kTokenDelimiters.data(), &save);
+        if (command == nullptr) { g_scenario_txn.reject(); return; }
+        uppercase_ascii(command);
+        if (std::strcmp(command, "BEGIN") == 0) {
+            std::uint64_t token{}, boot{};
+            const bool valid = parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), token, 10) &&
+                parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), boot, 16) &&
+                !has_extra_token(&save) && boot == g_boot_id &&
+                !g_running.load(std::memory_order_acquire) &&
+                g_scenario_txn.begin(token, g_signal_bank.snapshot(), monotonic_ms());
+            if (!valid) { g_scenario_txn.reset(); ESP_LOGE(kTag, "CFG BEGIN rejected"); return; }
+            ESP_LOGI(kTag, "CFG BEGIN token=%llu accepted boot=%016llX",
+                     static_cast<unsigned long long>(token), static_cast<unsigned long long>(g_boot_id));
+            return;
+        }
+        if (std::strcmp(command, "COMMIT") == 0) {
+            std::uint64_t token{}, hash{};
+            if (!parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), token, 10) ||
+                !parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), hash, 16) ||
+                has_extra_token(&save) || g_running.load(std::memory_order_acquire)) {
+                g_scenario_txn.reject();
+                ESP_LOGE(kTag, "CFG COMMIT rejected: malformed or running"); return;
+            }
+            const auto result = g_scenario_txn.commit(g_signal_bank, token, hash, monotonic_ms());
+            if (result != SvScenarioTransaction::Result::accepted) {
+                ESP_LOGE(kTag, "CFG REJECT token=%llu code=%u",
+                         static_cast<unsigned long long>(token), static_cast<unsigned>(result)); return;
+            }
+            ESP_LOGI(kTag, "CFG COMMITTED token=%llu hash=%016llX generation=%llu boot=%016llX",
+                     static_cast<unsigned long long>(token),
+                     static_cast<unsigned long long>(g_scenario_txn.checksum()),
+                     static_cast<unsigned long long>(g_scenario_txn.applied_generation()),
+                     static_cast<unsigned long long>(g_boot_id));
+            return;
+        }
+        if (std::strcmp(command, "SHOW") == 0) {
+            std::uint64_t token{};
+            if (!parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), token, 10) ||
+                has_extra_token(&save) ||
+                !g_scenario_txn.readback_matches(g_signal_bank, token, monotonic_ms())) {
+                ESP_LOGE(kTag, "CFG READBACK rejected"); return;
+            }
+            ESP_LOGI(kTag, "CFG READBACK token=%llu hash=%016llX generation=%llu boot=%016llX",
+                     static_cast<unsigned long long>(token),
+                     static_cast<unsigned long long>(g_scenario_txn.checksum()),
+                     static_cast<unsigned long long>(g_scenario_txn.applied_generation()),
+                     static_cast<unsigned long long>(g_boot_id));
+            return;
+        }
+        if (std::strcmp(command, "ABORT") == 0) {
+            g_scenario_txn.reset();
+            ESP_LOGI(kTag, "CFG ABORT accepted");
+            return;
+        }
+        staged = std::strcmp(command, "FREQ") == 0 || std::strcmp(command, "SET") == 0 ||
+                 std::strcmp(command, "ENABLE") == 0 || std::strcmp(command, "QUALITY") == 0 ||
+                 std::strcmp(command, "SHAPE") == 0;
+        if (!staged || !g_scenario_txn.staging() ||
+            g_running.load(std::memory_order_acquire)) {
+            g_scenario_txn.reject();
+            ESP_LOGE(kTag, "CFG rejected: no staging or invalid command");
+            return;
+        }
+    }
 
     if (std::strcmp(command, "HEARTBEAT") == 0) {
         if (has_extra_token(&save)) {
@@ -424,8 +505,14 @@ void handle_line(char* line) noexcept {
     }
 
     if (std::strcmp(command, "START") == 0) {
-        if (has_extra_token(&save)) {
-            ESP_LOGE(kTag, "Usage: START");
+        std::uint64_t token{}, boot{}, hash{};
+        if (!parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), token, 10) ||
+            !parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), boot, 16) ||
+            !parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), hash, 16) ||
+            has_extra_token(&save) || boot != g_boot_id ||
+            g_running.load(std::memory_order_acquire) ||
+            !g_scenario_txn.can_start(g_signal_bank, token, hash, monotonic_ms())) {
+            ESP_LOGE(kTag, "START rejected: CFG commit/readback token or boot invalid");
             return;
         }
         if (!arm_control_lease_if_fresh()) {
@@ -433,10 +520,12 @@ void handle_line(char* line) noexcept {
             return;
         }
         profile_control_abort_staging();
+        g_scenario_txn.consume_start();
         g_start_request.store(true, std::memory_order_release);
         g_running.store(true, std::memory_order_release);
         wake_publisher();
-        ESP_LOGI(kTag, "START accepted: profile armed, phase and smpCnt reset at first sample boundary");
+        ESP_LOGI(kTag, "START accepted: profile armed token=%llu hash=%016llX, phase and smpCnt reset at first sample boundary",
+                 static_cast<unsigned long long>(token), static_cast<unsigned long long>(hash));
         return;
     }
     if (std::strcmp(command, "STOP") == 0) {
@@ -445,6 +534,7 @@ void handle_line(char* line) noexcept {
             return;
         }
         g_running.store(false, std::memory_order_release);
+        g_scenario_txn.reset();
         disarm_control_lease();
         wake_publisher();
         ESP_LOGI(kTag, "STOP accepted: SV transmission suppressed");
@@ -467,6 +557,7 @@ void handle_line(char* line) noexcept {
         return;
     }
     if (std::strcmp(command, "PROFILE") == 0) {
+        g_scenario_txn.reset();
         handle_profile_command(save);
         return;
     }
@@ -618,6 +709,7 @@ void live_control_initialize(
     for (std::size_t index = 4U; index < 7U; ++index) initial.channels[index].rms_counts = voltage_rms_counts;
     initial.channels[7].rms_counts = 0;
     static_cast<void>(g_signal_bank.publish(initial));
+    g_scenario_txn.reset();
     g_running.store(false, std::memory_order_release);
     g_start_request.store(false, std::memory_order_release);
     clear_control_session();
