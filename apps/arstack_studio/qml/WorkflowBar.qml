@@ -32,11 +32,18 @@ SurfacePanel {
         target: ribbon.device
         function onRunningChanged() {
             if (ribbon.device.running) {
+                if (!ribbon.startQueued) {
+                    // Positive RUNNING telemetry may originate from a recovered
+                    // pre-existing board session. It is NOT an operator START.
+                    controller.cancelLiveAutoApply()
+                    controller.pendingApply = true
+                    return
+                }
                 ribbon.startQueued = false
                 startWatchdog.stop()
-                // A GUI edit made after the immutable START snapshot remains dirty.
+                // Edits made after the immutable START snapshot must still be applied.
                 controller.pendingApply = controller.scenarioRevision !== ribbon.startQueuedRevision
-                if (controller.pendingApply) Qt.callLater(controller.submitLiveScenario)
+                controller.activateLiveAutoApplyAfterStart()
             }
         }
         function onLastErrorChanged() {
