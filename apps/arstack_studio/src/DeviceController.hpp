@@ -7,6 +7,7 @@
 #include <QThread>
 #include <QTimer>
 #include <QVariantMap>
+#include "ariec61850/sampled_values/live_signal_state.hpp"
 
 class DeterministicSessionHarness;
 class DeviceIoWorker;
@@ -295,7 +296,8 @@ protected:
     // multi-channel flush. Empty result = invalid; never send partial batch.
     static QString formatSignalCommand(const QString& signalId, double magnitude,
         double phaseDegrees, quint32 quality, double currentCountsPerAmp,
-        double voltageCountsPerVolt, double frequencyHz);
+        double voltageCountsPerVolt, double frequencyHz,
+        ar::iec61850::sampled_values::SvLiveChannelState* encoded = nullptr);
     void setSessionHeartbeatEnabled(bool enabled);
 
 private:
@@ -306,6 +308,8 @@ private:
         awaiting_start, awaiting_runtime, awaiting_stop_ack, awaiting_stop_readback,
         stop_unconfirmed
     };
+
+    enum class ScenarioStage { idle, awaiting_commit, awaiting_readback, awaiting_start_ack };
 
     enum class BinaryProfileStage {
         idle,
@@ -350,6 +354,8 @@ private:
     bool sendNextBinaryProfileChunk();
     void resetBinaryProfileTransfer();
     void failBinaryProfileDeployment(const QString& message);
+    void failScenarioStart(const QString& message);
+    void resetScenarioStart() noexcept;
     void resetTelemetry();
     void resetPtpState();
     [[nodiscard]] bool needsPtpStopBeforeShutdown() const noexcept { return ptpRunning_ || ptpStarting(); }
@@ -396,6 +402,14 @@ private:
     bool ptpRunning_{false};
     PtpStartStage ptpStartStage_{PtpStartStage::idle};
     QTimer ptpStartTimer_;
+    QTimer scenarioTimer_;
+    ScenarioStage scenarioStage_{ScenarioStage::idle};
+    quint64 scenarioToken_{0};
+    quint64 scenarioHash_{0};
+    quint64 scenarioSessionGeneration_{0};
+    quint64 scenarioSignalGeneration_{0};
+    QString scenarioBoot_;
+    QString scenarioProfileGeneration_;
     QTimer ptpStopPollTimer_;
     QTimer logUpdateTimer_;
     QString pendingPtpRole_;
