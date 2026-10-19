@@ -102,16 +102,23 @@ public:
                sv_scenario_hash(observed) == checksum_;
     }
 
+    [[nodiscard]] bool confirm_readback(const SvLiveSignalBank& bank,
+                                        const std::uint64_t token,
+                                        const std::uint32_t now) noexcept {
+        readback_seen_ = readback_matches(bank, token, now);
+        return readback_seen_;
+    }
+
     [[nodiscard]] bool can_start(const SvLiveSignalBank& bank,
                                  const std::uint64_t token,
                                  const std::uint64_t hash,
                                  const std::uint32_t now) const noexcept {
-        return checksum_ == hash && readback_matches(bank, token, now);
+        return readback_seen_ && checksum_ == hash && readback_matches(bank, token, now);
     }
 
     void consume_start() noexcept { reset(); }
     void reset() noexcept {
-        staging_ = false; committed_ = false; rejected_ = false;
+        staging_ = false; committed_ = false; rejected_ = false; readback_seen_ = false;
         mask_ = 0; token_ = 0; checksum_ = 0; generation_ = 0; began_ms_ = 0;
     }
 
@@ -129,5 +136,6 @@ private:
     bool staging_{false};
     bool committed_{false};
     bool rejected_{false};
+    bool readback_seen_{false};
 };
 } // namespace ar::iec61850::sampled_values
