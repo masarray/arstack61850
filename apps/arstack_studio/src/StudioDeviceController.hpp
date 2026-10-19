@@ -247,7 +247,7 @@ private:
         // Profile deployment is an exclusive transport transaction. Health
         // observation is deferred instead of interleaving another command or
         // treating intentional queue exclusivity as a missed response.
-        if (profileDeploying()) return;
+        if (profileDeploying() || scenarioApplying()) return;
 
         if (healthProbeOutstanding_) {
             ++missedHealthReplies_;
