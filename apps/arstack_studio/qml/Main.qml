@@ -120,7 +120,7 @@ ApplicationWindow {
     property int scenarioRevision: 0
     property int liveInFlightRevision: -1
     property bool liveApplyJustSucceeded: false
-    property bool liveApplyArmed: true
+    property bool liveApplyArmed: false
     // Session-only operator intent. Never persist across application launches:
     // an explicit PTP ON can be restored after a firmware reflash/reconnect
     // without introducing an uncontrolled power-on publisher.
@@ -203,12 +203,9 @@ ApplicationWindow {
             root.showMessage(message, false)
         }
         function onRunningChanged() {
-            if (device.running) {
-                root.liveApplyArmed = true
-                if (root.pendingApply) Qt.callLater(root.submitLiveScenario)
-            } else {
-                root.liveApplyArmed = false
-            }
+            // Unsolicited RUNNING telemetry (including after reconnect) does
+            // not authorize applying an old GUI draft to the physical publisher.
+            if (!device.running) root.liveApplyArmed = false
         }
         function onLastErrorChanged() {
             if (root.liveInFlightRevision >= 0) root.liveApplyArmed = false
@@ -216,6 +213,7 @@ ApplicationWindow {
         function onDeviceVerifiedChanged() {
             root.pendingApply = true
             root.liveInFlightRevision = -1
+            root.liveApplyArmed = false
             root.offlinePreviewRunning = false
         }
         function onLiveScenarioApplied() {
@@ -523,6 +521,12 @@ ApplicationWindow {
             if (!queued) showMessage("Signal update not accepted; Stop/Start to recover.", true)
         }
         return true
+    }
+
+    function activateLiveAutoApplyAfterStart() {
+        liveApplyArmed = true
+        if (pendingApply && workflowBar.injectionRunning)
+            Qt.callLater(root.submitLiveScenario)
     }
 
     function cancelLiveAutoApply() {
