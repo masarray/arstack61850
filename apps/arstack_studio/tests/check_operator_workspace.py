@@ -114,8 +114,10 @@ def main() -> None:
             and '!root.startPtpRole("SOURCE")' in main_qml,
             "default PTP start must be one-shot and deliberate OFF must cancel it")
     require("phaseLink && row < 3" in main_qml
-            and "sendLinkedGroup(group) : sendSignal(group, row)" in main_qml,
-            "edited 3-phase angles must be transmitted from the same table model")
+            and "sendLinkedGroup(group) : sendSignal(group, row)" in main_qml
+            and "scenarioRevision += 1" in main_qml
+            and "Qt.callLater(root.submitLiveScenario)" in main_qml,
+            "edited 3-phase angles must submit the complete table through atomic live CFG")
     controller = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
     require("logUpdateTimer_.setInterval(100)" in controller
             and "if (!logUpdateTimer_.isActive()) logUpdateTimer_.start();" in controller,
@@ -138,14 +140,24 @@ def main() -> None:
             "checkbox must keep one stable custom indicator on hover")
     require("anchors.centerIn: parent" in calm,
             "button caption needs horizontal centering")
-    require("root.sendSignal(group, row)" in main_qml
+    require("function submitLiveScenario()" in main_qml
+            and "workflowBar.session.requestApplyLiveScenario(snapshot)" in main_qml
+            and "onLiveScenarioApplied()" in main_qml
             and "Layout.fillHeight: false" in main_qml
             and "Layout.preferredHeight: 196" in main_qml,
-            "tables and live sent phases must use explicit bounded layout")
+            "bounded tables must map to atomic 4I4V live commits and verified readback")
     require('property bool ptpDefaultStartAttempted: false' in main_qml
             and 'root.startPtpRole("SOURCE")' in main_qml
             and "device.deviceVerified" in main_qml,
             "default PTP must reuse verified session ownership")
+    require("requestSetSignal(" not in main_qml
+            and "requestSetFrequency(" not in main_qml
+            and "requestSetCtSaturation(" not in main_qml
+            and "requestSetQuality(" not in main_qml
+            and "requestSetEnabled(" not in matrix
+            and "requestZero(" not in main_qml
+            and "root.pendingApply = false" in main_qml,
+            "RUNNING edits must not queue fragmented 4I4V commands or optimistic GUI success")
     device_cpp = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
     require('commands << QStringLiteral("CFG FREQ %1")' in device_cpp
             and "const double phase = row.at(1).toDouble(&phaseOk);" in device_cpp
