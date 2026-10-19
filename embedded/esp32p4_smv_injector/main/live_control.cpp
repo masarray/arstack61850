@@ -618,6 +618,7 @@ void handle_line(char* line) noexcept {
             !parse_u32(order_text, order) || !parse_u32(clip_text, clip) || has_extra_token(&save) ||
             enabled > 1U || dc_offset < -3000 || dc_offset > 3000 || harmonic > 3000U ||
             order < 2U || order > 63U || clip < 10U || clip > 10000U) {
+            if (staged) g_scenario_txn.reject();
             ESP_LOGE(kTag, "Usage: SHAPE CT <0|1> <dc_permille> <harmonic_permille> <order> <clip_permille>");
             return;
         }
@@ -648,12 +649,14 @@ void handle_line(char* line) noexcept {
         std::strcmp(command, "QUALITY") == 0) {
         char* channel_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
         if (channel_text == nullptr) {
+            if (staged) g_scenario_txn.reject();
             ESP_LOGE(kTag, "Channel name is required");
             return;
         }
         uppercase_ascii(channel_text);
         const auto channel_index = live_channel_index(channel_text);
         if (!channel_index.has_value()) {
+            if (staged) g_scenario_txn.reject();
             ESP_LOGE(kTag, "Unknown channel '%s'", channel_text);
             return;
         }
@@ -667,15 +670,18 @@ void handle_line(char* line) noexcept {
             std::int32_t rms{};
             std::int32_t phase{};
             if (!parse_i32(rms_text, rms) || !parse_i32(phase_text, phase)) {
+            if (staged) g_scenario_txn.reject();
                 ESP_LOGE(kTag, "Usage: SET <channel> <rms_wire_counts> <phase_mdeg> [quality]");
                 return;
             }
             std::uint32_t quality{};
             if (quality_text != nullptr && !parse_u32(quality_text, quality)) {
+            if (staged) g_scenario_txn.reject();
                 ESP_LOGE(kTag, "Invalid quality value '%s'", quality_text);
                 return;
             }
             if (has_extra_token(&save)) {
+                if (staged) g_scenario_txn.reject();
                 ESP_LOGE(kTag, "Usage: SET <channel> <rms_wire_counts> <phase_mdeg> [quality]");
                 return;
             }
@@ -696,6 +702,7 @@ void handle_line(char* line) noexcept {
             char* enabled_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
             std::uint32_t enabled{};
             if (!parse_u32(enabled_text, enabled) || enabled > 1U || has_extra_token(&save)) {
+            if (staged) g_scenario_txn.reject();
                 ESP_LOGE(kTag, "Usage: ENABLE <channel> <0|1>");
                 return;
             }
@@ -713,6 +720,7 @@ void handle_line(char* line) noexcept {
         char* quality_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
         std::uint32_t quality{};
         if (!parse_u32(quality_text, quality) || has_extra_token(&save)) {
+            if (staged) g_scenario_txn.reject();
             ESP_LOGE(kTag, "Usage: QUALITY <channel> <uint32/0xhex>");
             return;
         }
