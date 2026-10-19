@@ -34,9 +34,9 @@ const QRegularExpression kSignalGenerationExpression{
     QStringLiteral("Live signal generation\\s+(\\d+)\\s+committed"),
     QRegularExpression::CaseInsensitiveOption};
 const QRegularExpression kScenarioCommitExpression{
-    QStringLiteral("CFG COMMITTED token=(\\d+) hash=([0-9A-Fa-f]{16}) generation=(\\d+) boot=([0-9A-Fa-f]{16}")};
+    QStringLiteral("CFG COMMITTED token=(\\d+) hash=([0-9A-Fa-f]{16}) generation=(\\d+) boot=([0-9A-Fa-f]{16})")};
 const QRegularExpression kScenarioReadbackExpression{
-    QStringLiteral("CFG READBACK token=(\\d+) hash=([0-9A-Fa-f]{16}) generation=(\\d+) boot=([0-9A-Fa-f]{16}")};
+    QStringLiteral("CFG READBACK token=(\\d+) hash=([0-9A-Fa-f]{16}) generation=(\\d+) boot=([0-9A-Fa-f]{16})")};
 const QRegularExpression kScenarioStartExpression{
     QStringLiteral("START accepted: profile armed token=(\\d+) hash=([0-9A-Fa-f]{16})")};
 const QRegularExpression kBinaryCommitExpression{
@@ -639,6 +639,7 @@ void DeviceController::handlePortClosed(const QString& portName) {
     setIdentificationState(IdentificationState::Idle);
     discovering_ = false;
     resetPtpState();
+    resetScenarioStart();
     resetTelemetry();
 
     emit runningChanged();
@@ -764,7 +765,10 @@ bool DeviceController::startWithScenario(const QVariantMap& scenario) {
     signalFrequencyHz_ = hz;
     return true;
 }
-bool DeviceController::stop() { return sendCommand(QStringLiteral("STOP")); }
+bool DeviceController::stop() {
+    resetScenarioStart();
+    return sendCommand(QStringLiteral("STOP"));
+}
 bool DeviceController::zero() { return sendCommand(QStringLiteral("ZERO")); }
 
 bool DeviceController::setFrequency(const double hz) {
@@ -1427,6 +1431,21 @@ bool DeviceController::sendQuietCommand(const QString& command) {
 }
 
 bool DeviceController::sendCommandBatch(const QStringList& commands, const bool quiet, const bool exclusive) {
+    if (scenarioStage_ != ScenarioStage::idle) {
+        const bool stagingBatch = exclusive && !commands.isEmpty() &&
+            commands.constFirst().startsWith(QStringLiteral("CFG BEGIN "));
+        const bool safeCommand = !exclusive && commands.size() == 1 &&
+            (commands.constFirst() == QStringLiteral("STOP") ||
+             commands.constFirst() == QStringLiteral("PTP STOP") ||
+             commands.constFirst() == QStringLiteral("HEARTBEAT") ||
+             commands.constFirst() == QStringLiteral("SHOW") ||
+             commands.constFirst().startsWith(QStringLiteral("CFG SHOW ")) ||
+             commands.constFirst().startsWith(QStringLiteral("START ")));
+        if (!stagingBatch && !safeCommand) {
+            setError(QStringLiteral("SV transaction pending: concurrent configuration rejected."));
+            return false;
+        }
+    }
     if (!connected_ || !ioWorkerReady_ || ioWorker_ == nullptr || sessionGeneration_ == 0) {
         setError(QStringLiteral("Device is not connected."));
         return false;
@@ -1452,6 +1471,26 @@ void DeviceController::setSessionHeartbeatEnabled(const bool enabled) {
             worker->setHeartbeatEnabled(enabled, generation);
         },
         Qt::QueuedConnection);
+}
+
+void DeviceController::resetScenarioStart() noexcept {
+    scenarioTimer_.stop();
+    scenarioStage_ = ScenarioStage::idle;
+    scenarioToken_ = 0;
+    scenarioHash_ = 0;
+    scenarioSessionGeneration_ = 0;
+    scenarioSignalGeneration_ = 0;
+    scenarioBoot_.clear();
+    scenarioProfileGeneration_.clear();
+}
+
+void DeviceController::failScenarioStart(const QString& message) {
+    if (scenarioStage_ == ScenarioStage::idle) return;
+    resetScenarioStart();
+    // Even if START ACK was lost after a valid commit, issue STOP. It is not
+    // safe to conclude that the physical publisher is stopped from a timeout.
+    static_cast<void>(sendCommand(QStringLiteral("STOP")));
+    setError(message);
 }
 
 void DeviceController::setRunning(const bool value) {
@@ -1529,16 +1568,84 @@ void DeviceController::processLine(const QString& rawLine) {
     if (line.isEmpty()) return;
     appendLog(QStringLiteral("←"), line);
 
+    // Only the owner of the current session+boot may advance commit -> readback -> START.
+    // Regexes search through ESP-IDF log prefixes; all token fields are matched strictly.
+    const auto scenarioCommitted = kScenarioCommitExpression.match(line);
+    const auto scenarioReadback = kScenarioReadbackExpression.match(line);
+    const auto scenarioStart = kScenarioStartExpression.match(line);
+    const auto scenarioMatches = [this](const QRegularExpressionMatch& m) {
+        if (!m.hasMatch() || sessionGeneration_ != scenarioSessionGeneration_ ||
+            scenarioBoot_.compare(m.captured(4), Qt::CaseInsensitive) != 0 ||
+            scenarioProfileGeneration_ != profileGeneration_) return false;
+        bool tokenOk = false, hashOk = false, generationOk = false;
+        const auto token = m.captured(1).toULongLong(&tokenOk);
+        const auto hash = m.captured(2).toULongLong(&hashOk, 16);
+        const auto generation = m.captured(3).toULongLong(&generationOk);
+        return tokenOk && hashOk && generationOk && token == scenarioToken_ &&
+            hash == scenarioHash_ && generation > 0;
+    };
+    if (scenarioStage_ == ScenarioStage::awaiting_commit && scenarioCommitted.hasMatch()) {
+        if (!scenarioMatches(scenarioCommitted)) {
+            failScenarioStart(QStringLiteral("SV commit ACK identity/hash mismatch."));
+        } else {
+            scenarioSignalGeneration_ = scenarioCommitted.captured(3).toULongLong();
+            scenarioStage_ = ScenarioStage::awaiting_readback;
+            if (!sendCommand(QStringLiteral("CFG SHOW %1").arg(scenarioToken_)))
+                failScenarioStart(QStringLiteral("Unable to request firmware-applied SV readback."));
+        }
+        return;
+    }
+    if (scenarioStage_ == ScenarioStage::awaiting_readback && scenarioReadback.hasMatch()) {
+        if (!scenarioMatches(scenarioReadback) ||
+            scenarioReadback.captured(3).toULongLong() != scenarioSignalGeneration_) {
+            failScenarioStart(QStringLiteral("SV firmware readback differs from committed scenario."));
+        } else {
+            scenarioStage_ = ScenarioStage::awaiting_start_ack;
+            const QString hash = QString::number(scenarioHash_, 16).toUpper()
+                .rightJustified(16, QLatin1Char('0'));
+            if (!sendCommand(QStringLiteral("START %1 %2 %3")
+                             .arg(scenarioToken_).arg(scenarioBoot_).arg(hash)))
+                failScenarioStart(QStringLiteral("Verified SV START command could not be dispatched."));
+        }
+        return;
+    }
+    if (line.contains(QStringLiteral("CFG REJECT")) ||
+        line.contains(QStringLiteral("CFG COMMIT rejected")) ||
+        line.contains(QStringLiteral("CFG READBACK rejected")) ||
+        line.contains(QStringLiteral("START rejected: CFG"))) {
+        if (scenarioStage_ != ScenarioStage::idle)
+            failScenarioStart(QStringLiteral("Firmware rejected SV configuration/START: ") + line);
+        return;
+    }
+    if (scenarioStart.hasMatch()) {
+        bool tokenOk = false, hashOk = false;
+        const auto token = scenarioStart.captured(1).toULongLong(&tokenOk);
+        const auto hash = scenarioStart.captured(2).toULongLong(&hashOk, 16);
+        if (scenarioStage_ != ScenarioStage::awaiting_start_ack ||
+            scenarioSessionGeneration_ != sessionGeneration_ ||
+            scenarioBoot_ != identity_.bootId ||
+            !tokenOk || !hashOk || token != scenarioToken_ || hash != scenarioHash_) {
+            if (scenarioStage_ != ScenarioStage::idle)
+                failScenarioStart(QStringLiteral("Unexpected SV START ACK identity/hash."));
+            return;
+        }
+        resetScenarioStart();
+        setRunning(true);
+        return;
+    }
+
     // SV lifecycle acknowledgements are not PTP lifecycle acknowledgements.
     // Never report 4I+4V output RUNNING merely because PTP START succeeded.
-    if (line.contains(QStringLiteral("START accepted: profile armed"), Qt::CaseInsensitive))
-        setRunning(true);
+    // Bare/unmatched START text is never evidence of a verified 8-channel START.
     if (line.contains(QStringLiteral("STOP accepted: SV transmission suppressed"), Qt::CaseInsensitive))
         setRunning(false);
 
     auto match = kStateExpression.match(line);
     if (match.hasMatch()) {
-        setRunning(match.captured(1).compare(QStringLiteral("RUNNING"), Qt::CaseInsensitive) == 0);
+        const bool observedRunning = match.captured(1).compare(QStringLiteral("RUNNING"), Qt::CaseInsensitive) == 0;
+        if (scenarioStage_ != ScenarioStage::idle && observedRunning)
+            failScenarioStart(QStringLiteral("SV running telemetry arrived before verified START ACK."));
+        else if (scenarioStage_ == ScenarioStage::idle) setRunning(observedRunning);
         signalGeneration_ = match.captured(2);
         emit telemetryChanged();
     }
