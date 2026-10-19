@@ -625,6 +625,7 @@ void DeviceController::handlePortOpened(const QString& portName, const bool auto
     clearIdentity();
     running_ = false;
     profileArmed_ = false;
+    profileWasReused_ = false;
     profileDeploying_ = false;
     resetBinaryProfileTransfer();
     resetScenarioStart();
@@ -653,6 +654,7 @@ void DeviceController::handlePortClosed(const QString& portName) {
     running_ = false;
     profileDeploying_ = false;
     profileArmed_ = false;
+    profileWasReused_ = false;
     resetBinaryProfileTransfer();
     deviceVerified_ = false;
     clearIdentity();
