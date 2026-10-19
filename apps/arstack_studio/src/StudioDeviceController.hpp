@@ -38,6 +38,9 @@ public:
             serviceControlHealth();
         });
 
+        connect(this, &DeviceController::scenarioApplicationFinished, this, [this] {
+            if (frequencyPending_ || !pendingSignals_.isEmpty()) scheduleLiveFlush();
+        });
         connect(this, &DeviceController::connectedChanged, this, [this] {
             if (!connected()) {
                 clearPendingLiveCommands();
@@ -282,6 +285,9 @@ private:
 
     bool flushLiveCommands() {
         liveFlushTimer_.stop();
+        // Preserve last-value-wins edits while firmware applies the immutable START snapshot.
+        // Retry once at terminal transaction notification; never silently drop newer edits.
+        if (scenarioApplying()) return true;
         if (!deviceVerified()) {
             clearPendingLiveCommands();
             return false;
