@@ -1646,9 +1646,9 @@ void DeviceController::processLine(const QString& rawLine) {
     auto match = kStateExpression.match(line);
     if (match.hasMatch()) {
         const bool observedRunning = match.captured(1).compare(QStringLiteral("RUNNING"), Qt::CaseInsensitive) == 0;
-        if (scenarioStage_ != ScenarioStage::idle && observedRunning)
-            failScenarioStart(QStringLiteral("SV running telemetry arrived before verified START ACK."));
-        else if (scenarioStage_ == ScenarioStage::idle) setRunning(observedRunning);
+        // Unsolicited RUNNING telemetry may race the token-bound START ACK.
+        // It is neither success nor failure evidence while the commit gate is active.
+        if (scenarioStage_ == ScenarioStage::idle) setRunning(observedRunning);
         signalGeneration_ = match.captured(2);
         emit telemetryChanged();
     }
