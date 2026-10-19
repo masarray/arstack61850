@@ -51,6 +51,7 @@ public:
             {"legacy bare SV START refuses stale eight-channel state", legacyBareStartFailsClosed()},
             {"SV commit ACK/readback START chain is generation bound", svTransactionAckChain()},
             {"SV stale ACK and mismatched firmware readback fail closed", svTransactionNegativeAcks()},
+            {"STOP cancels pending SV commit-to-START chain", svStopCancelsPendingStart()},
             {"ABC live SET encoder remains consistent and bounded", abcSetpointBatchContract()},
             {"PTP STOP full queue uses bounded priority slot", ptpSafetyStopBypassesFullQueue()},
             {"PTP STOP requires firmware ACK and stopped readback", ptpStopConfirmationCannotBeGuessed()},
@@ -562,6 +563,20 @@ private:
         d.processLine(QStringLiteral(
             "START accepted: profile armed token=4242 hash=ABCDEF1234567890"));
         return d.running() && d.scenarioStage_ == DeviceController::ScenarioStage::idle;
+    }
+
+    static bool svStopCancelsPendingStart() {
+        Fixture f;
+        seedScenarioAck(f);
+        auto& d = f.device;
+        if (!f.session.requestStop()) return false;
+        if (d.scenarioStage_ != DeviceController::ScenarioStage::idle || d.running())
+            return false;
+        d.processLine(QStringLiteral(
+            "CFG COMMITTED token=4242 hash=ABCDEF1234567890 generation=91 boot=0123456789ABCDEF"));
+        d.processLine(QStringLiteral(
+            "START accepted: profile armed token=4242 hash=ABCDEF1234567890"));
+        return !d.running() && d.scenarioStage_ == DeviceController::ScenarioStage::idle;
     }
 
     static bool svTransactionNegativeAcks() {
