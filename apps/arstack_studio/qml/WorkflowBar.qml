@@ -221,6 +221,7 @@ SurfacePanel {
         if (smartSession.state === "UPDATING FIRMWARE") return "Installing firmware"
         if (smartSession.state === "UPDATE NEEDS BOOT") return "Download mode required"
         if (smartSession.state === "PREPARING 4I+4V") return "Preparing"
+        if (smartSession.state === "RECOVERING PROFILE") return "Retrying profile"
         if (smartSession.state === "READY") return smartSession.firmwareUpdateAvailable ? "Ready · update available" : "Ready to inject"
         if (smartSession.state === "RUNNING") return "Injection running"
         if (smartSession.state === "PROFILE BLOCKED") return "Profile unavailable"
@@ -233,6 +234,7 @@ SurfacePanel {
         if (smartSession.state === "RUNNING" || smartSession.state === "READY") return theme.green
         if (smartSession.state === "CONNECTING" || smartSession.state === "CHECKING DEVICE" ||
             smartSession.state === "FIRMWARE RECOVERY" || smartSession.state === "PREPARING 4I+4V" ||
+            smartSession.state === "RECOVERING PROFILE" ||
             smartSession.state === "FIRMWARE UPDATE" || smartSession.state === "UPDATING FIRMWARE" ||
             smartSession.state === "UPDATE NEEDS BOOT") return theme.amber
         if (smartSession.state === "DEVICE FOUND") return theme.accent
@@ -249,6 +251,7 @@ SurfacePanel {
         if (smartSession.updateNeedsBootloaderHelp) return "Complete Download mode recovery before starting injection."
         if (smartSession.state === "CONNECTING" || smartSession.state === "CHECKING DEVICE") return "Studio is identifying the device automatically."
         if (smartSession.state === "PREPARING 4I+4V") return "Studio is preparing the default 4I+4V injection automatically."
+        if (smartSession.state === "RECOVERING PROFILE") return smartSession.statusText
         if (smartSession.state === "PROFILE SYNC ERROR") return smartSession.statusText
         if (smartSession.state === "WAITING FOR DEVICE") return "Connect ESP32-P4; Studio will detect it automatically."
         return smartSession.statusText
