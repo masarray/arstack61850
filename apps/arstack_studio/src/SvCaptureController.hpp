@@ -7,7 +7,7 @@
 #include <QStringList>
 #include <QVariantMap>
 
-class SvCaptureController final : public QObject {
+class SvCaptureController : public QObject {
     Q_OBJECT
     Q_PROPERTY(QStringList interfaces READ interfaces NOTIFY interfacesChanged)
     Q_PROPERTY(int suggestedInterface READ suggestedInterface NOTIFY interfacesChanged)
