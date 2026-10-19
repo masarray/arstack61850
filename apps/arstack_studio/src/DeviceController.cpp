@@ -634,13 +634,17 @@ void DeviceController::handlePortClosed(const QString& portName) {
 bool DeviceController::sendShow() { return sendCommand(QStringLiteral("SHOW")); }
 bool DeviceController::start() { return sendCommand(QStringLiteral("START")); }
 
+bool DeviceController::frequencyWithinFirmwareContract(const double hz) noexcept {
+    return std::isfinite(hz) && (hz == 0.0 || (hz >= 1.0 && hz <= 1000.0));
+}
+
 bool DeviceController::startWithScenario(const QVariantMap& scenario) {
     if (!deviceVerified_ || running_) return false;
     bool hzOk = false, currentScaleOk = false, voltageScaleOk = false;
     const double hz = scenario.value(QStringLiteral("hz")).toDouble(&hzOk);
     const double currentScale = scenario.value(QStringLiteral("currentScale")).toDouble(&currentScaleOk);
     const double voltageScale = scenario.value(QStringLiteral("voltageScale")).toDouble(&voltageScaleOk);
-    if (!hzOk || !std::isfinite(hz) || hz < 0.0 || hz > 1000.0 ||
+    if (!hzOk || !frequencyWithinFirmwareContract(hz) ||
         !currentScaleOk || !voltageScaleOk || !finitePositive(currentScale) ||
         !finitePositive(voltageScale)) {
         setError(QStringLiteral("Invalid frequency or engineering scale; START refused."));
@@ -710,8 +714,8 @@ bool DeviceController::stop() { return sendCommand(QStringLiteral("STOP")); }
 bool DeviceController::zero() { return sendCommand(QStringLiteral("ZERO")); }
 
 bool DeviceController::setFrequency(const double hz) {
-    if (!std::isfinite(hz) || hz < 0.0 || hz > 1000.0) {
-        setError(QStringLiteral("Frequency must be within 0..1000 Hz (0 = DC)."));
+    if (!frequencyWithinFirmwareContract(hz)) {
+        setError(QStringLiteral("Frequency must be 0 Hz (DC) or 1..1000 Hz (AC)."));
         return false;
     }
     const auto millihertz = std::llround(hz * 1000.0);
