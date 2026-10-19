@@ -16,6 +16,7 @@ SurfacePanel {
     property string monoFont: "Inter"
     property bool compact: false
     property bool startQueued: false
+    property int startQueuedRevision: -1
     Timer {
         id: startWatchdog
         interval: 8000
@@ -33,7 +34,9 @@ SurfacePanel {
             if (ribbon.device.running) {
                 ribbon.startQueued = false
                 startWatchdog.stop()
-                controller.pendingApply = false
+                // A GUI edit made after the immutable START snapshot remains dirty.
+                controller.pendingApply = controller.scenarioRevision !== ribbon.startQueuedRevision
+                if (controller.pendingApply) Qt.callLater(controller.submitLiveScenario)
             }
         }
         function onLastErrorChanged() {
@@ -295,6 +298,7 @@ SurfacePanel {
         } else {
             // A successful queue call is NOT the board START ACK.
             // Keep the draft dirty until RUNNING evidence arrives.
+            ribbon.startQueuedRevision = controller.scenarioRevision
             ribbon.startQueued = true
             startWatchdog.restart()
         }
@@ -304,6 +308,7 @@ SurfacePanel {
         // A pending CFG transaction can progress to START: Stop must remain
         // actionable before RUNNING telemetry, not only after it.
         if (!ribbon.injectionRunning && !ribbon.startQueued) return
+        controller.cancelLiveAutoApply()
         if (!smartSession.requestStop()) {
             controller.showMessage("Studio could not cancel the current device session.", true)
             return
