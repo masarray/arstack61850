@@ -125,8 +125,8 @@ public:
     }
 
     bool setFrequency(const double hz) override {
-        if (!std::isfinite(hz) || hz < 0.0 || hz > 1000.0) {
-            emit deviceMessage(QStringLiteral("Frequency must be within 0..1000 Hz."));
+        if (!frequencyWithinFirmwareContract(hz)) {
+            emit deviceMessage(QStringLiteral("Frequency must be 0 Hz (DC) or 1..1000 Hz (AC)."));
             return false;
         }
         if (!deviceVerified()) return false;
