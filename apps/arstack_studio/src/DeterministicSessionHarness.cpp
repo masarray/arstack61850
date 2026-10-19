@@ -62,6 +62,8 @@ public:
             {"profile timeout -> bounded terminal error", profileTimeoutIsTerminal()},
             {"profile rejection -> bounded terminal error", profileRejectionIsTerminal()},
             {"binary stale ACK identity -> fail closed", binaryProfileStaleAckFailsClosed()},
+            {"identical canonical PROFILE digest + readback reuses active", canonicalProfileReuseRequiresMatchingReadback()},
+            {"supervisor accepts same generation only with verified reuse", matchingProfileReuseTransitionsToReady()},
             {"corrupt console PROFILE command reports cause and blocks START", malformedProfileLineFailsClosed()},
             {"PTP polling suspended while binary PROFILE stage owns serial", ptpRefreshBlockedDuringProfileSync()},
             {"binary PROFILE excludes PTP/SHOW/SET and buffers live setpoints", binaryProfileReservesSerialConsole()},
@@ -1017,6 +1019,89 @@ private:
                 QStringLiteral("BINCOMMIT"), Qt::CaseInsensitive);
 
         return abortClosed && commitClosed;
+    }
+
+    static bool canonicalProfileReuseRequiresMatchingReadback() {
+        Fixture good;
+        if (!good.profileReady) return false;
+        auto updated = identity();
+        updated.capabilities.push_back(QStringLiteral("PROFILE-REUSE-V1"));
+        seedVerified(good, updated, QStringLiteral("COM7"), false);
+        good.session.profileSyncStage_ =
+            SmartSessionController::ProfileSyncStage::failed;
+        auto& d = good.device;
+        d.profileDeploying_ = true;
+        d.profileArmed_ = false;
+        d.binaryProfileStage_ = DeviceController::BinaryProfileStage::waiting_reuse;
+        d.binaryProfile_.svId = QStringLiteral("ARSTACK_SV01");
+        d.binaryProfile_.appId = 0x4000;
+        d.binaryProfile_.rate = 4000;
+        d.binaryProfile_.modulus = 4000;
+        d.binaryProfile_.confRev = 1;
+        d.binaryProfile_.bytes = QByteArray(96, char(7));
+        d.binaryProfile_.recordHash = 0xAABBCCDDEEFF0011ULL;
+        d.binaryProfile_.lastObservedTransaction = 5;
+
+        const auto readback = QStringLiteral(
+            "PROFILE generation=7 svID=ARSTACK_SV01 APPID=0x4000 rate=4000 "
+            "wrap=4000 confRev=1 VLAN=1/0/4 dataSetField=0 sampleRateField=0");
+        if (!d.processBinaryProfileLine(readback)) return false;
+        if (d.profileArmed() || d.profileWasReused()) return false;
+        if (!d.processBinaryProfileLine(QStringLiteral(
+                "PROFILE BINIDENTITY generation=7 hash=AABBCCDDEEFF0011 bytes=96"))) return false;
+        const bool reused = d.profileArmed() && d.profileWasReused() &&
+            !d.profileDeploying() && d.profileGeneration() == QStringLiteral("7");
+
+        Fixture bad;
+        if (!bad.profileReady) return false;
+        seedVerified(bad, updated, QStringLiteral("COM8"), false);
+        bad.session.profileSyncStage_ =
+            SmartSessionController::ProfileSyncStage::failed;
+        auto& different = bad.device;
+        different.profileDeploying_ = true;
+        different.profileArmed_ = false;
+        different.binaryProfileStage_ = DeviceController::BinaryProfileStage::waiting_reuse;
+        different.binaryProfile_.svId = QStringLiteral("ARSTACK_SV01");
+        different.binaryProfile_.appId = 0x4000;
+        different.binaryProfile_.rate = 4000;
+        different.binaryProfile_.modulus = 4000;
+        different.binaryProfile_.confRev = 1;
+        different.binaryProfile_.bytes = QByteArray(96, char(7));
+        different.binaryProfile_.recordHash = 0xAABBCCDDEEFF0011ULL;
+        different.binaryProfile_.lastObservedTransaction = 5;
+        different.processBinaryProfileLine(readback);
+        different.processBinaryProfileLine(QStringLiteral(
+            "PROFILE BINIDENTITY generation=6 hash=AABBCCDDEEFF0011 bytes=96"));
+        // Same hash but stale generation can NEVER make the profile armed.
+        return reused && !different.profileWasReused() && !different.profileArmed();
+    }
+
+    static bool matchingProfileReuseTransitionsToReady() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
+        auto& session = fixture.session;
+        auto& device = fixture.device;
+        session.profileSyncBaselineGeneration_ = QStringLiteral("7");
+        session.profileSyncStage_ = SmartSessionController::ProfileSyncStage::deploying;
+        session.profileSyncAttempts_ = 1;
+        session.needsProfileSync_ = true;
+        device.profileArmed_ = true;
+        device.profileDeploying_ = false;
+        device.profileWasReused_ = true;
+        session.handleProfileStateChanged();
+        session.reconcile();
+        const bool ready = !session.needsProfileSync_ &&
+            session.profileSyncStage_ == SmartSessionController::ProfileSyncStage::idle &&
+            session.state() == QStringLiteral("READY") && session.startReady();
+        // An unchanged generation alone without verified reuse is not proof.
+        session.needsProfileSync_ = true;
+        session.profileSyncStage_ = SmartSessionController::ProfileSyncStage::deploying;
+        device.profileWasReused_ = false;
+        session.handleProfileStateChanged();
+        return ready &&
+            session.needsProfileSync_ &&
+            session.profileSyncStage_ == SmartSessionController::ProfileSyncStage::deploying;
     }
 
     static bool malformedProfileLineFailsClosed() {
