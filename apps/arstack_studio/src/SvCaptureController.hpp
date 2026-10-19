@@ -39,6 +39,7 @@ signals:
     void stateChanged();
 
 private:
+    friend class SvCaptureHarness; // production decoder test without capture privileges
     void setStatus(const QString& text);
     void onCaptureFinished(int exitCode, QProcess::ExitStatus exitStatus);
     void decodeCapturedFile();
