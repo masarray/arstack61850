@@ -6,11 +6,13 @@
 
 #include "ariec61850/ethernet/ethernet.hpp"
 #include "ariec61850/sampled_values/compiled_device_profile.hpp"
+#include "ariec61850/sampled_values/live_signal_transaction.hpp"
 
 #include <QDateTime>
 #include <QDebug>
 #include <QMetaObject>
 #include <QRegularExpression>
+#include <QRandomGenerator>
 #include <QSemaphore>
 #include <QSharedPointer>
 
@@ -31,6 +33,12 @@ const QRegularExpression kTimingExpression{
 const QRegularExpression kSignalGenerationExpression{
     QStringLiteral("Live signal generation\\s+(\\d+)\\s+committed"),
     QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kScenarioCommitExpression{
+    QStringLiteral("CFG COMMITTED token=(\\d+) hash=([0-9A-Fa-f]{16}) generation=(\\d+) boot=([0-9A-Fa-f]{16}")};
+const QRegularExpression kScenarioReadbackExpression{
+    QStringLiteral("CFG READBACK token=(\\d+) hash=([0-9A-Fa-f]{16}) generation=(\\d+) boot=([0-9A-Fa-f]{16}")};
+const QRegularExpression kScenarioStartExpression{
+    QStringLiteral("START accepted: profile armed token=(\\d+) hash=([0-9A-Fa-f]{16})")};
 const QRegularExpression kBinaryCommitExpression{
     QStringLiteral("PROFILE BINCOMMIT transaction=(\\d+)\\s+committed generation=(\\d+)\\s+svID=(\\S+)\\s+APPID=0x([0-9A-Fa-f]+)\\s+rate=(\\d+)\\s+wrap=(\\d+)"),
     QRegularExpression::CaseInsensitiveOption};
@@ -92,6 +100,12 @@ DeviceController::DeviceController(QObject* parent) : QObject(parent) {
     logUpdateTimer_.setInterval(100);
     connect(&logUpdateTimer_, &QTimer::timeout, this,
             &DeviceController::logTextChanged);
+    scenarioTimer_.setSingleShot(true);
+    scenarioTimer_.setInterval(8000);
+    connect(&scenarioTimer_, &QTimer::timeout, this, [this] {
+        if (scenarioStage_ != ScenarioStage::idle)
+            failScenarioStart(QStringLiteral("SV scenario firmware ACK/readback timed out; START cancelled."));
+    });
     ptpStartTimer_.setSingleShot(true);
     connect(&ptpStartTimer_, &QTimer::timeout, this, [this] {
         if (!ptpStarting()) return;
@@ -135,6 +149,7 @@ bool DeviceController::shutdown() {
     pendingConnectPort_.clear();
     const bool requestPtpStop = needsPtpStopBeforeShutdown();
     resetPtpStartup();
+    resetScenarioStart();
 
     if (ioWorker_ == nullptr || !ioThread_.isRunning()) {
         ioWorker_ = nullptr;
@@ -344,6 +359,8 @@ void DeviceController::connectWorkerSignals() {
     connect(ioWorker_, &DeviceIoWorker::commandRejected, this,
             [this](const quint64 generation, const QString& message) {
         if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
+        if (scenarioStage_ != ScenarioStage::idle)
+            failScenarioStart(QStringLiteral("SV scenario serial command rejected: ") + message);
         if (profileDeploying_) {
             profileDeploying_ = false;
             profileArmed_ = false;
@@ -363,6 +380,8 @@ void DeviceController::connectWorkerSignals() {
             [this](const quint64 generation, const QString& message, const bool fatal) {
         if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
         Q_UNUSED(fatal)
+        if (scenarioStage_ != ScenarioStage::idle)
+            failScenarioStart(QStringLiteral("SV transaction transport error: ") + message);
         setError(message);
     });
 }
@@ -409,6 +428,7 @@ QString DeviceController::ptpTxFailures() const { return ptpTxFailures_; }
 void DeviceController::setSessionGeneration(const quint64 generation) {
     if (generation == 0 || generation == sessionGeneration_) return;
     resetPtpStartup();
+    resetScenarioStart();
     sessionGeneration_ = generation;
     pendingAutoDetect_ = false;
     pendingConnectPort_.clear();
@@ -586,6 +606,7 @@ void DeviceController::handlePortOpened(const QString& portName, const bool auto
     profileArmed_ = false;
     profileDeploying_ = false;
     resetBinaryProfileTransfer();
+    resetScenarioStart();
     resetPtpState();
     resetTelemetry();
 
@@ -640,7 +661,12 @@ bool DeviceController::start() {
 }
 
 bool DeviceController::startWithScenario(const QVariantMap& scenario) {
-    if (!deviceVerified_ || running_) return false;
+    if (!deviceVerified_ || running_ || scenarioStage_ != ScenarioStage::idle) return false;
+    if (!identity_.capabilities.contains(QStringLiteral("SV-CONFIG-TXN-V1"), Qt::CaseInsensitive) ||
+        identity_.bootId.size() != 16 || sessionGeneration_ == 0) {
+        setError(QStringLiteral("Firmware does not support verified SV configuration transactions; START refused."));
+        return false;
+    }
     bool hzOk = false, currentScaleOk = false, voltageScaleOk = false;
     const double hz = scenario.value(QStringLiteral("hz")).toDouble(&hzOk);
     const double currentScale = scenario.value(QStringLiteral("currentScale")).toDouble(&currentScaleOk);
@@ -657,9 +683,13 @@ bool DeviceController::startWithScenario(const QVariantMap& scenario) {
         setError(QStringLiteral("START requires exactly four current and four voltage channels."));
         return false;
     }
+    using ar::iec61850::sampled_values::SvLiveSignalState;
+    using ar::iec61850::sampled_values::sv_scenario_hash;
+    SvLiveSignalState normalized{};
+    normalized.frequency_millihz = static_cast<quint32>(std::llround(hz * 1000.0));
     QStringList commands;
-    commands.reserve(20);
-    commands << QStringLiteral("FREQ %1").arg(std::llround(hz * 1000.0));
+    commands.reserve(22);
+    commands << QStringLiteral("CFG FREQ %1").arg(normalized.frequency_millihz);
     static const QStringList ids{QStringLiteral("IA"), QStringLiteral("IB"),
         QStringLiteral("IC"), QStringLiteral("IN"), QStringLiteral("UA"),
         QStringLiteral("UB"), QStringLiteral("UC"), QStringLiteral("UN")};
@@ -678,13 +708,15 @@ bool DeviceController::startWithScenario(const QVariantMap& scenario) {
             return false;
         }
         const QString command = formatSignalCommand(ids.at(i), magnitude, phase,
-            static_cast<quint32>(quality), currentScale, voltageScale, hz);
+            static_cast<quint32>(quality), currentScale, voltageScale, hz,
+            &normalized.channels[static_cast<std::size_t>(i)]);
         if (command.isEmpty()) {
             setError(QStringLiteral("Out-of-range setpoint; START refused."));
             return false;
         }
-        commands << command;
-        commands << QStringLiteral("ENABLE %1 %2").arg(ids.at(i)).arg(row.at(2).toBool() ? 1 : 0);
+        normalized.channels[static_cast<std::size_t>(i)].enabled = row.at(2).toBool();
+        commands << QStringLiteral("CFG ") + command;
+        commands << QStringLiteral("CFG ENABLE %1 %2").arg(ids.at(i)).arg(row.at(2).toBool() ? 1 : 0);
     }
     const QVariantMap shape = scenario.value(QStringLiteral("ct")).toMap();
     bool dcOk = false, harmonicOk = false, clipOk = false, orderOk = false;
@@ -700,14 +732,35 @@ bool DeviceController::startWithScenario(const QVariantMap& scenario) {
         setError(QStringLiteral("Invalid CT shaping; START refused."));
         return false;
     }
-    commands << QStringLiteral("SHAPE CT %1 %2 %3 %4 %5")
+    normalized.current_shape.enabled = shaping;
+    normalized.current_shape.dc_offset_permille = static_cast<qint32>(std::llround(dc * 10.0));
+    normalized.current_shape.harmonic_permille = static_cast<quint32>(std::llround(harmonic * 10.0));
+    normalized.current_shape.harmonic_order = static_cast<quint8>(order);
+    normalized.current_shape.clip_permille = static_cast<quint32>(std::llround(clip * 10.0));
+    if (!ar::iec61850::sampled_values::SvLiveSignalBank::validate(normalized)) {
+        setError(QStringLiteral("Scenario is outside firmware wire bounds; START refused."));
+        return false;
+    }
+    commands << QStringLiteral("CFG SHAPE CT %1 %2 %3 %4 %5")
         .arg(shaping ? 1 : 0).arg(std::llround(dc * 10.0))
         .arg(std::llround(harmonic * 10.0)).arg(order).arg(std::llround(clip * 10.0));
-    commands << QStringLiteral("START");
-    // Worker admission is all-or-none (bounded queue), and exclusive FIFO
-    // prevents concurrent UI edits interleaving with this START transaction.
-    // Acceptance is not firmware ACK; RUNNING still requires board telemetry.
-    if (!sendCommandBatch(commands, false, true)) return false;
+    quint64 token = QRandomGenerator::global()->generate64();
+    if (token == 0) token = 1;
+    const quint64 hash = sv_scenario_hash(normalized);
+    const QString hashText = QString::number(hash, 16).toUpper().rightJustified(16, QLatin1Char('0'));
+    commands.prepend(QStringLiteral("CFG BEGIN %1 %2").arg(token).arg(identity_.bootId));
+    commands << QStringLiteral("CFG COMMIT %1 %2").arg(token).arg(hashText);
+    // Only the immutable staging+COMMIT goes into the bounded exclusive FIFO.
+    // START is dispatched later, after firmware ACK and independent bank readback.
+    scenarioStage_ = ScenarioStage::awaiting_commit;
+    scenarioToken_ = token;
+    scenarioHash_ = hash;
+    scenarioBoot_ = identity_.bootId;
+    scenarioSessionGeneration_ = sessionGeneration_;
+    scenarioSignalGeneration_ = 0;
+    scenarioProfileGeneration_ = profileGeneration_;
+    if (!sendCommandBatch(commands, false, true)) { resetScenarioStart(); return false; }
+    scenarioTimer_.start();
     signalFrequencyHz_ = hz;
     return true;
 }
@@ -733,7 +786,8 @@ QString DeviceController::formatSignalCommand(
     const quint32 quality,
     const double currentCountsPerAmp,
     const double voltageCountsPerVolt,
-    const double frequencyHz) {
+    const double frequencyHz,
+    ar::iec61850::sampled_values::SvLiveChannelState* const encoded) {
     const QString id = signalId.trimmed().toUpper();
     static const QStringList validIds{
         QStringLiteral("IA"), QStringLiteral("IB"), QStringLiteral("IC"), QStringLiteral("IN"),
@@ -752,6 +806,11 @@ QString DeviceController::formatSignalCommand(
         angleMdeg > static_cast<double>(std::numeric_limits<qint32>::max())) return {};
     const auto counts = std::llround(scaled);
     const auto phaseMdeg = std::llround(angleMdeg);
+    if (encoded != nullptr) {
+        encoded->rms_counts = static_cast<qint32>(counts);
+        encoded->phase_millidegrees = static_cast<qint32>(phaseMdeg);
+        encoded->quality = quality;
+    }
     return QStringLiteral("SET %1 %2 %3 %4")
         .arg(id)
         .arg(counts)
