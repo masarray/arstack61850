@@ -3,6 +3,8 @@
 #include "ariec61850/sampled_values/live_signal_state.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <thread>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -19,6 +21,52 @@ namespace {
                                  " at " + __FILE__ + ":" + std::to_string(__LINE__)); \
     } \
 } while (false)
+
+// Publisher and SHOW run on independent firmware tasks. Prove every
+// concurrently observed generation is a complete published 4I+4V state;
+// a shared single-reader index used to make this a data race.
+void concurrent_publisher_and_diagnostics_snapshots_are_coherent() {
+    using namespace ar::iec61850::sampled_values;
+    SvLiveSignalBank bank;
+    std::atomic<bool> done{false};
+    std::atomic<bool> inconsistent{false};
+    std::atomic<std::uint32_t> read_count{0U};
+
+    const auto reader = [&] {
+        do {
+            const auto s = bank.snapshot();
+            if (s.generation != 0U) {
+                const auto number = static_cast<std::int32_t>(s.generation);
+                if (s.channels[0].rms_counts != number ||
+                    s.channels[1].phase_millidegrees != number ||
+                    s.channels[4].rms_counts != number * 2 ||
+                    s.channels[7].quality != static_cast<std::uint32_t>(number)) {
+                    inconsistent.store(true);
+                }
+            }
+            read_count.fetch_add(1U);
+        } while (!done.load());
+    };
+    std::thread publisher(reader);
+    std::thread diagnostics(reader);
+
+    std::uint32_t committed = 0U;
+    for (std::uint32_t i = 0U; i < 20000U; ++i) {
+        auto s = bank.snapshot();
+        const auto next = static_cast<std::int32_t>(s.generation + 1U);
+        s.channels[0].rms_counts = next;
+        s.channels[1].phase_millidegrees = next;
+        s.channels[4].rms_counts = next * 2;
+        s.channels[7].quality = static_cast<std::uint32_t>(next);
+        if (bank.publish(s)) ++committed;
+    }
+    done.store(true);
+    publisher.join();
+    diagnostics.join();
+    CHECK(committed > 100U);
+    CHECK(read_count.load() > 100U);
+    CHECK(!inconsistent.load());
+}
 
 void bank_commits_complete_generations() {
     using namespace ar::iec61850::sampled_values;
@@ -221,6 +269,7 @@ void independent_channels_change_without_stream_restart() {
 int main() {
     try {
         bank_commits_complete_generations();
+        concurrent_publisher_and_diagnostics_snapshots_are_coherent();
         fixed_point_engine_preserves_frequency_and_phase();
         dc_engine_outputs_constant_engineering_values();
         ct_saturation_shape_is_bounded_and_asymmetric();
