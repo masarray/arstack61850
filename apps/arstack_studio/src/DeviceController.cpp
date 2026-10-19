@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include "ariec61850/sampled_values/live_signal_transaction.hpp"
 #include "DeviceController.hpp"
 
 #include "DeviceIoWorker.hpp"
 
 #include "ariec61850/ethernet/ethernet.hpp"
 #include "ariec61850/sampled_values/compiled_device_profile.hpp"
-#include "ariec61850/sampled_values/live_signal_transaction.hpp"
 
 #include <QDateTime>
 #include <QDebug>
