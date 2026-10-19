@@ -158,6 +158,13 @@ def main() -> None:
             and "requestZero(" not in main_qml
             and "root.pendingApply = false" in main_qml,
             "RUNNING edits must not queue fragmented 4I4V commands or optimistic GUI success")
+    workflow_src = source("WorkflowBar.qml")
+    require("if (!ribbon.startQueued)" in workflow_src
+            and "controller.cancelLiveAutoApply()" in workflow_src
+            and "controller.activateLiveAutoApplyAfterStart()" in workflow_src
+            and "property bool liveApplyArmed: false" in main_qml
+            and "if (!device.running) root.liveApplyArmed = false" in main_qml,
+            "reconnect RUNNING telemetry must never auto-apply a stale 4I4V GUI draft")
     device_cpp = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
     require('commands << QStringLiteral("CFG FREQ %1")' in device_cpp
             and "const double phase = row.at(1).toDouble(&phaseOk);" in device_cpp
