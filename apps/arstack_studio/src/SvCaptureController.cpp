@@ -246,7 +246,7 @@ void SvCaptureController::refreshInterfaces() {
     discovery_.setArguments({QStringLiteral("-D")});
     discovery_.start();
 }
-bool SvCaptureController::startCapture(int index, int seconds) {
+bool SvCaptureController::startCapture(int index, int seconds, const QVariantMap& studioTelemetry) {
     if (capturing() || processing() || discovery_.state() != QProcess::NotRunning ||
         index < 0 || index >= interfaceIds_.size() ||
         (seconds != 30 && seconds != 120 && seconds != 3600)) {
@@ -271,6 +271,7 @@ bool SvCaptureController::startCapture(int index, int seconds) {
     activeSeconds_ = QDir(outputFolder_).filePath(filename + QStringLiteral("_seconds.csv"));
     activeJson_ = QDir(outputFolder_).filePath(filename + QStringLiteral("_report.json"));
     activeAdapter_ = interfaceIds_.at(index);
+    activeStudioTelemetry_ = studioTelemetry;
     activeSecondsRequested_ = seconds;
     abortRequested_ = false;
     lastReport_.clear();
@@ -316,7 +317,8 @@ void SvCaptureController::onCaptureFinished(int exitCode, QProcess::ExitStatus e
 void SvCaptureController::decodeCapturedFile() {
     setStatus(QStringLiteral("Writing filtered SV CSV and JSON report (off the UI thread)..."));
     decoder_.setFuture(QtConcurrent::run(&SvCaptureController::decodePcap,
-        activePcap_, activeCsv_, activeSeconds_, activeJson_, activeSecondsRequested_, activeAdapter_));
+        activePcap_, activeCsv_, activeSeconds_, activeJson_, activeSecondsRequested_, activeAdapter_,
+        activeStudioTelemetry_));
     emit stateChanged();
 }
 void SvCaptureController::openOutputFolder() {
@@ -326,7 +328,8 @@ void SvCaptureController::openOutputFolder() {
 
 QVariantMap SvCaptureController::decodePcap(
     const QString& pcapFile, const QString& csvFile, const QString& secondsFile,
-    const QString& jsonFile, int requestedSeconds, const QString& adapter) {
+    const QString& jsonFile, int requestedSeconds, const QString& adapter,
+    const QVariantMap& studioTelemetry) {
     QVariantMap result;
     result.insert(QStringLiteral("json"), jsonFile);
     result.insert(QStringLiteral("status"), QStringLiteral("Capture failed: PCAP parser error."));
@@ -475,6 +478,7 @@ QVariantMap SvCaptureController::decodePcap(
         {QStringLiteral("source"), QStringLiteral("independent ethernet PCAP via dumpcap/Npcap")},
         {QStringLiteral("capture_filter"), QString::fromLatin1(kSvBpf)},
         {QStringLiteral("interface"), adapter},
+        {QStringLiteral("studio_telemetry_snapshot_UNVERIFIED"), studioTelemetry},
         {QStringLiteral("pcap"), pcapFile},
         {QStringLiteral("samples_csv"), csvFile},
         {QStringLiteral("seconds_csv"), secondsFile},
