@@ -323,3 +323,193 @@ void SvCaptureController::openOutputFolder() {
     if (!QDir().mkpath(outputFolder_)) return;
     QDesktopServices::openUrl(QUrl::fromLocalFile(outputFolder_));
 }
+
+QVariantMap SvCaptureController::decodePcap(
+    const QString& pcapFile, const QString& csvFile, const QString& secondsFile,
+    const QString& jsonFile, int requestedSeconds, const QString& adapter) {
+    QVariantMap result;
+    result.insert(QStringLiteral("json"), jsonFile);
+    result.insert(QStringLiteral("status"), QStringLiteral("Capture failed: PCAP parser error."));
+    QFile in(pcapFile);
+    if (!in.open(QIODevice::ReadOnly)) {
+        result.insert(QStringLiteral("status"), QStringLiteral("Failed to open captured PCAP."));
+        return result;
+    }
+    const QByteArray global = in.read(24);
+    if (global.size() != 24) {
+        result.insert(QStringLiteral("status"), QStringLiteral("Truncated PCAP header."));
+        return result;
+    }
+    const QByteArray signature = global.left(4);
+    const bool little = signature == QByteArray::fromHex("d4c3b2a1") ||
+                        signature == QByteArray::fromHex("4d3cb2a1");
+    const bool big = signature == QByteArray::fromHex("a1b2c3d4") ||
+                     signature == QByteArray::fromHex("a1b23c4d");
+    if (!little && !big) {
+        result.insert(QStringLiteral("status"), QStringLiteral("Capture is not classic PCAP."));
+        return result;
+    }
+    const bool nanoseconds = signature == QByteArray::fromHex("4d3cb2a1") ||
+                             signature == QByteArray::fromHex("a1b23c4d");
+    const auto word = [little](const uchar* p) { return little ? le32(p) : be32(p); };
+    const auto* gh = reinterpret_cast<const uchar*>(global.constData());
+    if (word(gh + 20) != 1) {
+        result.insert(QStringLiteral("status"), QStringLiteral("Capture link type must be Ethernet."));
+        return result;
+    }
+
+    QFile csv(csvFile);
+    QFile secondsCsv(secondsFile);
+    if (!csv.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
+        !secondsCsv.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        result.insert(QStringLiteral("status"), QStringLiteral("Cannot create CSV files in Documents."));
+        return result;
+    }
+    QTextStream stream(&csv);
+    QTextStream secondsStream(&secondsCsv);
+    stream << "timestamp_us,source_mac,destination_mac,appid,sv_id,smp_cnt,smp_synch";
+    for (const auto* name : kChannels)
+        stream << ',' << name << ',' << name << "_quality";
+    stream << '\n';
+    secondsStream << "utc_second,sv_frames,missing_smpcnt,duplicates,malformed\n";
+    // Preserve every raw PCAP packet. 3600s CSV exports only every 20th
+    // validated frame; per-second counters always use every frame.
+    const quint64 csvStride = requestedSeconds >= 3600 ? 20 : 1;
+    quint64 matched = 0, malformed = 0, missing = 0, duplicates = 0;
+    quint64 firstTimestamp = 0, lastTimestamp = 0, csvRows = 0;
+    quint32 lastCount = 0;
+    quint64 lastBucket = std::numeric_limits<quint64>::max();
+    quint64 bucketFrames = 0, bucketMissing = 0, bucketDuplicates = 0, bucketMalformed = 0;
+    bool hasPrevious = false;
+    QVariantMap syncCounts;
+    QVariantMap streams;
+    QString parseFailure;
+    constexpr quint32 kSampleWrap = 4000;
+
+    const auto finishBucket = [&] {
+        if (lastBucket == std::numeric_limits<quint64>::max()) return;
+        secondsStream << lastBucket << ',' << bucketFrames << ',' << bucketMissing
+                      << ',' << bucketDuplicates << ',' << bucketMalformed << '\n';
+        bucketFrames = bucketMissing = bucketDuplicates = bucketMalformed = 0;
+    };
+    while (!in.atEnd()) {
+        const QByteArray header = in.read(16);
+        if (header.isEmpty()) break;
+        if (header.size() != 16) {
+            parseFailure = QStringLiteral("Truncated PCAP record header.");
+            break;
+        }
+        const auto* ph = reinterpret_cast<const uchar*>(header.constData());
+        const quint32 sec = word(ph), sub = word(ph + 4);
+        const quint32 captured = word(ph + 8), original = word(ph + 12);
+        if (captured > 65535 || captured < 14 || original < captured ||
+            sub >= (nanoseconds ? 1000000000U : 1000000U)) {
+            parseFailure = QStringLiteral("Invalid PCAP packet length/timestamp.");
+            break;
+        }
+        const QByteArray data = in.read(captured);
+        if (data.size() != qsizetype(captured)) {
+            parseFailure = QStringLiteral("Truncated PCAP packet.");
+            break;
+        }
+        const quint64 timestamp = quint64(sec) * 1000000ULL +
+                                  (nanoseconds ? sub / 1000U : sub);
+        const quint64 bucket = sec;
+        if (lastBucket != bucket) {
+            finishBucket();
+            lastBucket = bucket;
+        }
+        Sample record;
+        if (!parseSvFrame(QByteArrayView(data), record)) {
+            ++malformed;
+            ++bucketMalformed;
+            continue;
+        }
+        if (matched == 0) firstTimestamp = timestamp;
+        lastTimestamp = timestamp;
+        ++matched;
+        ++bucketFrames;
+        const auto syncKey = QString::number(record.synch);
+        syncCounts.insert(syncKey, syncCounts.value(syncKey).toULongLong() + 1);
+        const QString streamKey = record.src + QLatin1Char('/') +
+                                  QString::number(record.appId) + QLatin1Char('/') + record.svId;
+        streams.insert(streamKey, streams.value(streamKey).toULongLong() + 1);
+        if (hasPrevious) {
+            const quint32 diff = (record.count + kSampleWrap - lastCount) % kSampleWrap;
+            if (diff == 0) {
+                ++duplicates;
+                ++bucketDuplicates;
+            } else if (diff != 1) {
+                missing += diff - 1;
+                bucketMissing += diff - 1;
+            }
+        }
+        hasPrevious = true;
+        lastCount = record.count;
+        if ((matched - 1) % csvStride != 0) continue;
+        ++csvRows;
+        stream << timestamp << ',' << record.src << ',' << record.dst << ','
+               << record.appId << ',' << record.svId << ','
+               << record.count << ',' << record.synch;
+        for (int i = 0; i < 8; ++i) {
+            stream << ',' << record.values[i] << ",0x"
+                   << QString::number(record.qualities[i], 16).rightJustified(8, QLatin1Char('0')).toUpper();
+        }
+        stream << '\n';
+        if (stream.status() != QTextStream::Ok) {
+            parseFailure = QStringLiteral("CSV write error (disk full?).");
+            break;
+        }
+    }
+    finishBucket();
+    stream.flush();
+    secondsStream.flush();
+    if (csv.error() != QFile::NoError || secondsCsv.error() != QFile::NoError)
+        parseFailure = QStringLiteral("CSV output failed (disk full?).");
+    csv.close();
+    secondsCsv.close();
+    const double span = matched > 1 ? (lastTimestamp - firstTimestamp) / 1000000.0 : 0.;
+    const double observedFps = span > 0 ? (matched - 1) / span : 0.;
+    QVariantMap report{
+        {QStringLiteral("schema"), QStringLiteral("arstack.sv.capture.v1")},
+        {QStringLiteral("source"), QStringLiteral("independent ethernet PCAP via dumpcap/Npcap")},
+        {QStringLiteral("capture_filter"), QString::fromLatin1(kSvBpf)},
+        {QStringLiteral("interface"), adapter},
+        {QStringLiteral("pcap"), pcapFile},
+        {QStringLiteral("samples_csv"), csvFile},
+        {QStringLiteral("seconds_csv"), secondsFile},
+        {QStringLiteral("csv_row_stride"), qulonglong(csvStride)},
+        {QStringLiteral("csv_rows"), qulonglong(csvRows)},
+        {QStringLiteral("requested_seconds"), requestedSeconds},
+        {QStringLiteral("captured_span_seconds"), span},
+        {QStringLiteral("observed_fps"), observedFps},
+        {QStringLiteral("sample_count_wrap_assumed"), int(kSampleWrap)},
+        {QStringLiteral("sv_frames"), qulonglong(matched)},
+        {QStringLiteral("malformed_frames"), qulonglong(malformed)},
+        {QStringLiteral("missing_sample_counts"), qulonglong(missing)},
+        {QStringLiteral("duplicate_sample_counts"), qulonglong(duplicates)},
+        {QStringLiteral("smpSynch_distribution"), syncCounts},
+        {QStringLiteral("streams"), streams},
+        {QStringLiteral("physical_acceptance"), false},
+        {QStringLiteral("qualifications"),
+         QStringLiteral("Adapter/SPAN packet drops, PTP lock, per-channel RMS/phase equivalence, "
+                        "source identity, CPU and ISR measurements require independent acceptance.")},
+    };
+    const bool usable = parseFailure.isEmpty() && matched > 0;
+    report.insert(QStringLiteral("status"), usable ? QStringLiteral("CAPTURED_NOT_ACCEPTED")
+                                                 : QStringLiteral("INVALID_CAPTURE"));
+    if (!parseFailure.isEmpty()) report.insert(QStringLiteral("error"), parseFailure);
+    QFile json(jsonFile);
+    if (!json.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
+        json.write(QJsonDocument::fromVariant(report).toJson(QJsonDocument::Indented)) < 0) {
+        result.insert(QStringLiteral("status"), QStringLiteral("Capture parsed but JSON report could not be written."));
+        return result;
+    }
+    json.close();
+    result.insert(QStringLiteral("status"), usable
+        ? QStringLiteral("SV evidence ready: %1 packets, %2 CSV rows, %3 missing; open folder to share PCAP + CSV + JSON.")
+              .arg(matched).arg(csvRows).arg(missing)
+        : formatError(QStringLiteral("Capture validation failed"),
+                      parseFailure.isEmpty() ? QStringLiteral("No valid SV packets.") : parseFailure));
+    return result;
+}
