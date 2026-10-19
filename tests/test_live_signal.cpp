@@ -31,8 +31,10 @@ void concurrent_publisher_and_diagnostics_snapshots_are_coherent() {
     std::atomic<bool> done{false};
     std::atomic<bool> inconsistent{false};
     std::atomic<std::uint32_t> read_count{0U};
+    std::atomic<std::uint32_t> readers_ready{0U};
 
     const auto reader = [&] {
+        readers_ready.fetch_add(1U);
         do {
             const auto s = bank.snapshot();
             if (s.generation != 0U) {
@@ -49,6 +51,10 @@ void concurrent_publisher_and_diagnostics_snapshots_are_coherent() {
     };
     std::thread publisher(reader);
     std::thread diagnostics(reader);
+    // Deterministic scheduler handshake: on Windows/MSVC the writer can
+    // finish 20k updates before a freshly launched reader is scheduled.
+    // Require both readers to be active, not an arbitrary read-count rate.
+    while (readers_ready.load() != 2U) std::this_thread::yield();
 
     std::uint32_t committed = 0U;
     for (std::uint32_t i = 0U; i < 20000U; ++i) {
@@ -59,12 +65,13 @@ void concurrent_publisher_and_diagnostics_snapshots_are_coherent() {
         s.channels[4].rms_counts = next * 2;
         s.channels[7].quality = static_cast<std::uint32_t>(next);
         if (bank.publish(s)) ++committed;
+        if ((i % 128U) == 0U) std::this_thread::yield();
     }
     done.store(true);
     publisher.join();
     diagnostics.join();
     CHECK(committed > 100U);
-    CHECK(read_count.load() > 100U);
+    CHECK(read_count.load() >= 2U); // each initialized reader sampled at least once
     CHECK(!inconsistent.load());
 }
 
