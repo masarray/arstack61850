@@ -55,6 +55,9 @@ ApplicationWindow {
         // All edits are a draft until the matching command is queued.
         // Never label a visible draft as proven transmitted waveform data.
         pendingApply = true
+        scenarioRevision += 1
+        if (workflowBar.injectionRunning)
+            Qt.callLater(root.submitLiveScenario)
     }
     function restoreLocalScenario() {
         const saved = scenarioSettings.lastScenario
@@ -114,6 +117,8 @@ ApplicationWindow {
     property bool phaseLink: false
     property bool profileDirty: false
     property bool pendingApply: true
+    property int scenarioRevision: 0
+    property int liveInFlightRevision: -1
     // Session-only operator intent. Never persist across application launches:
     // an explicit PTP ON can be restored after a firmware reflash/reconnect
     // without introducing an uncontrolled power-on publisher.
@@ -197,7 +202,21 @@ ApplicationWindow {
         }
         function onDeviceVerifiedChanged() {
             root.pendingApply = true
+            root.liveInFlightRevision = -1
             root.offlinePreviewRunning = false
+        }
+        function onLiveScenarioApplied() {
+            // Commit/readback ACK precedes this signal. No optimistic QUEUED=APPLIED.
+            if (root.liveInFlightRevision >= 0 &&
+                    root.liveInFlightRevision === root.scenarioRevision)
+                root.pendingApply = false
+        }
+        function onScenarioApplicationFinished() {
+            const newerDraft = root.liveInFlightRevision >= 0 &&
+                               root.scenarioRevision > root.liveInFlightRevision
+            root.liveInFlightRevision = -1
+            if (newerDraft && workflowBar.injectionRunning)
+                Qt.callLater(root.submitLiveScenario)
         }
     }
 
@@ -441,15 +460,11 @@ ApplicationWindow {
     }
 
     function sendSignal(group, row) {
-        if (!workflowBar.session || !workflowBar.session.liveControlReady) return true
-        var signal = groupModel(group).get(row)
-        return workflowBar.session.requestSetSignal(
-            signal.signalId,
-            signal.magnitude,
-            signal.phase,
-            Number(signal.quality),
-            currentScale,
-            voltageScale)
+        // All operator edits use exactly one complete GUI scenario snapshot.
+        // A single SET cannot maintain 4I+4V frame-level atomicity.
+        if (workflowBar.injectionRunning)
+            Qt.callLater(root.submitLiveScenario)
+        return true
     }
 
     function sendLinkedGroup(group) {
@@ -489,23 +504,34 @@ ApplicationWindow {
                 workflowBar.session.liveControlReady) {
             const queued = phaseLink && row < 3
                 ? sendLinkedGroup(group) : sendSignal(group, row)
-            if (!queued) showMessage("Signal update not queued; retry or Stop/Start.", true)
-            else pendingApply = false
+            if (!queued) showMessage("Signal update not accepted; Stop/Start to recover.", true)
         }
         return true
     }
 
+    function submitLiveScenario() {
+        if (!pendingApply || !workflowBar.injectionRunning ||
+                !workflowBar.session || !workflowBar.session.liveControlReady)
+            return false
+        // A newer edit is retained in the GUI. Completion of the previous
+        // exact-revision firmware transaction schedules the newer snapshot.
+        if (device.scenarioApplying) return true
+        const snapshot = startScenarioSnapshot()
+        if (!snapshot) return false
+        if (!workflowBar.session.requestApplyLiveScenario(snapshot)) {
+            showMessage("Atomic SV live update rejected. Board state not verified.", true)
+            return false
+        }
+        liveInFlightRevision = scenarioRevision
+        return true
+    }
+
     function applyAllSignals() {
-        if (!workflowBar.session || !workflowBar.session.liveControlReady) return false
-        var ok = workflowBar.session.requestSetFrequency(signalFrequency)
-        for (var group = 0; group < 2; ++group)
-            for (var row = 0; row < 4; ++row) ok = sendSignal(group, row) && ok
-        ok = workflowBar.session.requestSetCtSaturation(ctSaturationEnabled, ctDcOffsetPercent,
-                 ctHarmonicPercent, ctHarmonicOrder, ctClipPercent) && ok
-        pendingApply = !ok
-        showMessage(ok ? "Local draft commands queued. Verify physical SV on wire; SETs are not atomic."
-                       : "One or more draft commands could not be queued; retry after checking the board.", !ok)
-        return ok
+        if (!workflowBar.injectionRunning) {
+            showMessage("Apply the full scenario using Start when stopped.", false)
+            return false
+        }
+        return submitLiveScenario()
     }
     function startScenarioSnapshot() {
         // The table editors debounce keyboard edits for live preview. Flush
@@ -532,8 +558,7 @@ ApplicationWindow {
         frequencyField.invalidInput = false
         refreshPreview()
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
-            workflowBar.session.requestSetFrequency(value)
+        // markScenarioDirty() schedules full atomic CFG apply while running.
         return true
     }
 
@@ -557,9 +582,7 @@ ApplicationWindow {
         ctSaturationEnabled = enabled
         refreshPreview()
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
-            workflowBar.session.requestSetCtSaturation(enabled, ctDcOffsetPercent,
-                                                       ctHarmonicPercent, ctHarmonicOrder, ctClipPercent)
+        // Full 4I+4V snapshot includes CT shaping in the same firmware commit.
         showMessage(enabled
             ? "CT saturation stress enabled · DC offset + 2nd harmonic + clipping approximation."
             : "CT saturation stress disabled.", false)
@@ -628,7 +651,7 @@ ApplicationWindow {
         selectSignal(activeGroup, activeRow)
         refreshPreview()
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply) applyAllSignals()
+        // One complete scenario is scheduled by markScenarioDirty().
     }
 
     function zeroAll() {
@@ -639,8 +662,7 @@ ApplicationWindow {
         selectSignal(activeGroup, activeRow)
         refreshPreview()
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
-            workflowBar.session.requestZero()
+        // Zero currents and voltages together using the atomic CFG path.
     }
 
     function setActiveQuality(value) {
@@ -648,8 +670,7 @@ ApplicationWindow {
         groupModel(activeGroup).setProperty(activeRow, "quality", unsignedValue)
         activeQuality = unsignedValue
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
-            workflowBar.session.requestSetQuality(activeSignal, unsignedValue)
+        // Quality travels in the same hash-verified full scenario transaction.
     }
 
     Shortcut { sequence: "Ctrl+B"; enabled: !workflowBar.startQueued; onActivated: root.balanced() }
@@ -1043,8 +1064,7 @@ ApplicationWindow {
                                             if (value > 0) root.previousAcFrequency = value
                                             root.refreshPreview()
                                             root.markScenarioDirty()
-                                            if (workflowBar.session && workflowBar.session.liveControlReady && !root.pendingApply)
-                                                workflowBar.session.requestSetFrequency(value)
+                                            // Full scenario apply is scheduled by markScenarioDirty().
                                         } else invalidInput = true
                                     }
                                     onEditingFinished: {
@@ -1074,15 +1094,8 @@ ApplicationWindow {
                                         root.markScenarioDirty()
                                         if (workflowBar.injectionRunning && workflowBar.session
                                                 && workflowBar.session.liveControlReady) {
-                                            // Persist *all eight current table values* on
-                                            // live link changes; the displayed draft
-                                            // must never silently diverge from TX.
-                                            var ok = true
-                                            for (var group = 0; group < 2; ++group)
-                                                for (var row = 0; row < 4; ++row)
-                                                    ok = root.sendSignal(group, row) && ok
-                                            if (ok) root.pendingApply = false
-                                            else root.showMessage("Not all live phases were sent. Stop/Start to apply the table.", true)
+                                            // markScenarioDirty() already schedules the same
+                                            // canonical 8-channel CFG transaction.
                                         }
                                     }
                                     font.family: root.uiFont
