@@ -97,6 +97,7 @@ SurfacePanel {
             Layout.fillWidth: true
             Layout.preferredHeight: 268
             theme: panel.theme
+            device: panel.device
             uiFont: panel.uiFont
             monoFont: panel.monoFont
         }
