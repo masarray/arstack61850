@@ -405,6 +405,7 @@ QStringList DeviceController::capabilities() const { return identity_.capabiliti
 DeviceIdentity DeviceController::deviceIdentity() const { return identity_; }
 bool DeviceController::connected() const noexcept { return connected_; }
 bool DeviceController::running() const noexcept { return running_; }
+bool DeviceController::scenarioApplying() const noexcept { return scenarioStage_ != ScenarioStage::idle; }
 QString DeviceController::portName() const { return portName_; }
 QString DeviceController::lastError() const { return lastError_; }
 QString DeviceController::logText() const { return logText_; }
@@ -1474,6 +1475,7 @@ void DeviceController::setSessionHeartbeatEnabled(const bool enabled) {
 }
 
 void DeviceController::resetScenarioStart() noexcept {
+    const bool wasPending = scenarioStage_ != ScenarioStage::idle;
     scenarioTimer_.stop();
     scenarioStage_ = ScenarioStage::idle;
     scenarioToken_ = 0;
@@ -1482,6 +1484,7 @@ void DeviceController::resetScenarioStart() noexcept {
     scenarioSignalGeneration_ = 0;
     scenarioBoot_.clear();
     scenarioProfileGeneration_.clear();
+    if (wasPending) emit scenarioApplicationFinished();
 }
 
 void DeviceController::failScenarioStart(const QString& message) {
