@@ -48,6 +48,10 @@ void DeviceIoWorker::initialize() {
     verificationTimer_ = new QTimer(this);
     presenceTimer_ = new QTimer(this);
     heartbeatTimer_ = new QTimer(this);
+    writeGapTimer_ = new QTimer(this);
+    writeGapTimer_->setSingleShot(true);
+    writeGapTimer_->setInterval(serialCommandGapMs());
+    connect(writeGapTimer_, &QTimer::timeout, this, &DeviceIoWorker::pumpWriteQueue);
 
     verificationTimer_->setSingleShot(true);
     verificationTimer_->setInterval(identityRetryIntervalMs());
@@ -117,6 +121,7 @@ void DeviceIoWorker::shutdown(const bool requestSvStop, const bool requestPtpSto
     if (verificationTimer_ != nullptr) verificationTimer_->stop();
     if (presenceTimer_ != nullptr) presenceTimer_->stop();
     if (heartbeatTimer_ != nullptr) heartbeatTimer_->stop();
+    if (writeGapTimer_ != nullptr) writeGapTimer_->stop();
     heartbeatEnabled_ = false;
     probeQueue_.clear();
     genericProbeActive_ = false;
@@ -244,6 +249,7 @@ bool DeviceIoWorker::openPortInternal(const QString& portName, const bool automa
     identityConfirmed_ = false;
     identifyAttempts_ = 0;
     pendingRx_.clear();
+    if (writeGapTimer_ != nullptr) writeGapTimer_->stop();
     commandQueue_.clear();
     ptpStopPending_ = false;
     svStopPending_ = false;
@@ -468,6 +474,12 @@ void DeviceIoWorker::queuePriorityPtpStop() {
 void DeviceIoWorker::pumpWriteQueue() {
     if (serial_ == nullptr || !serial_->isOpen() || writeActive_ ||
         (!svStopPending_ && !ptpStopPending_ && commandQueue_.isEmpty())) return;
+    // bytesToWrite()==0 proves only host/driver drain, not ESP console line
+    // consumption. Throttle ordinary writes; reserved STOPs always bypass.
+    if (!svStopPending_ && !ptpStopPending_ && writeGapTimer_ != nullptr &&
+        writeGapTimer_->isActive()) return;
+    if ((svStopPending_ || ptpStopPending_) && writeGapTimer_ != nullptr)
+        writeGapTimer_->stop();
 
     if (svStopPending_) {
         svStopPending_ = false;
@@ -505,7 +517,13 @@ void DeviceIoWorker::completeActiveWrite() {
         --exclusiveCommandsRemaining_;
     }
     emit commandTransmitted(activeGeneration_, completed.text, completed.quiet);
-    pumpWriteQueue();
+    if (svStopPending_ || ptpStopPending_) {
+        pumpWriteQueue(); // safety priority never waits for line pacing
+    } else if (writeGapTimer_ != nullptr) {
+        writeGapTimer_->start();
+    } else {
+        pumpWriteQueue();
+    }
 }
 
 void DeviceIoWorker::processReadyRead() {
