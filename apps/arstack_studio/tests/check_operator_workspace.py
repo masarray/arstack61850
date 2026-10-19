@@ -154,7 +154,7 @@ def main() -> None:
             and "requestSetFrequency(" not in main_qml
             and "requestSetCtSaturation(" not in main_qml
             and "requestSetQuality(" not in main_qml
-            and "requestSetEnabled(" not in matrix
+            and "requestSetEnabled(" not in source("SignalMatrix.qml")
             and "requestZero(" not in main_qml
             and "root.pendingApply = false" in main_qml,
             "RUNNING edits must not queue fragmented 4I4V commands or optimistic GUI success")
