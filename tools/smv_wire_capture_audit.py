@@ -7,7 +7,7 @@ Physical 4I+4V acceptance is *not* inferred from synthetic fixtures.
 import argparse
 import collections
 import json
-import statistics
+import math
 import struct
 import sys
 from pathlib import Path
@@ -111,7 +111,8 @@ def frames(path):
                 raise ValueError("truncated PCAP Ethernet packet")
             yield seconds + sub / resolution, data
 
-def analyze(path, expected_appid, expected_svid, modulus, min_seconds, expected_fps):
+def analyze(path, expected_appid, expected_svid, modulus, min_seconds, expected_fps,
+            signal_frequency_hz=50.0, expected_channels=None):
     counts = collections.Counter()
     previous = None
     first_ts = last_ts = None
@@ -119,6 +120,8 @@ def analyze(path, expected_appid, expected_svid, modulus, min_seconds, expected_
     minimums = [None] * 8
     maximums = [None] * 8
     squared_sums = [0] * 8
+    sin_sums = [0.0] * 8
+    cos_sums = [0.0] * 8
     sample_counts = [0] * 8
     quality = [collections.Counter() for _ in range(8)]
     sources = collections.Counter()
@@ -153,14 +156,30 @@ def analyze(path, expected_appid, expected_svid, modulus, min_seconds, expected_
                     reversals += 1
         previous = current
         counts["smpSynch_" + str(record["synch"])] += 1
+        theta = 2.0 * math.pi * signal_frequency_hz * current / expected_fps
+        sin_theta, cos_theta = math.sin(theta), math.cos(theta)
         for i, (value, q) in enumerate(record["channels"]):
             minimums[i] = value if minimums[i] is None else min(minimums[i], value)
             maximums[i] = value if maximums[i] is None else max(maximums[i], value)
             squared_sums[i] += value * value
+            sin_sums[i] += value * sin_theta
+            cos_sums[i] += value * cos_theta
             sample_counts[i] += 1
             quality[i][q] += 1
     duration = 0 if first_ts is None else last_ts - first_ts
     rate = (counts["matched"] - 1) / duration if duration > 0 else 0
+    fundamental = []
+    for i in range(8):
+        n = sample_counts[i]
+        if not n:
+            fundamental.append({"rms": None, "phase_degrees": None})
+            continue
+        a = sin_sums[i] * 2.0 / n
+        b = cos_sums[i] * 2.0 / n
+        fundamental.append({
+            "rms": round(math.hypot(a, b) / math.sqrt(2.0), 3),
+            "phase_degrees": round(math.degrees(math.atan2(b, a)), 3)
+        })
     report = {
         "source_file": str(path), "status": "FAIL", "matched_sv_frames": counts["matched"],
         "total_sv_frames": counts["SV"], "foreign_sv_frames": counts["foreign"],
@@ -178,6 +197,8 @@ def analyze(path, expected_appid, expected_svid, modulus, min_seconds, expected_
              "max": maximums[i],
              "rms_wire_counts": round((squared_sums[i] / sample_counts[i]) ** 0.5, 3)
              if sample_counts[i] else None,
+             "fundamental_rms_wire_counts": fundamental[i]["rms"],
+             "fundamental_phase_degrees": fundamental[i]["phase_degrees"],
              "qualities": {f"0x{q:08X}": n for q, n in quality[i].items()}}
             for i in range(8)],
     }
@@ -194,11 +215,33 @@ def analyze(path, expected_appid, expected_svid, modulus, min_seconds, expected_
         issues.append("average frame rate outside ±2%")
     if sample_counts[0] < 2 or any(n == 0 for n in sample_counts):
         issues.append("incomplete 8-channel wire payload")
+    if expected_channels is not None:
+        for i, name in enumerate(NAMES):
+            expected = expected_channels[name]
+            intended_rms = float(expected["rms_counts"])
+            intended_phase = float(expected["phase_degrees"])
+            tolerance = float(expected.get("rms_tolerance_percent", 2.0))
+            phase_tolerance = float(expected.get("phase_tolerance_degrees", 2.0))
+            observed = fundamental[i]
+            if intended_rms == 0.0:
+                if observed["rms"] is None or observed["rms"] > float(expected.get("zero_tolerance_counts", 2.0)):
+                    issues.append(f"{name}: zero-valued channel has residual fundamental")
+            else:
+                if (observed["rms"] is None or
+                    abs(observed["rms"] - intended_rms) > abs(intended_rms) * tolerance / 100):
+                    issues.append(f"{name}: fundamental RMS differs from operator scenario")
+                if observed["phase_degrees"] is None:
+                    issues.append(f"{name}: fundamental phase unavailable")
+                else:
+                    delta = (observed["phase_degrees"] - intended_phase + 180) % 360 - 180
+                    if abs(delta) > phase_tolerance:
+                        issues.append(f"{name}: fundamental phase differs from operator scenario")
     report["blocking_findings"] = issues
     report["status"] = "PASS_PCAPPARSER_ONLY" if not issues else "FAIL"
-    report["disclaimer"] = ("No I/V engineering-scale or phasor-angle equivalence is asserted; "
-                           "PTP lock, smpSynch legitimacy, source MAC, realtime CPU and physical "
-                           "endurance need separate evidence.")
+    report["disclaimer"] = (
+        "Fundamental waveform comparisons are only authoritative with --expected-json "
+        "containing independent operator raw-wire setpoints. PTP lock, smpSynch legitimacy, "
+        "source MAC, realtime CPU and hardware operation need separate evidence.")
     return report
 
 def main():
@@ -209,15 +252,26 @@ def main():
     ap.add_argument("--wrap", type=int, default=4000)
     ap.add_argument("--minimum-seconds", type=float, default=120.0)
     ap.add_argument("--fps", type=float, default=4000.0)
+    ap.add_argument("--signal-frequency-hz", type=float, default=50.0)
+    ap.add_argument("--expected-json", type=Path,
+                    help="Scenario JSON containing channels IA..UN with rms_counts and phase_degrees")
     args = ap.parse_args()
     try:
-        if args.wrap <= 1 or args.fps <= 0 or args.minimum_seconds <= 0:
+        if args.wrap <= 1 or args.fps <= 0 or args.minimum_seconds <= 0 or args.signal_frequency_hz <= 0:
             raise ValueError("invalid acceptance criteria")
+        expected = None
+        if args.expected_json is not None:
+            config = json.loads(args.expected_json.read_text(encoding="utf-8"))
+            expected = config["channels"]
+            if set(expected) != set(NAMES):
+                raise ValueError("expected scenario must specify exactly IA IB IC IN UA UB UC UN")
+            if config.get("ct_shaping_enabled", False):
+                raise ValueError("fundamental equivalence with nonlinear CT shaping is not supported")
         report = analyze(args.pcap, args.appid, args.sv_id, args.wrap,
-                         args.minimum_seconds, args.fps)
+                         args.minimum_seconds, args.fps, args.signal_frequency_hz, expected)
         print(json.dumps(report, indent=2))
         return 0 if report["status"] == "PASS_PCAPPARSER_ONLY" else 2
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, KeyError, TypeError) as exc:
         print(json.dumps({"status": "ERROR", "reason": str(exc)}), file=sys.stderr)
         return 1
 
