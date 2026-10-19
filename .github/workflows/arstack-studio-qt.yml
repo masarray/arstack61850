@@ -216,7 +216,7 @@ jobs:
         run: |
           set -o pipefail
           cmake --build build-arstack-studio \
-            --target arstack_studio arstack_session_harness --parallel 2 \
+            --target arstack_studio arstack_session_harness arstack_capture_harness --parallel 2 \
             2>&1 | tee /tmp/arstack-studio-build.log
 
       - name: 4I+4V reference template regression
@@ -239,6 +239,13 @@ jobs:
           set -o pipefail
           timeout 20s ./build-arstack-studio/arstack_session_harness \
             2>&1 | tee /tmp/arstack-studio-session-harness.log
+
+      - name: Native SV PCAP capture and CSV decoder regression
+        shell: bash
+        run: |
+          set -o pipefail
+          timeout 20s ./build-arstack-studio/arstack_capture_harness \
+            2>&1 | tee /tmp/arstack-studio-capture-harness.log
 
       - name: Firmware bundle contract regression
         shell: bash
