@@ -162,8 +162,8 @@ def main() -> None:
             "editable channel rows must consume vertical space without a blank filler")
     require('bar.workflow.injectionRunning || bar.workflow.startQueued || bar.controller.offlinePreviewRunning'
             in ribbon_qml
-            and '!ribbon.injectionRunning && !ribbon.startQueued' in workflow
-            and 'startWatchdog.stop()' in workflow,
+            and '!ribbon.injectionRunning && !ribbon.startQueued' in source("WorkflowBar.qml")
+            and 'startWatchdog.stop()' in source("WorkflowBar.qml"),
             "SV STOP must remain actionable while the acknowledged scenario transaction is pending")
     require("function flushPendingEdits()" in matrix
             and "magnitudeApplyTimer.stop()" in matrix
