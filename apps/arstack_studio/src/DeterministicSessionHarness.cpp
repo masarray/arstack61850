@@ -54,6 +54,7 @@ public:
             {"STOP cancels pending SV commit-to-START chain", svStopCancelsPendingStart()},
             {"ABC live SET encoder remains consistent and bounded", abcSetpointBatchContract()},
             {"PTP STOP full queue uses bounded priority slot", ptpSafetyStopBypassesFullQueue()},
+            {"SV STOP remains responsive with full command queue", svPriorityStopBypassesFullQueue()},
             {"PTP STOP requires firmware ACK and stopped readback", ptpStopConfirmationCannotBeGuessed()},
             {"PTP STOP timeout blocks restart pending manual recovery", ptpUnverifiedStopBlocksRestart()},
             {"App teardown must stop PTP without SV output", ptpOnlyShutdownIntent()},
