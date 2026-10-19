@@ -7,7 +7,7 @@
 #include <QThread>
 #include <QTimer>
 #include <QVariantMap>
-#include "ariec61850/sampled_values/live_signal_state.hpp"
+namespace ar::iec61850::sampled_values { struct SvLiveChannelState; }
 
 class DeterministicSessionHarness;
 class DeviceIoWorker;
