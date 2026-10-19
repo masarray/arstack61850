@@ -470,7 +470,7 @@ void DeviceIoWorker::pumpWriteQueue() {
     if (svStopPending_) {
         svStopPending_ = false;
         activeCommand_ = PendingCommand{
-            QStringLiteral("STOP"), QByteArrayLiteral("STOP\\n"), false, false};
+            QStringLiteral("STOP"), QByteArrayLiteral("STOP\n"), false, false};
     } else if (ptpStopPending_) {
         ptpStopPending_ = false;
         activeCommand_ = PendingCommand{
