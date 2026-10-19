@@ -9,6 +9,7 @@
 #include "smp_synch_lab.hpp"
 
 #include "ariec61850/ethernet/ethernet.hpp"
+#include "ariec61850/sampled_values/profile_identity.hpp"
 
 #include "esp_log.h"
 #include "sdkconfig.h"
@@ -283,6 +284,13 @@ void handle_binary_profile_command(const char* command, char** save) noexcept {
         const auto record = g_binary_staging.complete_record(transaction);
         RuntimePublisherProfile candidate{};
         const auto decoded = decode_binary_runtime_profile(record, candidate);
+        if (g_binary_staging.complete(transaction) &&
+            decoded == BinaryRuntimeProfileStatus::ok &&
+            runtime_profile_validate(candidate)) {
+            candidate.binary_record_identity_hash =
+                ar::iec61850::sampled_values::sv_binary_profile_identity_hash(record);
+            candidate.binary_record_bytes = static_cast<std::uint32_t>(record.size());
+        }
         if (!g_binary_staging.complete(transaction) ||
             decoded != BinaryRuntimeProfileStatus::ok ||
             !runtime_profile_validate(candidate) ||
@@ -328,7 +336,17 @@ void handle_profile_command(char* arguments) noexcept {
             ESP_LOGE(kTag, "Usage: PROFILE SHOW");
             return;
         }
-        print_profile(runtime_profile_snapshot());
+        const auto active = runtime_profile_snapshot();
+        print_profile(active);
+        // Emitted only for a fully decoded, committed canonical binary profile.
+        // No metadata from incomplete staging can ever be presented as active.
+        if (active.binary_record_identity_hash != 0U) {
+            ESP_LOGI(kTag,
+                     "PROFILE BINIDENTITY generation=%llu hash=%016llX bytes=%lu",
+                     static_cast<unsigned long long>(active.generation),
+                     static_cast<unsigned long long>(active.binary_record_identity_hash),
+                     static_cast<unsigned long>(active.binary_record_bytes));
+        }
         print_smp_synch_policy();
 #if CONFIG_AR_PTP_LAB_TX
         print_ptp_role();
@@ -422,6 +440,9 @@ void handle_profile_command(char* arguments) noexcept {
             return;
         }
         g_staging = runtime_profile_snapshot();
+        // ASCII profile transactions deliberately revoke canonical-record reuse.
+        g_staging.binary_record_identity_hash = 0U;
+        g_staging.binary_record_bytes = 0U;
         g_staging_active = true;
         ESP_LOGI(kTag, "PROFILE staging started");
         return;
