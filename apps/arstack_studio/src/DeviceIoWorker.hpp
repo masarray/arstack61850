@@ -181,6 +181,7 @@ private:
     QStringList probeQueue_;
     QByteArray pendingRx_;
     QQueue<PendingCommand> commandQueue_;
+    bool svStopPending_{false};
     PendingCommand activeCommand_;
     QString lastPort_;
 
