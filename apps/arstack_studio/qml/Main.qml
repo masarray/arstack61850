@@ -396,7 +396,7 @@ ApplicationWindow {
     }
 
     function validFrequency(value) {
-        return isFinite(value) && value >= 0 && value <= 1000.0
+        return isFinite(value) && (value === 0 || (value >= 1.0 && value <= 1000.0))
     }
 
     function normalizedAngle(value) {
