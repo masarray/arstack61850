@@ -445,6 +445,8 @@ void handle_line(char* line) noexcept {
             return;
         }
         g_running.store(false, std::memory_order_release);
+        // Cancel a queued START before it can create a new sample clock.
+        g_start_request.store(false, std::memory_order_release);
         disarm_control_lease();
         wake_publisher();
         ESP_LOGI(kTag, "STOP accepted: SV transmission suppressed");
