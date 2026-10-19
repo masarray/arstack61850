@@ -283,8 +283,8 @@ Rectangle {
                             matrix.controller.selectSignal(matrix.groupIndex, signalRow.rowIndex)
                             matrix.controller.refreshPreview()
                             matrix.controller.markScenarioDirty()
-                            if (matrix.session && matrix.session.liveControlReady && !matrix.controller.pendingApply)
-                                matrix.session.requestSetEnabled(signalRow.sid, checked)
+                            // ENABLE joins RMS, phase, quality, frequency and CT
+                            // shaping in the same verified eight-channel CFG commit.
                         }
                     }
 
