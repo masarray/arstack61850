@@ -41,6 +41,9 @@ public:
         return visible;
     }
     [[nodiscard]] static constexpr int heartbeatIntervalMs() noexcept { return 700; }
+    // Allow the ESP32-P4 line-oriented console to drain a complete command
+    // before accepting the next command, even when the host USB buffer emptied.
+    [[nodiscard]] static constexpr int serialCommandGapMs() noexcept { return 15; }
 
     // Fast discovery policy: USB bridge metadata may prioritize a port, but it
     // never verifies device identity. The opened port must still answer the
@@ -175,6 +178,7 @@ private:
     QTimer* verificationTimer_{nullptr};
     QTimer* presenceTimer_{nullptr};
     QTimer* heartbeatTimer_{nullptr};
+    QTimer* writeGapTimer_{nullptr};
 
     QStringList ports_;
     QString recommendedPort_;
