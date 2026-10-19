@@ -340,13 +340,11 @@ void handle_profile_command(char* arguments) noexcept {
         print_profile(active);
         // Emitted only for a fully decoded, committed canonical binary profile.
         // No metadata from incomplete staging can ever be presented as active.
-        if (active.binary_record_identity_hash != 0U) {
-            ESP_LOGI(kTag,
-                     "PROFILE BINIDENTITY generation=%llu hash=%016llX bytes=%lu",
-                     static_cast<unsigned long long>(active.generation),
-                     static_cast<unsigned long long>(active.binary_record_identity_hash),
-                     static_cast<unsigned long>(active.binary_record_bytes));
-        }
+        ESP_LOGI(kTag,
+                 "PROFILE BINIDENTITY generation=%llu hash=%016llX bytes=%lu",
+                 static_cast<unsigned long long>(active.generation),
+                 static_cast<unsigned long long>(active.binary_record_identity_hash),
+                 static_cast<unsigned long>(active.binary_record_bytes));
         print_smp_synch_policy();
 #if CONFIG_AR_PTP_LAB_TX
         print_ptp_role();
