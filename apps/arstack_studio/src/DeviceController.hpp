@@ -193,6 +193,7 @@ public:
         const QString& expectedFirmwareVersion,
         const QString& expectedBuildId = {});
 
+    [[nodiscard]] static constexpr int scenarioAckTimeoutMs() noexcept { return 5000; }
     [[nodiscard]] static constexpr int identityMaxAttempts() noexcept { return 5; }
     [[nodiscard]] static constexpr int identityRetryIntervalMs() noexcept { return 1100; }
     [[nodiscard]] static constexpr bool identityRetryAllowed(const int attemptsSent) noexcept {
@@ -211,7 +212,7 @@ public:
     void disconnectPort();
     bool sendShow();
     virtual bool start();
-    // Single validated, bounded FIFO transaction. START is always last.
+    // Validated typed transaction, firmware COMMIT ACK/readback before START.
     bool startWithScenario(const QVariantMap& scenario);
     bool stop();
     virtual bool zero();
@@ -295,11 +296,25 @@ protected:
     // multi-channel flush. Empty result = invalid; never send partial batch.
     static QString formatSignalCommand(const QString& signalId, double magnitude,
         double phaseDegrees, quint32 quality, double currentCountsPerAmp,
-        double voltageCountsPerVolt, double frequencyHz);
+        double voltageCountsPerVolt, double frequencyHz,
+        qint32* outCounts = nullptr, qint32* outPhaseMdeg = nullptr);
     void setSessionHeartbeatEnabled(bool enabled);
 
 private:
     friend class DeterministicSessionHarness;
+
+    enum class ScenarioStartStage {
+        idle, awaiting_commit, awaiting_readback, awaiting_start
+    };
+
+    struct ScenarioPending final {
+        quint32 token{};
+        quint64 hash{};
+        QString generation;
+        QString bootId;
+        QString profileGeneration;
+        quint64 session{};
+    };
 
     enum class PtpStartStage {
         idle, awaiting_role_ack, awaiting_role_readback, awaiting_config,
@@ -352,6 +367,9 @@ private:
     void failBinaryProfileDeployment(const QString& message);
     void resetTelemetry();
     void resetPtpState();
+    void resetScenarioStart() noexcept;
+    void advanceScenarioStartup(const QString& line);
+    void failScenarioStart(const QString& reason);
     [[nodiscard]] bool needsPtpStopBeforeShutdown() const noexcept { return ptpRunning_ || ptpStarting(); }
     void advancePtpStartup(const QString& line);
     void failPtpStartup(const QString& reason, bool rollback);
@@ -395,6 +413,9 @@ private:
     bool ptpAvailable_{false};
     bool ptpRunning_{false};
     PtpStartStage ptpStartStage_{PtpStartStage::idle};
+    ScenarioStartStage scenarioStartStage_{ScenarioStartStage::idle};
+    ScenarioPending scenarioPending_{};
+    QTimer scenarioStartTimer_;
     QTimer ptpStartTimer_;
     QTimer ptpStopPollTimer_;
     QTimer logUpdateTimer_;

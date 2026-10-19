@@ -6,11 +6,13 @@
 
 #include "ariec61850/ethernet/ethernet.hpp"
 #include "ariec61850/sampled_values/compiled_device_profile.hpp"
+#include "ariec61850/sampled_values/live_scenario_transaction.hpp"
 
 #include <QDateTime>
 #include <QDebug>
 #include <QMetaObject>
 #include <QRegularExpression>
+#include <QRandomGenerator>
 #include <QSemaphore>
 #include <QSharedPointer>
 
@@ -27,6 +29,18 @@ const QRegularExpression kStateExpression{
     QRegularExpression::CaseInsensitiveOption};
 const QRegularExpression kTimingExpression{
     QStringLiteral("samples=(\\d+)\\s+\\(~(\\d+)\\s+fps\\).*?MC ok=(\\d+) fail=(\\d+).*?missed=(\\d+).*?signal_gen=(\\d+)"),
+    QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kScenarioCommitExpression{
+    QStringLiteral("SCENARIO COMMIT transaction=(\\d+) applied generation=(\\d+) hash=([0-9A-Fa-f]{16})"),
+    QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kScenarioReadbackExpression{
+    QStringLiteral("SCENARIO READBACK transaction=(\\d+) generation=(\\d+) hash=([0-9A-Fa-f]{16})"),
+    QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kScenarioStartExpression{
+    QStringLiteral("SCENARIO START transaction=(\\d+) accepted generation=(\\d+) hash=([0-9A-Fa-f]{16})"),
+    QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kScenarioRejectExpression{
+    QStringLiteral("SCENARIO transaction=(\\d+) rejected"),
     QRegularExpression::CaseInsensitiveOption};
 const QRegularExpression kSignalGenerationExpression{
     QStringLiteral("Live signal generation\\s+(\\d+)\\s+committed"),
@@ -92,6 +106,11 @@ DeviceController::DeviceController(QObject* parent) : QObject(parent) {
     logUpdateTimer_.setInterval(100);
     connect(&logUpdateTimer_, &QTimer::timeout, this,
             &DeviceController::logTextChanged);
+    scenarioStartTimer_.setSingleShot(true);
+    connect(&scenarioStartTimer_, &QTimer::timeout, this, [this] {
+        if (scenarioStartStage_ != ScenarioStartStage::idle)
+            failScenarioStart(QStringLiteral("SCENARIO firmware acknowledgement/readback timed out."));
+    });
     ptpStartTimer_.setSingleShot(true);
     connect(&ptpStartTimer_, &QTimer::timeout, this, [this] {
         if (!ptpStarting()) return;
@@ -145,7 +164,8 @@ bool DeviceController::shutdown() {
         return true;
     }
 
-    const bool requestSvStop = running_;
+    const bool requestSvStop = running_ || scenarioStartStage_ != ScenarioStartStage::idle;
+    resetScenarioStart();
     if (QThread::currentThread() == &ioThread_) {
         ioWorker_->shutdown(requestSvStop, requestPtpStop);
         ioThread_.quit();
@@ -344,6 +364,10 @@ void DeviceController::connectWorkerSignals() {
     connect(ioWorker_, &DeviceIoWorker::commandRejected, this,
             [this](const quint64 generation, const QString& message) {
         if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
+        if (scenarioStartStage_ != ScenarioStartStage::idle) {
+            failScenarioStart(QStringLiteral("SCENARIO serial queue rejected: ") + message);
+            return;
+        }
         if (profileDeploying_) {
             profileDeploying_ = false;
             profileArmed_ = false;
@@ -409,6 +433,7 @@ QString DeviceController::ptpTxFailures() const { return ptpTxFailures_; }
 void DeviceController::setSessionGeneration(const quint64 generation) {
     if (generation == 0 || generation == sessionGeneration_) return;
     resetPtpStartup();
+    resetScenarioStart();
     sessionGeneration_ = generation;
     pendingAutoDetect_ = false;
     pendingConnectPort_.clear();
@@ -618,6 +643,7 @@ void DeviceController::handlePortClosed(const QString& portName) {
     setIdentificationState(IdentificationState::Idle);
     discovering_ = false;
     resetPtpState();
+    resetScenarioStart();
     resetTelemetry();
 
     emit runningChanged();
@@ -640,12 +666,18 @@ bool DeviceController::start() {
 }
 
 bool DeviceController::startWithScenario(const QVariantMap& scenario) {
-    if (!deviceVerified_ || running_) return false;
+    if (!deviceVerified_ || running_ || scenarioStartStage_ != ScenarioStartStage::idle ||
+        !profileArmed_ || profileDeploying_) return false;
+    if (!identity_.capabilities.contains(QStringLiteral("SCENARIO-TX-V1"), Qt::CaseInsensitive)) {
+        setError(QStringLiteral("Firmware update required: atomic SCENARIO-TX-V1 commit/readback is unavailable."));
+        return false;
+    }
     bool hzOk = false, currentScaleOk = false, voltageScaleOk = false;
     const double hz = scenario.value(QStringLiteral("hz")).toDouble(&hzOk);
     const double currentScale = scenario.value(QStringLiteral("currentScale")).toDouble(&currentScaleOk);
     const double voltageScale = scenario.value(QStringLiteral("voltageScale")).toDouble(&voltageScaleOk);
     if (!hzOk || !std::isfinite(hz) || hz < 0.0 || hz > 1000.0 ||
+        (hz > 0.0 && hz < 1.0) ||
         !currentScaleOk || !voltageScaleOk || !finitePositive(currentScale) ||
         !finitePositive(voltageScale)) {
         setError(QStringLiteral("Invalid frequency or engineering scale; START refused."));
@@ -659,7 +691,11 @@ bool DeviceController::startWithScenario(const QVariantMap& scenario) {
     }
     QStringList commands;
     commands.reserve(20);
-    commands << QStringLiteral("FREQ %1").arg(std::llround(hz * 1000.0));
+    using ar::iec61850::sampled_values::SvLiveSignalBank;
+    using ar::iec61850::sampled_values::SvLiveScenarioTransaction;
+    auto normalized = SvLiveSignalBank::default_state();
+    normalized.frequency_millihz = static_cast<quint32>(std::llround(hz * 1000.0));
+    commands << QStringLiteral("FREQ %1").arg(normalized.frequency_millihz);
     static const QStringList ids{QStringLiteral("IA"), QStringLiteral("IB"),
         QStringLiteral("IC"), QStringLiteral("IN"), QStringLiteral("UA"),
         QStringLiteral("UB"), QStringLiteral("UC"), QStringLiteral("UN")};
@@ -677,12 +713,15 @@ bool DeviceController::startWithScenario(const QVariantMap& scenario) {
             setError(QStringLiteral("Invalid channel data; START refused."));
             return false;
         }
+        qint32 counts{}, phaseMdeg{};
         const QString command = formatSignalCommand(ids.at(i), magnitude, phase,
-            static_cast<quint32>(quality), currentScale, voltageScale, hz);
+            static_cast<quint32>(quality), currentScale, voltageScale, hz, &counts, &phaseMdeg);
         if (command.isEmpty()) {
             setError(QStringLiteral("Out-of-range setpoint; START refused."));
             return false;
         }
+        normalized.channels[i] = {
+            counts, phaseMdeg, static_cast<quint32>(quality), row.at(2).toBool()};
         commands << command;
         commands << QStringLiteral("ENABLE %1 %2").arg(ids.at(i)).arg(row.at(2).toBool() ? 1 : 0);
     }
@@ -700,18 +739,44 @@ bool DeviceController::startWithScenario(const QVariantMap& scenario) {
         setError(QStringLiteral("Invalid CT shaping; START refused."));
         return false;
     }
+    normalized.current_shape = {
+        shaping,
+        static_cast<qint32>(std::llround(dc * 10.0)),
+        static_cast<quint32>(std::llround(harmonic * 10.0)),
+        static_cast<quint8>(order),
+        static_cast<quint32>(std::llround(clip * 10.0))};
+    if (!SvLiveSignalBank::validate(normalized)) {
+        setError(QStringLiteral("Normalized 4I+4V values do not meet firmware bounds; START refused."));
+        return false;
+    }
     commands << QStringLiteral("SHAPE CT %1 %2 %3 %4 %5")
-        .arg(shaping ? 1 : 0).arg(std::llround(dc * 10.0))
-        .arg(std::llround(harmonic * 10.0)).arg(order).arg(std::llround(clip * 10.0));
-    commands << QStringLiteral("START");
-    // Worker admission is all-or-none (bounded queue), and exclusive FIFO
-    // prevents concurrent UI edits interleaving with this START transaction.
-    // Acceptance is not firmware ACK; RUNNING still requires board telemetry.
-    if (!sendCommandBatch(commands, false, true)) return false;
+        .arg(shaping ? 1 : 0).arg(normalized.current_shape.dc_offset_permille)
+        .arg(normalized.current_shape.harmonic_permille).arg(order)
+        .arg(normalized.current_shape.clip_permille);
+
+    // One portable fingerprint for GUI normalization, firmware commit, and
+    // readback. No START is queued in the non-acknowledged SET batch.
+    const auto token = QRandomGenerator::global()->generate() | 1U;
+    const auto hash = SvLiveScenarioTransaction::fingerprint(normalized);
+    const QString hex = QStringLiteral("%1").arg(static_cast<qulonglong>(hash),
+        16, 16, QLatin1Char('0')).toUpper();
+    commands.prepend(QStringLiteral("SCENARIO BEGIN %1").arg(token));
+    commands << QStringLiteral("SCENARIO COMMIT %1 %2").arg(token).arg(hex);
+    scenarioPending_ = {token, hash, QString{}, identity_.bootId,
+                        profileGeneration_, sessionGeneration_};
+    scenarioStartStage_ = ScenarioStartStage::awaiting_commit;
+    if (!sendCommandBatch(commands, false, true)) {
+        resetScenarioStart();
+        return false;
+    }
+    scenarioStartTimer_.start(scenarioAckTimeoutMs());
     signalFrequencyHz_ = hz;
     return true;
 }
-bool DeviceController::stop() { return sendCommand(QStringLiteral("STOP")); }
+bool DeviceController::stop() {
+    resetScenarioStart();
+    return sendCommand(QStringLiteral("STOP"));
+}
 bool DeviceController::zero() { return sendCommand(QStringLiteral("ZERO")); }
 
 bool DeviceController::setFrequency(const double hz) {
@@ -733,7 +798,9 @@ QString DeviceController::formatSignalCommand(
     const quint32 quality,
     const double currentCountsPerAmp,
     const double voltageCountsPerVolt,
-    const double frequencyHz) {
+    const double frequencyHz,
+    qint32* outCounts,
+    qint32* outPhaseMdeg) {
     const QString id = signalId.trimmed().toUpper();
     static const QStringList validIds{
         QStringLiteral("IA"), QStringLiteral("IB"), QStringLiteral("IC"), QStringLiteral("IN"),
@@ -752,6 +819,8 @@ QString DeviceController::formatSignalCommand(
         angleMdeg > static_cast<double>(std::numeric_limits<qint32>::max())) return {};
     const auto counts = std::llround(scaled);
     const auto phaseMdeg = std::llround(angleMdeg);
+    if (outCounts) *outCounts = static_cast<qint32>(counts);
+    if (outPhaseMdeg) *outPhaseMdeg = static_cast<qint32>(phaseMdeg);
     return QStringLiteral("SET %1 %2 %3 %4")
         .arg(id)
         .arg(counts)
@@ -1395,6 +1464,89 @@ void DeviceController::setSessionHeartbeatEnabled(const bool enabled) {
         Qt::QueuedConnection);
 }
 
+void DeviceController::resetScenarioStart() noexcept {
+    scenarioStartTimer_.stop();
+    scenarioStartStage_ = ScenarioStartStage::idle;
+    scenarioPending_ = {};
+}
+
+void DeviceController::failScenarioStart(const QString& why) {
+    if (scenarioStartStage_ == ScenarioStartStage::idle) return;
+    resetScenarioStart();
+    setError(why);
+    // Failure may be after firmware commit or even after a lost START reply.
+    // An independent reserved STOP runs ahead of unsent SV START commands.
+    if (connected_ && ioWorkerReady_ && sessionGeneration_ != 0) {
+        static_cast<void>(sendCommand(QStringLiteral("STOP")));
+    }
+}
+
+void DeviceController::advanceScenarioStartup(const QString& line) {
+    if (scenarioStartStage_ == ScenarioStartStage::idle) return;
+    if (scenarioPending_.session != sessionGeneration_ ||
+        !deviceVerified_ || scenarioPending_.bootId != identity_.bootId ||
+        scenarioPending_.profileGeneration != profileGeneration_) {
+        failScenarioStart(QStringLiteral("SCENARIO identity or profile generation changed during START."));
+        return;
+    }
+    auto rejected = kScenarioRejectExpression.match(line);
+    if (rejected.hasMatch()) {
+        if (rejected.captured(1).toUInt() == scenarioPending_.token) {
+            failScenarioStart(QStringLiteral("Firmware rejected the SCENARIO transaction or START."));
+        }
+        return;
+    }
+    QRegularExpressionMatch match;
+    if (scenarioStartStage_ == ScenarioStartStage::awaiting_commit) {
+        match = kScenarioCommitExpression.match(line);
+        if (!match.hasMatch()) return;
+        if (match.captured(1).toUInt() != scenarioPending_.token) return;
+        const auto observed = match.captured(3).toULongLong(nullptr, 16);
+        if (observed != scenarioPending_.hash) {
+            failScenarioStart(QStringLiteral("SCENARIO COMMIT hash did not match normalized GUI."));
+            return;
+        }
+        scenarioPending_.generation = match.captured(2);
+        scenarioStartStage_ = ScenarioStartStage::awaiting_readback;
+        if (!sendCommand(QStringLiteral("SCENARIO SHOW %1").arg(scenarioPending_.token))) {
+            failScenarioStart(QStringLiteral("SCENARIO readback request could not be queued."));
+            return;
+        }
+        scenarioStartTimer_.start(scenarioAckTimeoutMs());
+        return;
+    }
+    if (scenarioStartStage_ == ScenarioStartStage::awaiting_readback) {
+        match = kScenarioReadbackExpression.match(line);
+        if (!match.hasMatch()) return;
+        if (match.captured(1).toUInt() != scenarioPending_.token) return;
+        if (match.captured(2) != scenarioPending_.generation ||
+            match.captured(3).toULongLong(nullptr, 16) != scenarioPending_.hash) {
+            failScenarioStart(QStringLiteral("SCENARIO firmware readback mismatch."));
+            return;
+        }
+        scenarioStartStage_ = ScenarioStartStage::awaiting_start;
+        const QString hex = QStringLiteral("%1").arg(
+            static_cast<qulonglong>(scenarioPending_.hash), 16, 16, QLatin1Char('0')).toUpper();
+        if (!sendCommand(QStringLiteral("SCENARIO START %1 %2")
+            .arg(scenarioPending_.token).arg(hex))) {
+            failScenarioStart(QStringLiteral("Verified SCENARIO START could not be queued."));
+            return;
+        }
+        scenarioStartTimer_.start(scenarioAckTimeoutMs());
+        return;
+    }
+    match = kScenarioStartExpression.match(line);
+    if (!match.hasMatch() || match.captured(1).toUInt() != scenarioPending_.token)
+        return;
+    if (match.captured(2) != scenarioPending_.generation ||
+        match.captured(3).toULongLong(nullptr, 16) != scenarioPending_.hash) {
+        failScenarioStart(QStringLiteral("SCENARIO START acknowledgement mismatched applied state."));
+        return;
+    }
+    resetScenarioStart();
+    setRunning(true);
+}
+
 void DeviceController::setRunning(const bool value) {
     if (running_ == value) return;
     running_ = value;
@@ -1470,10 +1622,10 @@ void DeviceController::processLine(const QString& rawLine) {
     if (line.isEmpty()) return;
     appendLog(QStringLiteral("←"), line);
 
-    // SV lifecycle acknowledgements are not PTP lifecycle acknowledgements.
-    // Never report 4I+4V output RUNNING merely because PTP START succeeded.
-    if (line.contains(QStringLiteral("START accepted: profile armed"), Qt::CaseInsensitive))
-        setRunning(true);
+    // A generic legacy START line cannot authorize a new scenario. Only a
+    // token+hash+generation ACK, or independently observed state telemetry,
+    // may report RUNNING. Process this before ordinary status presentation.
+    advanceScenarioStartup(line);
     if (line.contains(QStringLiteral("STOP accepted: SV transmission suppressed"), Qt::CaseInsensitive))
         setRunning(false);
 
