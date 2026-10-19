@@ -50,6 +50,7 @@ class DeviceController : public QObject {
     Q_PROPERTY(QStringList capabilities READ capabilities NOTIFY deviceIdentityChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(bool running READ running NOTIFY runningChanged)
+    Q_PROPERTY(bool scenarioApplying READ scenarioApplying NOTIFY scenarioApplicationFinished)
     Q_PROPERTY(QString portName READ portName NOTIFY connectedChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(QString logText READ logText NOTIFY logTextChanged)
