@@ -306,8 +306,9 @@ void SmartSessionController::start() {
 }
 
 bool SmartSessionController::requestStart() {
-    if (!startReady_ || !deviceControlAvailable() || device_ == nullptr || device_->running()) return false;
-    return device_->start();
+    // Legacy callers must not bypass the fresh scenario snapshot supplied by the UI.
+    // requestStartWithScenario remains the only guided START entry point.
+    return false;
 }
 
 bool SmartSessionController::requestStartWithScenario(const QVariantMap& scenario) {
