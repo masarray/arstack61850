@@ -356,6 +356,8 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         !SmartSessionController::profileGenerationAdvanced(
             QStringLiteral("2"), QStringLiteral("2")) &&
         !SmartSessionController::profileGenerationAdvanced(
+            QStringLiteral("2"), QStringLiteral("1")) &&
+        !SmartSessionController::profileGenerationAdvanced(
             QStringLiteral("2"), QStringLiteral("not-a-generation"));
 
     const bool workerPolicyAligned =
