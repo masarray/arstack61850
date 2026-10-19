@@ -51,6 +51,7 @@ public:
             {"legacy bare SV START refuses stale eight-channel state", legacyBareStartFailsClosed()},
             {"SV commit ACK/readback START chain is generation bound", svTransactionAckChain()},
             {"running SV live CFG verified without START replay", svLiveAckNoStart()},
+            {"RUNNING legacy SET intents rejected before serial", svLiveLegacyIntentsRejected()},
             {"SV stale ACK and mismatched firmware readback fail closed", svTransactionNegativeAcks()},
             {"STOP cancels pending SV commit-to-START chain", svStopCancelsPendingStart()},
             {"ABC live SET encoder remains consistent and bounded", abcSetpointBatchContract()},
@@ -548,6 +549,20 @@ private:
         d.scenarioBoot_ = d.identity_.bootId;
         d.scenarioSessionGeneration_ = d.sessionGeneration_;
         d.scenarioProfileGeneration_ = d.profileGeneration_;
+    }
+
+    static bool svLiveLegacyIntentsRejected() {
+        Fixture f;
+        if (!f.profileReady) return false;
+        seedVerified(f, identity(), QStringLiteral("COM7"), true);
+        if (!f.session.liveControlReady()) return false;
+        return !f.session.requestSetFrequency(60.0) &&
+               !f.session.requestSetSignal(QStringLiteral("IA"), 1.0, 0.0, 0,
+                                           1000.0, 100.0) &&
+               !f.session.requestSetQuality(QStringLiteral("IA"), 1) &&
+               !f.session.requestSetEnabled(QStringLiteral("IA"), false) &&
+               !f.session.requestSetCtSaturation(true, 1.0, 1.0, 2, 100.0) &&
+               !f.session.requestZero();
     }
 
     static bool svLiveAckNoStart() {
