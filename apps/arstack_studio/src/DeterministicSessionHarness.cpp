@@ -972,7 +972,8 @@ private:
         fixture.device.profileArmed_ = false;
         session.profileSyncTotalTimer_.start();
         // Deterministic simulated timer signal uses production timeout lambda.
-        emit session.profileSyncTotalTimer_.timeout();
+        if (!QMetaObject::invokeMethod(&session.profileSyncTotalTimer_,
+                                       "timeout", Qt::DirectConnection)) return false;
         return !session.profileSyncTotalTimer_.isActive() &&
             !session.profileRetryTimer_.isActive() &&
             session.profileSyncStage_ == SmartSessionController::ProfileSyncStage::failed &&
