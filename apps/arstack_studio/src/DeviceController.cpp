@@ -926,6 +926,7 @@ bool DeviceController::deployProfile(const QVariantMap& profile) {
     binaryProfile_.bytes = bytes;
     binaryProfile_.recordHash = sv_binary_profile_identity_hash(source);
     binaryProfile_.svId = svId;
+    binaryProfile_.bootId = identity_.bootId;
     binaryProfile_.appId = decoded.app_id;
     binaryProfile_.rate = decoded.frame_rate_hz;
     binaryProfile_.modulus = decoded.sample_counter_modulus;
