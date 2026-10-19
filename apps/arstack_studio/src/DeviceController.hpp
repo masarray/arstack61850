@@ -144,6 +144,7 @@ public:
     [[nodiscard]] QString profileGeneration() const;
     [[nodiscard]] bool profileArmed() const noexcept;
     [[nodiscard]] bool profileDeploying() const noexcept;
+    [[nodiscard]] QString profileDeploymentProgressSummary() const;
     [[nodiscard]] bool ptpAvailable() const noexcept;
     [[nodiscard]] bool ptpRunning() const noexcept;
     [[nodiscard]] bool ptpStarting() const noexcept { return ptpStartStage_ != PtpStartStage::idle; }
