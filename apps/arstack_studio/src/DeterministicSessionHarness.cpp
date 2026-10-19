@@ -48,6 +48,7 @@ public:
             {"PTP runtime requires matching PTP2 role", ptpRuntimeRoleEvidenceRequired()},
             {"PTP rejected config never starts", ptpGuidedRejectedConfigStops()},
             {"PTP STOP cancels pending start after verified readback", ptpGuidedStopCancelsStart()},
+            {"legacy bare SV START refuses stale eight-channel state", legacyBareStartFailsClosed()},
             {"ABC live SET encoder remains consistent and bounded", abcSetpointBatchContract()},
             {"PTP STOP full queue uses bounded priority slot", ptpSafetyStopBypassesFullQueue()},
             {"PTP STOP requires firmware ACK and stopped readback", ptpStopConfirmationCannotBeGuessed()},
@@ -519,6 +520,16 @@ private:
         if (!device.needsPtpStopBeforeShutdown()) return false;
         device.ptpStartStage_ = DeviceController::PtpStartStage::awaiting_role_ack;
         return device.needsPtpStopBeforeShutdown();
+    }
+
+    static bool legacyBareStartFailsClosed() {
+        Fixture f;
+        // Regression: neither a future C++ caller nor the legacy supervisor
+        // entry point may transmit START without a fresh scenario snapshot.
+        f.session.startReady_ = true;
+        if (f.session.requestStart()) return false;
+        if (f.device.start()) return false;
+        return f.device.errorString().contains(QStringLiteral("Bare START refused"));
     }
 
     static QVariantMap ptpValidProfile() {
