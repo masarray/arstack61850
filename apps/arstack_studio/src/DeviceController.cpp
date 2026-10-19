@@ -416,6 +416,22 @@ QString DeviceController::signalGeneration() const { return signalGeneration_; }
 QString DeviceController::profileGeneration() const { return profileGeneration_; }
 bool DeviceController::profileArmed() const noexcept { return profileArmed_; }
 bool DeviceController::profileDeploying() const noexcept { return profileDeploying_; }
+
+QString DeviceController::profileDeploymentProgressSummary() const {
+    QString stage;
+    switch (binaryProfileStage_) {
+    case BinaryProfileStage::idle: stage = QStringLiteral("idle"); break;
+    case BinaryProfileStage::waiting_status: stage = QStringLiteral("BINSTATUS"); break;
+    case BinaryProfileStage::waiting_abort: stage = QStringLiteral("BINABORT"); break;
+    case BinaryProfileStage::waiting_begin: stage = QStringLiteral("BINBEGIN"); break;
+    case BinaryProfileStage::waiting_chunk: stage = QStringLiteral("BINCHUNK"); break;
+    case BinaryProfileStage::waiting_commit: stage = QStringLiteral("BINCOMMIT"); break;
+    case BinaryProfileStage::waiting_readback: stage = QStringLiteral("PROFILE SHOW readback"); break;
+    }
+    return QStringLiteral("phase=%1, verified_bytes=%2/%3, transaction=%4, boot=%5")
+        .arg(stage).arg(binaryProfile_.offset).arg(binaryProfile_.bytes.size())
+        .arg(binaryProfile_.transaction).arg(identity_.bootId);
+}
 bool DeviceController::ptpAvailable() const noexcept { return ptpAvailable_; }
 bool DeviceController::ptpRunning() const noexcept { return ptpRunning_; }
 QString DeviceController::ptpStatus() const { return ptpStatus_; }
