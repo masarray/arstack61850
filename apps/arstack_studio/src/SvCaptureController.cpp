@@ -7,6 +7,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonDocument>
 #include <QRegularExpression>
 #include <QStandardPaths>
@@ -258,7 +259,7 @@ bool SvCaptureController::startCapture(int index, int seconds, const QVariantMap
         return false;
     }
     const QStorageInfo storage(outputFolder_);
-    const qint64 required = qint64(seconds) * 4000 * 240 + 128LL * 1024 * 1024;
+    const qint64 required = qint64(seconds + 5) * 4000 * 240 + 128LL * 1024 * 1024;
     if (!storage.isValid() || storage.bytesAvailable() < required) {
         setStatus(QStringLiteral("Insufficient capture disk space (budget: %1 MB).")
                       .arg(required / 1024 / 1024));
@@ -280,7 +281,7 @@ bool SvCaptureController::startCapture(int index, int seconds, const QVariantMap
         QStringLiteral("-f"), QString::fromLatin1(kSvBpf),
         QStringLiteral("-s"), QStringLiteral("0"),
         QStringLiteral("-P"), // classic PCAP, not default PCAPNG
-        QStringLiteral("-a"), QStringLiteral("duration:%1").arg(seconds),
+        QStringLiteral("-a"), QStringLiteral("duration:%1").arg(seconds + 5),
         QStringLiteral("-w"), activePcap_
     };
     capture_.setProgram(dumpcap_);
@@ -380,11 +381,10 @@ QVariantMap SvCaptureController::decodePcap(
     const quint64 csvStride = requestedSeconds >= 3600 ? 20 : 1;
     quint64 matched = 0, malformed = 0, missing = 0, duplicates = 0;
     quint64 firstTimestamp = 0, lastTimestamp = 0, csvRows = 0;
-    quint32 lastCount = 0;
+    QHash<QString, quint32> previousCounters;
     quint64 lastBucket = std::numeric_limits<quint64>::max();
     quint64 bucketFrames = 0, bucketMissing = 0, bucketDuplicates = 0, bucketMalformed = 0;
-    bool hasPrevious = false;
-    QVariantMap syncCounts;
+     QVariantMap syncCounts;
     QVariantMap streams;
     QString parseFailure;
     constexpr quint32 kSampleWrap = 4000;
@@ -437,8 +437,9 @@ QVariantMap SvCaptureController::decodePcap(
         const QString streamKey = record.src + QLatin1Char('/') +
                                   QString::number(record.appId) + QLatin1Char('/') + record.svId;
         streams.insert(streamKey, streams.value(streamKey).toULongLong() + 1);
-        if (hasPrevious) {
-            const quint32 diff = (record.count + kSampleWrap - lastCount) % kSampleWrap;
+        const auto previous = previousCounters.constFind(streamKey);
+        if (previous != previousCounters.cend()) {
+            const quint32 diff = (record.count + kSampleWrap - previous.value()) % kSampleWrap;
             if (diff == 0) {
                 ++duplicates;
                 ++bucketDuplicates;
@@ -447,8 +448,7 @@ QVariantMap SvCaptureController::decodePcap(
                 bucketMissing += diff - 1;
             }
         }
-        hasPrevious = true;
-        lastCount = record.count;
+        previousCounters.insert(streamKey, record.count);
         if ((matched - 1) % csvStride != 0) continue;
         ++csvRows;
         stream << timestamp << ',' << record.src << ',' << record.dst << ','
