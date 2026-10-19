@@ -64,6 +64,7 @@ public:
             {"binary stale ACK identity -> fail closed", binaryProfileStaleAckFailsClosed()},
             {"corrupt console PROFILE command reports cause and blocks START", malformedProfileLineFailsClosed()},
             {"PTP polling suspended while binary PROFILE stage owns serial", ptpRefreshBlockedDuringProfileSync()},
+            {"binary PROFILE excludes PTP/SHOW/SET and buffers live setpoints", binaryProfileReservesSerialConsole()},
             {"UART paced but STOP remains reserved queue preemption", serialPacingDoesNotRemoveSafetySlot()},
             {"binary progress -> per-step deadline rearmed", binaryProfileProgressRearmsDeadline()},
             {"READY unplug/replug COM renumber -> READY stopped", readyReplugRecoversWithoutStart()},
@@ -1052,6 +1053,27 @@ private:
         fixture.session.profileSyncStage_ = SmartSessionController::ProfileSyncStage::failed;
         fixture.device.profileDeploying_ = false;
         return blocked;
+    }
+
+    static bool binaryProfileReservesSerialConsole() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
+        fixture.session.profileSyncStage_ =
+            SmartSessionController::ProfileSyncStage::failed;
+        auto& d = fixture.device;
+        d.profileDeploying_ = true;
+        d.profileArmed_ = false;
+        d.binaryProfileStage_ = DeviceController::BinaryProfileStage::waiting_chunk;
+        const bool ptpBlocked = !d.sendPtpShow();
+        const bool showBlocked = !d.sendShow();
+        const bool setBlocked = !d.setEnabled(QStringLiteral("IA"), true);
+        d.frequencyPending_ = true;
+        d.pendingFrequencyHz_ = 60.0;
+        const bool deferred = d.flushLiveCommands() && d.frequencyPending_;
+        d.liveFlushTimer_.stop();
+        return ptpBlocked && showBlocked && setBlocked && deferred &&
+            d.lastError_.contains(QStringLiteral("owns the device console"));
     }
 
     static bool serialPacingDoesNotRemoveSafetySlot() {
