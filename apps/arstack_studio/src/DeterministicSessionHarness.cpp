@@ -49,6 +49,8 @@ public:
             {"PTP rejected config never starts", ptpGuidedRejectedConfigStops()},
             {"PTP STOP cancels pending start after verified readback", ptpGuidedStopCancelsStart()},
             {"legacy bare SV START refuses stale eight-channel state", legacyBareStartFailsClosed()},
+            {"SV commit ACK/readback START chain is generation bound", svTransactionAckChain()},
+            {"SV stale ACK and mismatched firmware readback fail closed", svTransactionNegativeAcks()},
             {"ABC live SET encoder remains consistent and bounded", abcSetpointBatchContract()},
             {"PTP STOP full queue uses bounded priority slot", ptpSafetyStopBypassesFullQueue()},
             {"PTP STOP requires firmware ACK and stopped readback", ptpStopConfirmationCannotBeGuessed()},
@@ -530,6 +532,63 @@ private:
         if (f.session.requestStart()) return false;
         if (f.device.start()) return false;
         return f.device.lastError().contains(QStringLiteral("Bare START refused"));
+    }
+
+    static void seedScenarioAck(Fixture& f) {
+        seedVerified(f, identity(), QStringLiteral("COM7"), false);
+        auto& d = f.device;
+        if (d.sessionGeneration_ == 0) d.setSessionGeneration(77);
+        d.ioWorkerReady_ = true; // Queued invocation accepted, no physical COM.
+        d.scenarioStage_ = DeviceController::ScenarioStage::awaiting_commit;
+        d.scenarioToken_ = 4242U;
+        d.scenarioHash_ = UINT64_C(0xABCDEF1234567890);
+        d.scenarioBoot_ = d.identity_.bootId;
+        d.scenarioSessionGeneration_ = d.sessionGeneration_;
+        d.scenarioProfileGeneration_ = d.profileGeneration_;
+    }
+
+    static bool svTransactionAckChain() {
+        Fixture f;
+        seedScenarioAck(f);
+        auto& d = f.device;
+        d.processLine(QStringLiteral(
+            "CFG COMMITTED token=4242 hash=ABCDEF1234567890 generation=91 boot=0123456789ABCDEF"));
+        if (d.scenarioStage_ != DeviceController::ScenarioStage::awaiting_readback ||
+            d.running()) return false;
+        d.processLine(QStringLiteral(
+            "CFG READBACK token=4242 hash=ABCDEF1234567890 generation=91 boot=0123456789ABCDEF"));
+        if (d.scenarioStage_ != DeviceController::ScenarioStage::awaiting_start_ack ||
+            d.running()) return false;
+        d.processLine(QStringLiteral(
+            "START accepted: profile armed token=4242 hash=ABCDEF1234567890"));
+        return d.running() && d.scenarioStage_ == DeviceController::ScenarioStage::idle;
+    }
+
+    static bool svTransactionNegativeAcks() {
+        Fixture mismatch;
+        seedScenarioAck(mismatch);
+        auto& d = mismatch.device;
+        d.processLine(QStringLiteral(
+            "CFG COMMITTED token=4241 hash=ABCDEF1234567890 generation=91 boot=0123456789ABCDEF"));
+        if (d.running() || d.scenarioStage_ != DeviceController::ScenarioStage::idle ||
+            !d.lastError_.contains(QStringLiteral("mismatch"))) return false;
+
+        Fixture wrongReadback;
+        seedScenarioAck(wrongReadback);
+        auto& r = wrongReadback.device;
+        r.processLine(QStringLiteral(
+            "CFG COMMITTED token=4242 hash=ABCDEF1234567890 generation=91 boot=0123456789ABCDEF"));
+        if (r.scenarioStage_ != DeviceController::ScenarioStage::awaiting_readback) return false;
+        r.processLine(QStringLiteral(
+            "CFG READBACK token=4242 hash=ABCDEF1234567890 generation=92 boot=0123456789ABCDEF"));
+        if (r.running() || r.scenarioStage_ != DeviceController::ScenarioStage::idle) return false;
+
+        Fixture negativeAck;
+        seedScenarioAck(negativeAck);
+        auto& n = negativeAck.device;
+        n.processLine(QStringLiteral("CFG REJECT token=4242 code=5"));
+        return !n.running() && n.scenarioStage_ == DeviceController::ScenarioStage::idle &&
+            n.lastError_.contains(QStringLiteral("rejected"));
     }
 
     static QVariantMap ptpValidProfile() {
