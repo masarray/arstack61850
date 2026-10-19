@@ -218,6 +218,11 @@ def analyze(path, expected_appid, expected_svid, modulus, min_seconds, expected_
     if expected_channels is not None:
         for i, name in enumerate(NAMES):
             expected = expected_channels[name]
+            if "quality" in expected:
+                wanted = expected["quality"]
+                wanted_q = int(wanted, 0) if isinstance(wanted, str) else int(wanted)
+                if quality[i] != {wanted_q: sample_counts[i]}:
+                    issues.append(f"{name}: per-sample quality differs from operator scenario")
             intended_rms = float(expected["rms_counts"])
             intended_phase = float(expected["phase_degrees"])
             tolerance = float(expected.get("rms_tolerance_percent", 2.0))
