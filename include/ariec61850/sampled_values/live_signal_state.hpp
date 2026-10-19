@@ -55,25 +55,29 @@ public:
         banks_[0] = default_state();
         banks_[1] = banks_[0];
         banks_[2] = banks_[0];
+        banks_[3] = banks_[0];
     }
 
-    // One control-plane writer and any number of serialized realtime snapshots
-    // are expected. The reader advertises the bank it is copying before the
-    // copy begins. With three banks, the writer can always select a bank that
-    // is neither active nor being read, so no non-atomic object is read and
-    // written concurrently.
+    // One control-plane writer, multiple *concurrent* readers (the 4 kHz
+    // publisher and low-rate SHOW/telemetry tasks). A single reader_index_
+    // was unsafe: the second reader overwrote the first reader's protection,
+    // permitting the writer to modify a still-in-use bank.
+    //
+    // Count readers PER bank. The reader pins a candidate, then rechecks the
+    // active index before copying. A writer never modifies the active bank or
+    // any pinned bank. A spare fourth bank prevents normal two-reader traffic
+    // from exhausting the writer's update slots. All operations are bounded:
+    // no mutex, allocation, or I/O in the 4 kHz snapshot path.
     [[nodiscard]] SvLiveSignalState snapshot() const noexcept {
         while (true) {
-            const auto index = active_index_.load(std::memory_order_acquire);
-            reader_index_.store(index, std::memory_order_release);
-
-            if (active_index_.load(std::memory_order_acquire) != index) {
-                reader_index_.store(kNoReader, std::memory_order_release);
+            const auto index = active_index_.load();
+            reader_counts_[index].fetch_add(1U);
+            if (active_index_.load() != index) {
+                reader_counts_[index].fetch_sub(1U);
                 continue;
             }
-
             const auto copy = banks_[index];
-            reader_index_.store(kNoReader, std::memory_order_release);
+            reader_counts_[index].fetch_sub(1U);
             return copy;
         }
     }
@@ -88,11 +92,9 @@ public:
         }
 
         const auto current = active_index_.load(std::memory_order_acquire);
-        const auto reader = reader_index_.load(std::memory_order_acquire);
-
         std::uint32_t next = kNoReader;
         for (std::uint32_t candidate = 0U; candidate < banks_.size(); ++candidate) {
-            if (candidate != current && candidate != reader) {
+            if (candidate != current && reader_counts_[candidate].load() == 0U) {
                 next = candidate;
                 break;
             }
@@ -103,7 +105,7 @@ public:
 
         banks_[next] = requested;
         banks_[next].generation = banks_[current].generation + 1U;
-        active_index_.store(next, std::memory_order_release);
+        active_index_.store(next);
         return true;
     }
 
@@ -149,8 +151,8 @@ public:
 
 private:
     static constexpr std::uint32_t kNoReader = 3U;
-    std::array<SvLiveSignalState, 3> banks_{};
-    mutable std::atomic<std::uint32_t> reader_index_{kNoReader};
+    std::array<SvLiveSignalState, 4> banks_{};
+    mutable std::array<std::atomic<std::uint32_t>, 4> reader_counts_{};
     std::atomic<std::uint32_t> active_index_{0U};
 };
 
