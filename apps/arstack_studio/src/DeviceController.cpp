@@ -1452,6 +1452,21 @@ bool DeviceController::sendQuietCommand(const QString& command) {
 }
 
 bool DeviceController::sendCommandBatch(const QStringList& commands, const bool quiet, const bool exclusive) {
+    if (profileDeploying_) {
+        const bool exactlyOne = !exclusive && commands.size() == 1;
+        const QString command = exactlyOne ? commands.constFirst() : QString{};
+        const bool protocolReply = command.startsWith(QStringLiteral("PROFILE BIN")) ||
+            (binaryProfileStage_ == BinaryProfileStage::waiting_readback &&
+             command == QStringLiteral("PROFILE SHOW"));
+        const bool safety = command == QStringLiteral("STOP") ||
+            command == QStringLiteral("PTP STOP");
+        if (!exactlyOne || (!protocolReply && !safety)) {
+            setError(QStringLiteral(
+                "Canonical binary profile transaction owns the device console; "
+                "concurrent polling and live mutations were deferred/rejected."));
+            return false;
+        }
+    }
     if (scenarioStage_ != ScenarioStage::idle) {
         const bool stagingBatch = exclusive && !commands.isEmpty() &&
             commands.constFirst().startsWith(QStringLiteral("CFG BEGIN "));
