@@ -13,6 +13,7 @@ Item {
     property var session
     property string uiFont: "Inter"
     property string monoFont: "Inter"
+    property bool captureTabVisited: false
 
     function openEngineeringFile() { profileInspector.openEngineeringFile() }
     function showRecovery() { expertTabs.currentIndex = 1 }
@@ -116,6 +117,7 @@ Item {
 
         TabBar {
             id: expertTabs
+            onCurrentIndexChanged: if (currentIndex === 4) hub.captureTabVisited = true
             Layout.fillWidth: true
             implicitHeight: 42
             spacing: 4
@@ -171,12 +173,18 @@ Item {
                 uiFont: hub.uiFont
                 monoFont: hub.monoFont
             }
-            DeviceExpertPanel {
-                theme: hub.theme
-                device: hub.device
-                session: hub.session
-                uiFont: hub.uiFont
-                monoFont: hub.monoFont
+            Loader {
+                // Never invoke Npcap interface discovery on the main Studio startup.
+                // Once opened, keep this item alive across tab switches so a running
+                // 120s/3600s capture cannot be aborted by merely browsing Advanced.
+                active: hub.captureTabVisited
+                sourceComponent: DeviceExpertPanel {
+                    theme: hub.theme
+                    device: hub.device
+                    session: hub.session
+                    uiFont: hub.uiFont
+                    monoFont: hub.monoFont
+                }
             }
         }
     }
