@@ -632,7 +632,12 @@ void DeviceController::handlePortClosed(const QString& portName) {
 }
 
 bool DeviceController::sendShow() { return sendCommand(QStringLiteral("SHOW")); }
-bool DeviceController::start() { return sendCommand(QStringLiteral("START")); }
+bool DeviceController::start() {
+    // A bare START bypasses the 4I+4V scenario snapshot and may reuse stale firmware state.
+    // Until firmware-applied transaction ACK is implemented, never expose this shortcut.
+    setError(QStringLiteral("Bare START refused: a fresh 4I+4V scenario is required."));
+    return false;
+}
 
 bool DeviceController::startWithScenario(const QVariantMap& scenario) {
     if (!deviceVerified_ || running_) return false;
