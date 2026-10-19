@@ -2,6 +2,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <cstdint>
 #include <QObject>
 #include <QStringList>
 #include <QThread>
