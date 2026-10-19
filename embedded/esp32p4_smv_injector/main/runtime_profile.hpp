@@ -22,6 +22,10 @@ struct RuntimePublisherProfile final {
     bool include_sample_rate{false};
     std::array<char, 96> sv_id{};
     std::array<char, 160> data_set_reference{};
+    // Zero for factory/default or legacy ASCII commits. A valid value is set
+    // only after an entire canonical PROFILE BINCOMMIT validates successfully.
+    std::uint64_t binary_record_identity_hash{0U};
+    std::uint32_t binary_record_bytes{0U};
     std::uint64_t generation{1U};
 };
 
