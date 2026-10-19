@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 SerialPort)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 SerialPort Concurrent)
 qt_standard_project_setup(REQUIRES 6.5)
 
 # Reuse the repository's IEC 61850/SCL implementation directly. The desktop UI
@@ -38,6 +38,8 @@ qt_add_executable(arstack_studio
     src/main.cpp
     src/StudioClipboard.cpp
     src/StudioClipboard.hpp
+    src/SvCaptureController.cpp
+    src/SvCaptureController.hpp
     ${ARSTACK_STUDIO_CORE_SOURCES}
 )
 
@@ -104,6 +106,7 @@ qt_add_qml_module(arstack_studio
         qml/StudioPtpSwitch.qml
         qml/StudioTimingTray.qml
         qml/DeviceExpertPanel.qml
+        qml/SvCapturePanel.qml
         qml/FirmwarePanel.qml
         qml/WaveformExpertPanel.qml
         qml/SignalMatrix.qml
@@ -166,6 +169,7 @@ target_link_libraries(arstack_studio PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
     Qt6::SerialPort
+    Qt6::Concurrent
     ARIEC61850::core
 )
 
