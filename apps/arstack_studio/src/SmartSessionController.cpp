@@ -690,6 +690,14 @@ void SmartSessionController::reconnectDeviceSignals() {
         reconcile();
     });
     connect(device_, &DeviceController::deviceIdentityChanged, this, [this] {
+        if (device_ != nullptr && device_->deviceVerified() &&
+            !profileSyncBootId_.isEmpty() && !device_->bootId().isEmpty() &&
+            profileSyncBootId_ != device_->bootId()) {
+            // A new firmware boot on an unchanged COM is a new authority
+            // epoch. Do not carry a READY/profile proof across the reset.
+            resetProfileSync(true);
+            profileSyncBootId_.clear();
+        }
         refreshFirmwareIdentity();
         emit stateChanged();
         reconcile();
