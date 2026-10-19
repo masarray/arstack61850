@@ -182,7 +182,7 @@ jobs:
           # Match only the publisher's top-level idle branch (8-space
           # indent). Guards inside START intentionally test live_tx_running()
           # and must remain inside this regression boundary.
-          start_end = source.index('        if (!live_tx_running()) {', start_begin)
+          start_end = source.index('\n        if (!live_tx_running()) {', start_begin)
           assert 'live_control_force_stop();' in source[start_begin:start_end]
           start_block = source[start_begin:start_end]
           # M3 passes the ETH/PTP epoch context as additional arguments.
