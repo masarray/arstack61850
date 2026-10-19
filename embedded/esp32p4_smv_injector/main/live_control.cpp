@@ -735,6 +735,10 @@ void handle_line(char* line) noexcept {
             }
             channel.rms_counts = rms;
             channel.phase_millidegrees = phase;
+            if (g_scenario.active() && quality_text == nullptr) {
+                ESP_LOGE(kTag, "SCENARIO staged SET requires explicit quality");
+                return; // guard poisons incomplete/malformed transaction
+            }
             if (quality_text != nullptr) channel.quality = quality;
             if (g_scenario.active()) {
                 if (!g_scenario.set_channel(*channel_index, rms, phase, channel.quality)) {

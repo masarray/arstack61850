@@ -137,6 +137,7 @@ private:
             QStringLiteral("PROFILE"),
             QStringLiteral("PROFILE-BINARY-V1"),
             QStringLiteral("LIVE-SETPOINTS"),
+            QStringLiteral("SCENARIO-TX-V1"),
             QStringLiteral("SESSION-LEASE"),
             QStringLiteral("PTP-P2"),
             QStringLiteral("SMPSYNCH-AUTO")};

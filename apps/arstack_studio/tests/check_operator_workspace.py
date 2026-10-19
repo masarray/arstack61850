@@ -150,7 +150,8 @@ def main() -> None:
     require('commands << QStringLiteral("FREQ %1")' in device_cpp
             and "const double phase = row.at(1).toDouble(&phaseOk);" in device_cpp
             and "const double angleMdeg = phaseDegrees * 1000.0;" in device_cpp
-            and "commands << QStringLiteral(\"START\");" in device_cpp,
+            and 'SCENARIO COMMIT %1 %2' in device_cpp
+            and 'SCENARIO START %1 %2' in device_cpp,
             "START must send actual eight model phases as millidegree SET commands before START")
     matrix = source("SignalMatrix.qml")
     require("Layout.fillHeight: true" in matrix
@@ -183,7 +184,8 @@ def main() -> None:
             and 'QStringLiteral("IC"), QStringLiteral("IN")' in device_controller
             and 'QStringLiteral("UA"), QStringLiteral("UB")' in device_controller
             and 'QStringLiteral("UC"), QStringLiteral("UN")' in device_controller
-            and 'commands << QStringLiteral("START");' in device_controller
+            and 'SCENARIO COMMIT %1 %2' in device_controller
+            and 'SCENARIO START %1 %2' in device_controller
             and 'const auto phaseMdeg = std::llround(angleMdeg);' in device_controller,
             "START transaction must retain every channel and signed millidegree")
     require("anchors.centerIn: parent" in source("CalmButton.qml")

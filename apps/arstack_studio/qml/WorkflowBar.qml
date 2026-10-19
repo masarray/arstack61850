@@ -18,7 +18,9 @@ SurfacePanel {
     property bool startQueued: false
     Timer {
         id: startWatchdog
-        interval: 8000
+        // Three distinct firmware proof stages, each with a bounded 5s
+        // controller deadline. UI must not time out before those deadlines.
+        interval: 16000
         repeat: false
         onTriggered: {
             if (!ribbon.startQueued) return
