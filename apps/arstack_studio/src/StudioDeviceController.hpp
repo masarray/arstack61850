@@ -288,6 +288,11 @@ private:
         // Preserve last-value-wins edits while firmware applies the immutable START snapshot.
         // Retry once at terminal transaction notification; never silently drop newer edits.
         if (scenarioApplying()) return true;
+        if (running()) {
+            clearPendingLiveCommands();
+            emit deviceMessage(QStringLiteral("Live edits require verified atomic 4I+4V scenario commit."));
+            return false;
+        }
         if (!deviceVerified()) {
             clearPendingLiveCommands();
             return false;
