@@ -282,9 +282,15 @@ Rectangle {
                             matrix.sourceModel.setProperty(signalRow.rowIndex, "enabled", checked)
                             matrix.controller.selectSignal(matrix.groupIndex, signalRow.rowIndex)
                             matrix.controller.refreshPreview()
+                            // markScenarioDirty sets pendingApply=true. Capture
+                            // eligibility BEFORE changing that flag, otherwise
+                            // the live ENABLE command is always skipped.
+                            const liveNow = matrix.session && matrix.session.liveControlReady
+                                    && matrix.session.state === "RUNNING"
+                                    && !matrix.controller.pendingApply
                             matrix.controller.markScenarioDirty()
-                            if (matrix.session && matrix.session.liveControlReady && !matrix.controller.pendingApply)
-                                matrix.session.requestSetEnabled(signalRow.sid, checked)
+                            if (liveNow && matrix.session.requestSetEnabled(signalRow.sid, checked))
+                                matrix.controller.pendingApply = false
                         }
                     }
 
