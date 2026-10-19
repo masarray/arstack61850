@@ -104,6 +104,15 @@ def main() -> None:
             and "Firmware recovery" in ribbon_qml,
             "never infer missing firmware from USB timeout; retry identification and prioritize semantic-verified ports")
     main_qml = source("Main.qml")
+    matrix_qml = source("SignalMatrix.qml")
+    require("function queueLiveDraft(sendCommand, errorMessage)" in main_qml
+            and "pendingApply = !queued // QUEUED only" in main_qml
+            and "matrix.controller.queueLiveDraft(function()" in matrix_qml
+            and "requestSetEnabled(signal.signalId, signal.enabled)" in main_qml
+            and "requestZero()" in main_qml
+            and "requestSetQuality(activeSignal, unsignedValue)" in main_qml
+            and "if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)" not in main_qml,
+            "all RUNNING GUI edits must queue, and Apply must include eight enable bits")
     host_controller = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
     host_header = (STUDIO / "src/DeviceController.hpp").read_text(encoding="utf-8")
     studio_controller = (STUDIO / "src/StudioDeviceController.hpp").read_text(encoding="utf-8")
