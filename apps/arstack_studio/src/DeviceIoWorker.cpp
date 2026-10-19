@@ -437,7 +437,13 @@ void DeviceIoWorker::queuePrioritySvStop() {
     // The emergency STOP slot is outside the 64-entry normal queue.
     // Discard remaining batch commands, including an unsent START, so
     // cancellation cannot accidentally complete a stale configuration.
-    commandQueue_.clear();
+    // Do not erase the independent emergency PTP STOP when SV STOP revokes
+    // outstanding configuration and START commands.
+    while (!commandQueue_.isEmpty()) {
+        const auto abandoned = commandQueue_.dequeue();
+        if (abandoned.text == QStringLiteral("PTP STOP"))
+            ptpStopPending_ = true;
+    }
     exclusiveCommandsRemaining_ = (writeActive_ && activeCommand_.exclusive) ? 1 : 0;
     if (!(writeActive_ && activeCommand_.text == QStringLiteral("STOP")))
         svStopPending_ = true;
