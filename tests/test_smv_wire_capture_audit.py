@@ -86,6 +86,13 @@ class WireAuditTests(unittest.TestCase):
             report = module.analyze(name, 0x4000, "ARSTACK_SV01", 4000,
                                     .09, 4000, 50.0, intended)
             self.assertEqual(report["status"], "PASS_PCAPPARSER_ONLY", report["blocking_findings"])
+            intended["IA"]["quality"] = "0x01"
+            wrong_quality = module.analyze(name, 0x4000, "ARSTACK_SV01", 4000,
+                                           .09, 4000, 50.0, intended)
+            self.assertEqual(wrong_quality["status"], "FAIL")
+            self.assertTrue(any("IA: per-sample quality" in err
+                                for err in wrong_quality["blocking_findings"]))
+            intended["IA"].pop("quality")
             intended["IB"]["phase_degrees"] = 120
             mismatch = module.analyze(name, 0x4000, "ARSTACK_SV01", 4000,
                                       .09, 4000, 50.0, intended)
