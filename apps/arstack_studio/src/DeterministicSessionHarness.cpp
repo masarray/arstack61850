@@ -532,7 +532,7 @@ private:
         // entry point may transmit START without a fresh scenario snapshot.
         f.session.startReady_ = true;
         if (f.session.requestStart()) return false;
-        if (f.device.start()) return false;
+        if (f.device.DeviceController::start()) return false;
         return f.device.lastError().contains(QStringLiteral("Bare START refused"));
     }
 
