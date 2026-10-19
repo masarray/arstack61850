@@ -579,18 +579,26 @@ void handle_line(char* line) noexcept {
         char* value_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
         std::uint32_t frequency{};
         if (!parse_u32(value_text, frequency) || has_extra_token(&save)) {
+            if (staged) g_scenario_txn.reject();
             ESP_LOGE(kTag, "Usage: FREQ <millihertz>");
             return;
         }
-        auto state = g_signal_bank.snapshot();
+        auto state = staged ? g_scenario_txn.draft() : g_signal_bank.snapshot();
         state.frequency_millihz = frequency;
-        static_cast<void>(publish_state(state));
+        if (staged) {
+            g_scenario_txn.draft() = state;
+            g_scenario_txn.mark_frequency();
+        } else {
+            g_scenario_txn.reset();
+            static_cast<void>(publish_state(state));
+        }
         return;
     }
 
     if (std::strcmp(command, "SHAPE") == 0) {
         char* shape_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
         if (shape_text == nullptr) {
+            if (staged) g_scenario_txn.reject();
             ESP_LOGE(kTag, "Usage: SHAPE CT <0|1> <dc_permille> <harmonic_permille> <order> <clip_permille>");
             return;
         }
@@ -613,13 +621,19 @@ void handle_line(char* line) noexcept {
             ESP_LOGE(kTag, "Usage: SHAPE CT <0|1> <dc_permille> <harmonic_permille> <order> <clip_permille>");
             return;
         }
-        auto state = g_signal_bank.snapshot();
+        auto state = staged ? g_scenario_txn.draft() : g_signal_bank.snapshot();
         state.current_shape.enabled = enabled != 0U;
         state.current_shape.dc_offset_permille = dc_offset;
         state.current_shape.harmonic_permille = harmonic;
         state.current_shape.harmonic_order = static_cast<std::uint8_t>(order);
         state.current_shape.clip_permille = clip;
-        static_cast<void>(publish_state(state));
+        if (staged) {
+            g_scenario_txn.draft() = state;
+            g_scenario_txn.mark_shape();
+        } else {
+            g_scenario_txn.reset();
+            static_cast<void>(publish_state(state));
+        }
         ESP_LOGI(kTag, "CT saturation shape %s: DC=%ld.%u%% H%u=%lu.%u%% clip=%lu.%u%%",
                  enabled ? "enabled" : "disabled",
                  static_cast<long>(dc_offset / 10), static_cast<unsigned>(std::abs(dc_offset % 10)),
@@ -644,7 +658,7 @@ void handle_line(char* line) noexcept {
             return;
         }
 
-        auto state = g_signal_bank.snapshot();
+        auto state = staged ? g_scenario_txn.draft() : g_signal_bank.snapshot();
         auto& channel = state.channels[*channel_index];
         if (std::strcmp(command, "SET") == 0) {
             char* rms_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
@@ -668,7 +682,13 @@ void handle_line(char* line) noexcept {
             channel.rms_counts = rms;
             channel.phase_millidegrees = phase;
             if (quality_text != nullptr) channel.quality = quality;
-            static_cast<void>(publish_state(state));
+            if (staged) {
+                g_scenario_txn.draft() = state;
+                g_scenario_txn.mark_set(*channel_index);
+            } else {
+                g_scenario_txn.reset();
+                static_cast<void>(publish_state(state));
+            }
             return;
         }
 
@@ -680,7 +700,13 @@ void handle_line(char* line) noexcept {
                 return;
             }
             channel.enabled = enabled != 0U;
-            static_cast<void>(publish_state(state));
+            if (staged) {
+                g_scenario_txn.draft() = state;
+                g_scenario_txn.mark_enabled(*channel_index);
+            } else {
+                g_scenario_txn.reset();
+                static_cast<void>(publish_state(state));
+            }
             return;
         }
 
@@ -691,10 +717,12 @@ void handle_line(char* line) noexcept {
             return;
         }
         channel.quality = quality;
-        static_cast<void>(publish_state(state));
+        if (staged) g_scenario_txn.draft() = state;
+        else { g_scenario_txn.reset(); static_cast<void>(publish_state(state)); }
         return;
     }
 
+    if (staged) g_scenario_txn.reject();
     ESP_LOGW(kTag, "Unknown command '%s'; type HELP", command);
 }
 
