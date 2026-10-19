@@ -663,7 +663,17 @@ bool DeviceController::start() {
 }
 
 bool DeviceController::startWithScenario(const QVariantMap& scenario) {
-    if (!deviceVerified_ || running_ || scenarioStage_ != ScenarioStage::idle) return false;
+    return submitScenario(scenario, true);
+}
+
+bool DeviceController::applyLiveScenario(const QVariantMap& scenario) {
+    return submitScenario(scenario, false);
+}
+
+bool DeviceController::submitScenario(const QVariantMap& scenario, const bool starting) {
+    // Exactly one source-to-wire normalization regardless of whether this is
+    // a stopped START or a live frame-boundary update.
+    if (!deviceVerified_ || running_ == starting || scenarioStage_ != ScenarioStage::idle) return false;
     if (!identity_.capabilities.contains(QStringLiteral("SV-CONFIG-TXN-V1"), Qt::CaseInsensitive) ||
         identity_.bootId.size() != 16 || sessionGeneration_ == 0) {
         setError(QStringLiteral("Firmware does not support verified SV configuration transactions; START refused."));
@@ -755,6 +765,7 @@ bool DeviceController::startWithScenario(const QVariantMap& scenario) {
     // Only the immutable staging+COMMIT goes into the bounded exclusive FIFO.
     // START is dispatched later, after firmware ACK and independent bank readback.
     scenarioStage_ = ScenarioStage::awaiting_commit;
+    scenarioLiveUpdate_ = !starting;
     scenarioToken_ = token;
     scenarioHash_ = hash;
     scenarioBoot_ = identity_.bootId;
@@ -1478,6 +1489,7 @@ void DeviceController::resetScenarioStart() noexcept {
     const bool wasPending = scenarioStage_ != ScenarioStage::idle;
     scenarioTimer_.stop();
     scenarioStage_ = ScenarioStage::idle;
+    scenarioLiveUpdate_ = false;
     scenarioToken_ = 0;
     scenarioHash_ = 0;
     scenarioSessionGeneration_ = 0;
@@ -1603,6 +1615,13 @@ void DeviceController::processLine(const QString& rawLine) {
             scenarioReadback.captured(3).toULongLong() != scenarioSignalGeneration_) {
             failScenarioStart(QStringLiteral("SV firmware readback differs from committed scenario."));
         } else {
+            if (scenarioLiveUpdate_) {
+                // A live commit already atomically changed the publisher bank.
+                // Never restart phase, smpCnt or publisher for a live edit.
+                emit liveScenarioApplied();
+                resetScenarioStart();
+                return;
+            }
             scenarioStage_ = ScenarioStage::awaiting_start_ack;
             const QString hash = QString::number(scenarioHash_, 16).toUpper()
                 .rightJustified(16, QLatin1Char('0'));
