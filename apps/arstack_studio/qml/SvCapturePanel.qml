@@ -7,6 +7,7 @@ import ARStack.Studio 1.0
 Rectangle {
     id: panel
     property var theme
+    property var device
     property string uiFont: "Inter"
     property string monoFont: "Inter"
     color: theme.surface2
@@ -111,7 +112,27 @@ Rectangle {
                 onClicked: {
                     var seconds = captureDuration.currentIndex === 2 ? 3600
                                 : captureDuration.currentIndex === 0 ? 30 : 120
-                    capture.startCapture(adapter.currentIndex, seconds)
+                    capture.startCapture(adapter.currentIndex, seconds, {
+                        "captured_utc": new Date().toISOString(),
+                        "firmware_version": panel.device ? panel.device.firmwareVersion : "",
+                        "firmware_build_id": panel.device ? panel.device.firmwareBuildId : "",
+                        "boot_id": panel.device ? panel.device.bootId : "",
+                        "device_id": panel.device ? panel.device.deviceId : "",
+                        "serial_port": panel.device ? panel.device.portName : "",
+                        "running": panel.device ? panel.device.running : false,
+                        "profile_generation": panel.device ? panel.device.profileGeneration : "",
+                        "signal_generation": panel.device ? panel.device.signalGeneration : "",
+                        "smpSynch_value": panel.device ? panel.device.smpSynchValue : "",
+                        "smpSynch_source": panel.device ? panel.device.smpSynchSource : "",
+                        "ptp_role": panel.device ? panel.device.ptpRole : "",
+                        "ptp_running": panel.device ? panel.device.ptpRunning : false,
+                        "ptp_discipline": panel.device ? panel.device.ptpDiscipline : "",
+                        "ptp_source": panel.device ? panel.device.ptpSource : "",
+                        "ptp_offset_ns": panel.device ? panel.device.ptpOffsetNs : "",
+                        "device_fps": panel.device ? panel.device.fps : "",
+                        "device_missed": panel.device ? panel.device.missed : "",
+                        "device_tx_failures": panel.device ? panel.device.txFailures : ""
+                    })
                 }
             }
             CalmButton {
