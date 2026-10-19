@@ -50,6 +50,7 @@ public:
             {"PTP STOP cancels pending start after verified readback", ptpGuidedStopCancelsStart()},
             {"legacy bare SV START refuses stale eight-channel state", legacyBareStartFailsClosed()},
             {"SV commit ACK/readback START chain is generation bound", svTransactionAckChain()},
+            {"running SV live CFG verified without START replay", svLiveAckNoStart()},
             {"SV stale ACK and mismatched firmware readback fail closed", svTransactionNegativeAcks()},
             {"STOP cancels pending SV commit-to-START chain", svStopCancelsPendingStart()},
             {"ABC live SET encoder remains consistent and bounded", abcSetpointBatchContract()},
@@ -549,6 +550,26 @@ private:
         d.scenarioProfileGeneration_ = d.profileGeneration_;
     }
 
+    static bool svLiveAckNoStart() {
+        Fixture f;
+        seedScenarioAck(f);
+        auto& d = f.device;
+        d.running_ = true;
+        d.scenarioLiveUpdate_ = true;
+        bool applied = false;
+        QObject::connect(&d, &DeviceController::liveScenarioApplied, &d,
+                         [&applied] { applied = true; });
+        d.processLine(QStringLiteral(
+            "CFG COMMITTED token=4242 hash=ABCDEF1234567890 generation=91 boot=0123456789ABCDEF"));
+        if (d.scenarioStage_ != DeviceController::ScenarioStage::awaiting_readback ||
+            !d.running()) return false;
+        d.processLine(QStringLiteral(
+            "CFG READBACK token=4242 hash=ABCDEF1234567890 generation=91 boot=0123456789ABCDEF"));
+        return applied && d.running() &&
+            d.scenarioStage_ == DeviceController::ScenarioStage::idle &&
+            !d.scenarioApplying();
+    }
+
     static bool svTransactionAckChain() {
         Fixture f;
         seedScenarioAck(f);
@@ -773,16 +794,18 @@ private:
         DeviceIoWorker worker;
         for (int i = 0; i < DeviceIoWorker::commandQueueCapacity(); ++i) {
             worker.commandQueue_.enqueue(DeviceIoWorker::PendingCommand{
-                QStringLiteral("CFG SET IA 1000 0 0"),
-                QByteArrayLiteral("CFG SET IA 1000 0 0\\n"), false, true});
+                i == 0 ? QStringLiteral("PTP STOP") : QStringLiteral("CFG SET IA 1000 0 0"),
+                i == 0 ? QByteArrayLiteral("PTP STOP\\n") :
+                         QByteArrayLiteral("CFG SET IA 1000 0 0\\n"), false, i != 0});
         }
         worker.exclusiveCommandsRemaining_ = DeviceIoWorker::commandQueueCapacity();
         worker.queuePrioritySvStop();
         const bool cancelled = worker.commandQueue_.isEmpty() &&
                                worker.exclusiveCommandsRemaining_ == 0 &&
-                               worker.svStopPending_;
+                               worker.svStopPending_ && worker.ptpStopPending_;
         worker.queuePrioritySvStop();
-        return cancelled && worker.svStopPending_ && worker.commandQueue_.isEmpty();
+        return cancelled && worker.svStopPending_ && worker.ptpStopPending_ &&
+               worker.commandQueue_.isEmpty();
     }
 
     static bool ptpSafetyStopBypassesFullQueue() {
