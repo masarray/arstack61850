@@ -295,6 +295,7 @@ void DeviceIoWorker::closePortInternal(const bool emitRelease) {
     if (serial_ == nullptr) return;
     if (verificationTimer_ != nullptr) verificationTimer_->stop();
     if (heartbeatTimer_ != nullptr) heartbeatTimer_->stop();
+    if (writeGapTimer_ != nullptr) writeGapTimer_->stop();
     heartbeatEnabled_ = false;
     identityConfirmed_ = false;
     identifyAttempts_ = 0;
