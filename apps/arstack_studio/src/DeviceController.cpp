@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ariec61850/sampled_values/live_signal_transaction.hpp"
+#include "ariec61850/sampled_values/profile_identity.hpp"
 #include "DeviceController.hpp"
 
 #include "DeviceIoWorker.hpp"
@@ -51,6 +52,8 @@ const QRegularExpression kProfileArmedExpression{
 const QRegularExpression kProfileReadbackExpression{
     QStringLiteral("PROFILE generation=(\\d+)\\s+svID=(\\S+)\\s+APPID=0x([0-9A-Fa-f]+)\\s+rate=(\\d+)\\s+wrap=(\\d+)\\s+confRev=(\\d+)"),
     QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kBinaryIdentityExpression{
+    QStringLiteral("PROFILE BINIDENTITY generation=(\\d+) hash=([0-9A-Fa-f]{16}) bytes=(\\d+)")};
 const QRegularExpression kBinaryStatusExpression{
     QStringLiteral("PROFILE BINSTATUS active=([01])\\s+transaction=(\\d+)\\s+last=(\\d+)\\s+received=(\\d+)\\s+expected=(\\d+)"),
     QRegularExpression::CaseInsensitiveOption};
@@ -422,6 +425,7 @@ QString DeviceController::profileDeploymentProgressSummary() const {
     switch (binaryProfileStage_) {
     case BinaryProfileStage::idle: stage = QStringLiteral("idle"); break;
     case BinaryProfileStage::waiting_status: stage = QStringLiteral("BINSTATUS"); break;
+    case BinaryProfileStage::waiting_reuse: stage = QStringLiteral("PROFILE reuse readback"); break;
     case BinaryProfileStage::waiting_abort: stage = QStringLiteral("BINABORT"); break;
     case BinaryProfileStage::waiting_begin: stage = QStringLiteral("BINBEGIN"); break;
     case BinaryProfileStage::waiting_chunk: stage = QStringLiteral("BINCHUNK"); break;
@@ -916,7 +920,9 @@ bool DeviceController::deployProfile(const QVariantMap& profile) {
     }
 
     resetBinaryProfileTransfer();
+    profileWasReused_ = false;
     binaryProfile_.bytes = bytes;
+    binaryProfile_.recordHash = sv_binary_profile_identity_hash(source);
     binaryProfile_.svId = svId;
     binaryProfile_.appId = decoded.app_id;
     binaryProfile_.rate = decoded.frame_rate_hz;
@@ -941,6 +947,7 @@ void DeviceController::abandonProfileDeployment() {
     resetBinaryProfileTransfer();
     profileDeploying_ = false;
     profileArmed_ = false;
+    profileWasReused_ = false;
     emit profileStateChanged();
 
     if (transaction != 0U &&
@@ -961,6 +968,7 @@ void DeviceController::failBinaryProfileDeployment(const QString& message) {
     resetBinaryProfileTransfer();
     profileDeploying_ = false;
     profileArmed_ = false;
+    profileWasReused_ = false;
     setError(message);
     emit profileStateChanged();
 }
@@ -972,6 +980,8 @@ bool DeviceController::beginBinaryProfileTransaction(const quint32 lastTransacti
         return false;
     }
     binaryProfile_.lastObservedTransaction = lastTransaction;
+    binaryProfile_.reusedReadbackMatched = false;
+    binaryProfile_.reusedReadbackGeneration.clear();
     binaryProfile_.transaction = lastTransaction + 1U;
     binaryProfile_.offset = 0;
     binaryProfile_.expectedReceived = 0;
@@ -1033,10 +1043,66 @@ bool DeviceController::processBinaryProfileLine(const QString& line) {
             if (!sendCommand(QStringLiteral("PROFILE BINABORT %1").arg(transaction))) {
                 failBinaryProfileDeployment(QStringLiteral("Could not clear stale firmware profile staging."));
             }
+        } else if (identity_.capabilities.contains(
+                       QStringLiteral("PROFILE-REUSE-V1"), Qt::CaseInsensitive)) {
+            // An already armed and byte-identical profile is safe to reuse.
+            // Require a fresh full PROFILE SHOW followed by matching digest
+            // from the *same* committed generation before accepting it.
+            binaryProfileStage_ = BinaryProfileStage::waiting_reuse;
+            if (!sendCommand(QStringLiteral("PROFILE SHOW"))) {
+                failBinaryProfileDeployment(
+                    QStringLiteral("Could not query active profile for safe reuse."));
+            }
         } else {
             static_cast<void>(beginBinaryProfileTransaction(last));
         }
         return true;
+    }
+
+    if (binaryProfileStage_ == BinaryProfileStage::waiting_reuse) {
+        const auto existing = kProfileReadbackExpression.match(line);
+        if (existing.hasMatch()) {
+            bool appOk = false, rateOk = false, modulusOk = false, confOk = false;
+            const quint32 appId = existing.captured(3).toUInt(&appOk, 16);
+            const quint32 rate = existing.captured(4).toUInt(&rateOk);
+            const quint32 modulus = existing.captured(5).toUInt(&modulusOk);
+            const quint32 confRev = existing.captured(6).toUInt(&confOk);
+            binaryProfile_.reusedReadbackGeneration = existing.captured(1);
+            binaryProfile_.reusedReadbackMatched =
+                appOk && rateOk && modulusOk && confOk &&
+                existing.captured(2) == binaryProfile_.svId &&
+                appId == binaryProfile_.appId &&
+                rate == binaryProfile_.rate &&
+                modulus == binaryProfile_.modulus &&
+                confRev == binaryProfile_.confRev;
+            return true;
+        }
+        const auto fingerprint = kBinaryIdentityExpression.match(line);
+        if (fingerprint.hasMatch()) {
+            bool lengthOk = false, hashOk = false;
+            const quint64 hash = fingerprint.captured(2).toULongLong(&hashOk, 16);
+            const quint64 length = fingerprint.captured(3).toULongLong(&lengthOk);
+            if (binaryProfile_.reusedReadbackMatched &&
+                hashOk && lengthOk &&
+                hash == binaryProfile_.recordHash &&
+                length == static_cast<quint64>(binaryProfile_.bytes.size()) &&
+                fingerprint.captured(1) == binaryProfile_.reusedReadbackGeneration &&
+                !identity_.bootId.isEmpty()) {
+                profileGeneration_ = fingerprint.captured(1);
+                resetBinaryProfileTransfer();
+                profileDeploying_ = false;
+                profileArmed_ = true;
+                profileWasReused_ = true;
+                emit profileStateChanged();
+                emit deviceMessage(QStringLiteral(
+                    "Existing canonical 4I+4V profile confirmed from matching firmware digest and readback; no upload needed."));
+                return true;
+            }
+            // Stale or different profile: never arm. Deploy a fresh canonical
+            // record via the old bounded firmware transaction instead.
+            static_cast<void>(beginBinaryProfileTransaction(binaryProfile_.lastObservedTransaction));
+            return true;
+        }
     }
 
     match = kBinaryAbortExpression.match(line);
@@ -1456,7 +1522,8 @@ bool DeviceController::sendCommandBatch(const QStringList& commands, const bool 
         const bool exactlyOne = !exclusive && commands.size() == 1;
         const QString command = exactlyOne ? commands.constFirst() : QString{};
         const bool protocolReply = command.startsWith(QStringLiteral("PROFILE BIN")) ||
-            (binaryProfileStage_ == BinaryProfileStage::waiting_readback &&
+            ((binaryProfileStage_ == BinaryProfileStage::waiting_readback ||
+              binaryProfileStage_ == BinaryProfileStage::waiting_reuse) &&
              command == QStringLiteral("PROFILE SHOW"));
         const bool safety = command == QStringLiteral("STOP") ||
             command == QStringLiteral("PTP STOP");
