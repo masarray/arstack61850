@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ariec61850/sampled_values/live_signal_state.hpp"
+#include "ariec61850/sampled_values/live_scenario_transaction.hpp"
 
 #include <algorithm>
 #include <array>
@@ -216,6 +217,89 @@ void independent_channels_change_without_stream_restart() {
     CHECK(row[6] != 0);
 }
 
+
+void scenario_transaction_is_atomic_and_fail_closed() {
+    using namespace ar::iec61850::sampled_values;
+    SvLiveSignalBank bank;
+    SvLiveScenarioTransaction transaction;
+    const auto baseline = bank.snapshot();
+    CHECK(transaction.begin(101U, bank));
+    CHECK(transaction.set_frequency(50000U));
+    const std::array<std::int32_t, 8> rms{1000, 800, 1200, 0, 5774, 5670, 5900, 0};
+    const std::array<std::int32_t, 8> phase{-30000, -150000, 90000, 0, 0, -120000, 120000, 0};
+    for (std::size_t i = 0; i < 8U; ++i) {
+        CHECK(transaction.set_channel(i, rms[i], phase[i], static_cast<std::uint32_t>(i + 1U)));
+        CHECK(transaction.set_enabled(i, i != 3U));
+        // No partial setpoint can leak to the publisher.
+        CHECK(bank.snapshot() == baseline);
+    }
+    SvCurrentWaveformShape shape;
+    shape.enabled = true;
+    shape.dc_offset_permille = 100;
+    shape.harmonic_permille = 200;
+    shape.harmonic_order = 2;
+    shape.clip_permille = 900;
+    CHECK(transaction.set_shape(shape));
+    const auto hash = SvLiveScenarioTransaction::fingerprint(transaction.staged());
+    CHECK(transaction.commit(100U, hash, bank) ==
+          SvLiveScenarioTransaction::CommitResult::wrong_token);
+    CHECK(transaction.commit(101U, hash ^ 1ULL, bank) ==
+          SvLiveScenarioTransaction::CommitResult::hash_mismatch);
+    CHECK(bank.snapshot() == baseline);
+    CHECK(transaction.commit(101U, hash, bank) ==
+          SvLiveScenarioTransaction::CommitResult::applied);
+    const auto applied = bank.snapshot();
+    CHECK(applied.generation == baseline.generation + 1U);
+    CHECK(applied.channels[1].phase_millidegrees == -150000);
+    CHECK(applied.channels[6].quality == 7U);
+    CHECK(!applied.channels[3].enabled);
+    CHECK(transaction.matches_applied(101U, hash, bank));
+    CHECK(!transaction.matches_applied(100U, hash, bank));
+    CHECK(!transaction.matches_applied(101U, hash ^ 1ULL, bank));
+    CHECK(!transaction.begin(101U, bank)); // no replay of committed token
+
+    // Unverified live mutation invalidates same-generation readback/START.
+    auto changed = bank.snapshot();
+    changed.channels[0].rms_counts = 2000;
+    CHECK(bank.publish(changed));
+    CHECK(!transaction.matches_applied(101U, hash, bank));
+    CHECK(transaction.begin(102U, bank));
+    CHECK(transaction.set_frequency(50000U));
+    CHECK(transaction.commit(102U, hash, bank) ==
+          SvLiveScenarioTransaction::CommitResult::incomplete);
+    CHECK(bank.snapshot().channels[0].rms_counts == 2000);
+    transaction.invalidate(); // STOP/reset aborts any pending transaction
+    CHECK(!transaction.active());
+    CHECK(!transaction.matches_applied(101U, hash, bank));
+
+    CHECK(transaction.begin(103U, bank));
+    CHECK(!transaction.set_channel(0U, std::numeric_limits<std::int32_t>::min(), 0, 0U));
+    CHECK(transaction.set_frequency(50000U));
+    for (std::size_t i = 0U; i < 8U; ++i) {
+        CHECK(transaction.set_channel(i, rms[i], phase[i], 0U));
+        CHECK(transaction.set_enabled(i, true));
+    }
+    CHECK(transaction.set_shape(SvCurrentWaveformShape{}));
+    CHECK(transaction.commit(103U, SvLiveScenarioTransaction::fingerprint(transaction.staged()), bank) ==
+          SvLiveScenarioTransaction::CommitResult::invalid);
+    transaction.invalidate();
+
+    CHECK(transaction.begin(104U, bank));
+    CHECK(transaction.set_frequency(50000U));
+    for (std::size_t i = 0U; i < 8U; ++i) {
+        CHECK(transaction.set_channel(i, rms[i], phase[i], 0U));
+        CHECK(transaction.set_enabled(i, true));
+    }
+    CHECK(transaction.set_shape(SvCurrentWaveformShape{}));
+    const auto staleHash = SvLiveScenarioTransaction::fingerprint(transaction.staged());
+    auto conflict = bank.snapshot();
+    conflict.frequency_millihz = 60000U;
+    CHECK(bank.publish(conflict));
+    CHECK(transaction.commit(104U, staleHash, bank) ==
+          SvLiveScenarioTransaction::CommitResult::stale_generation);
+    CHECK(bank.snapshot().frequency_millihz == 60000U);
+}
+
 } // namespace
 
 int main() {
@@ -226,6 +310,7 @@ int main() {
         ct_saturation_shape_is_bounded_and_asymmetric();
         independent_channels_change_without_stream_restart();
         custom_four_current_four_voltage_table_reaches_sine_samples();
+        scenario_transaction_is_atomic_and_fail_closed();
         std::cout << "[PASS] live Sampled Values signal state\n";
         return 0;
     } catch (const std::exception& error) {
