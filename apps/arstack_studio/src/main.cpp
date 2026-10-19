@@ -346,7 +346,8 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         SmartSessionController::profileSyncTimeoutMs() == 4500 &&
         SmartSessionController::profileSyncRetryAllowed(0) &&
         SmartSessionController::profileSyncRetryAllowed(1) &&
-        !SmartSessionController::profileSyncRetryAllowed(2) &&
+        SmartSessionController::profileSyncRetryAllowed(2) &&
+        !SmartSessionController::profileSyncRetryAllowed(3) &&
         !SmartSessionController::profileSyncRetryAllowed(-1) &&
         SmartSessionController::profileGenerationAdvanced(
             QStringLiteral("1"), QStringLiteral("2")) &&
