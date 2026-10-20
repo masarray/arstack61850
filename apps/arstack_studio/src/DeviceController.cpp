@@ -1343,10 +1343,21 @@ void DeviceController::markPtpStopUnconfirmed(const QString& reason) {
 }
 
 void DeviceController::failPtpStartup(const QString& reason, const bool rollback) {
-    // Preserve the failure across STOP rollback. A generic FAILED badge is
-    // never sufficient for diagnosing firmware/transport problems.
-    ptpFailureReason_ = reason.left(300);
-    setError(reason);
+    // Attach the stage BEFORE reset/STOP rollback destroys this information.
+    QString stage;
+    switch (ptpStartStage_) {
+    case PtpStartStage::awaiting_role_ack: stage = QStringLiteral("PTP role ACK"); break;
+    case PtpStartStage::awaiting_role_readback: stage = QStringLiteral("PTP role readback"); break;
+    case PtpStartStage::awaiting_config: stage = QStringLiteral("PTP settings"); break;
+    case PtpStartStage::awaiting_start: stage = QStringLiteral("PTP START ACK"); break;
+    case PtpStartStage::awaiting_runtime: stage = QStringLiteral("PTP runtime readback"); break;
+    case PtpStartStage::awaiting_stop_ack: stage = QStringLiteral("PTP STOP ACK"); break;
+    case PtpStartStage::awaiting_stop_readback: stage = QStringLiteral("PTP STOP readback"); break;
+    case PtpStartStage::stop_unconfirmed: stage = QStringLiteral("PTP STOP unverified"); break;
+    case PtpStartStage::idle: stage = QStringLiteral("PTP startup"); break;
+    }
+    ptpFailureReason_ = QStringLiteral("%1: %2").arg(stage, reason).left(300);
+    setError(ptpFailureReason_);
     if (rollback && connected_ && sessionGeneration_ != 0) {
         static_cast<void>(beginPtpStopVerification());
         return;
