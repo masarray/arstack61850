@@ -17,6 +17,7 @@
 #include <QVariantList>
 #include <QTimer>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
