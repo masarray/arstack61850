@@ -1683,6 +1683,13 @@ void telemetry_task(void*) {
 
 } // namespace
 
+extern "C" bool ar_esp32p4_eth_link_up(void) {
+    // Single source of truth: the existing ETH_EVENT handler owns link
+    // transitions for both SV and PTP; do not create another task/cache.
+    return g_link_events != nullptr &&
+        (xEventGroupGetBits(g_link_events) & kLinkUpBit) != 0;
+}
+
 extern "C" void app_main(void) {
     g_link_events = xEventGroupCreate();
     if (g_link_events == nullptr) {
