@@ -50,7 +50,10 @@ SurfacePanel {
             return false
         const accepted = panel.session.requestStartPtpConfigured(role, panel.ptpProfile())
         if (!accepted && panel.controller)
-            panel.controller.showMessage("PTP start blocked. Check timing diagnostics.", true)
+            panel.controller.showMessage(
+                panel.device.lastError && panel.device.lastError.length
+                    ? panel.device.lastError
+                    : "PTP START not queued; check board identity and firmware state.", true)
         return Boolean(accepted)
     }
 
@@ -147,6 +150,21 @@ SurfacePanel {
                         : panel.device.ptpRunning ? panel.theme.green
                         : panel.startPending ? panel.theme.amber : panel.theme.muted
                 }
+            }
+
+            Label {
+                Layout.fillWidth: true
+                visible: Boolean(panel.device.ptpFailureReason) &&
+                         panel.device.ptpFailureReason.length > 0 &&
+                         !panel.device.ptpRunning
+                text: "PTP start unsuccessful · " + panel.device.ptpFailureReason
+                color: panel.theme.red
+                font.family: panel.uiFont
+                font.pixelSize: 10
+                wrapMode: Text.WordWrap
+                maximumLineCount: 3
+                elide: Text.ElideRight
+                ToolTip.visible: false
             }
 
             Rectangle {
