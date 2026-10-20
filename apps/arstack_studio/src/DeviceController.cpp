@@ -1309,6 +1309,7 @@ void DeviceController::resetPtpStartup() noexcept {
     pendingPtpRole_.clear();
     pendingPtpConfig_.clear();
     ptpRuntimeRoleSeen_ = false;
+    ptpRuntimeRunningSeen_ = false;
 }
 
 bool DeviceController::beginPtpStopVerification() {
@@ -1318,6 +1319,7 @@ bool DeviceController::beginPtpStopVerification() {
     pendingPtpRole_.clear();
     pendingPtpConfig_.clear();
     ptpRuntimeRoleSeen_ = false;
+    ptpRuntimeRunningSeen_ = false;
     ptpStatus_ = QStringLiteral("Stopping PTP; waiting for board confirmation...");
     emit ptpStateChanged();
     // Emergency STOP has one reserved slot in the existing serial owner and
@@ -1475,6 +1477,7 @@ void DeviceController::advancePtpStartup(const QString& line) {
                line.contains(QStringLiteral("PTP start accepted"), Qt::CaseInsensitive)) {
         ptpStartStage_ = PtpStartStage::awaiting_runtime;
         ptpRuntimeRoleSeen_ = false;
+    ptpRuntimeRunningSeen_ = false;
         ptpStatus_ = QStringLiteral("Verifying live PTP role and runtime...");
         emit ptpStateChanged();
         if (!sendPtpShow()) {
@@ -1483,6 +1486,10 @@ void DeviceController::advancePtpStartup(const QString& line) {
         }
         ptpStartTimer_.start(5000);
     } else if (ptpStartStage_ == PtpStartStage::awaiting_runtime) {
+        // PTP SHOW may deliver RUNNING before periodic PTP2 role telemetry.
+        // Collect both independent facts in any order, under the same bounded
+        // five-second deadline. Missing evidence is NOT an immediate failure
+        // and NEVER an automatic success. Wrong role remains fail-closed.
         const auto roleEvidence = kPtpMeasuredStateExpression.match(line);
         if (roleEvidence.hasMatch()) {
             if (roleEvidence.captured(1).toUpper() != pendingPtpRole_) {
@@ -1490,14 +1497,18 @@ void DeviceController::advancePtpStartup(const QString& line) {
                 return;
             }
             ptpRuntimeRoleSeen_ = true;
-            return;
         }
         const auto readback = kPtpStatusExpression.match(line);
-        if (!readback.hasMatch()) return;
-        if (!ptpRuntimeRoleSeen_ || !ptpRunning_ || ptpRole_ != pendingPtpRole_) {
-            failPtpStartup(QStringLiteral("PTP requires matching PTP2 role and RUNNING readback."), true);
-            return;
+        if (readback.hasMatch()) {
+            if (readback.captured(1).compare(QStringLiteral("RUNNING"), Qt::CaseInsensitive) == 0)
+                ptpRuntimeRunningSeen_ = true;
+            else {
+                failPtpStartup(QStringLiteral("PTP START acknowledged but board readback is STOPPED."), true);
+                return;
+            }
         }
+        if (!ptpRuntimeRoleSeen_ || !ptpRuntimeRunningSeen_ ||
+            !ptpRunning_ || ptpRole_ != pendingPtpRole_) return;
         resetPtpStartup();
         ptpStatus_ = QStringLiteral("PTP runtime active; external timing still unqualified");
         emit ptpStateChanged();
