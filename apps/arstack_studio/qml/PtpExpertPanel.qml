@@ -365,7 +365,7 @@ SurfacePanel {
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: "Board-internal reasons, not an independently certified PTP/IED lock."
+                        text: "Last 16 board LOCK transitions are retained in RAM; no per-frame logging. Internal evidence only—not an independently verified PTP/IED lock."
                         color: panel.theme.muted
                         font.family: panel.uiFont
                         font.pixelSize: 9
