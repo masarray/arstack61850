@@ -292,6 +292,10 @@ extern "C" void ar_ptp_lab_start(const esp_eth_handle_t eth_handle) {
 }
 
 extern "C" void ar_ptp_lab_stop(void) {
+    // A PTP stop must revoke both live SV timing claims BEFORE asynchronous
+    // task teardown can complete, including external-GM receiver claims.
+    ar::esp32p4::smv::smp_synch_set_source_local_qualified(false);
+    ar::esp32p4::smv::smp_synch_set_receiver_timeline_qualified(false);
     // Publish the cancellation immediately. If START/config owns the
     // slot, that owner drains STOP at the atomic release boundary.
     if (ar::esp32p4::smv::g_role_control.request_stop_and_try_acquire()) {
@@ -369,7 +373,11 @@ extern "C" bool ar_ptp_lab_get_timing_authority(
               authority->selected_source_clock_identity);
     authority->selected_source_port_number = lease.source_port;
     authority->globally_traceable = lease.globally_traceable;
-    authority->sv_phase_qualified = lease.sv_phase_qualified;
+    authority->sv_phase_qualified =
+        (lease.role == ar::iec61850::time_sync::PtpAuthorityRole::source &&
+         ar::esp32p4::smv::smp_synch_source_local_qualified()) ||
+        (lease.role == ar::iec61850::time_sync::PtpAuthorityRole::receiver &&
+         ar::esp32p4::smv::smp_synch_receiver_timeline_qualified());
     return true;
 }
 
