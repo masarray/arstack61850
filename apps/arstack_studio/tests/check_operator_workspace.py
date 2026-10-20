@@ -496,6 +496,13 @@ def main() -> None:
             "Timing Copy diagnostics must use imported GUI singleton, verify native clipboard, "
             "and offer full selectable manual fallback")
 
+    ptp_facade = (ROOT / "embedded/esp32p4_smv_injector/main/ptp_mode_facade.cpp").read_text(encoding="utf-8")
+    require("const bool source_clock_qualified = " in ptp_facade
+            and "status.is_running = ok && ar_ptp_source_runtime_active();" in ptp_facade
+            and "status.timing_authority_clock_usable = source_clock_qualified;" in ptp_facade,
+            "PTP SOURCE physical RUNNING must survive unqualified clock freshness; "
+            "canonical timing authority must remain independently fail-closed")
+
     print("Studio operator workspace contract: PASS")
 
 
