@@ -342,11 +342,15 @@ void print_sv_sync_diagnostics() noexcept {
     }
     for (std::size_t i = 0U; i < s.recent_count; ++i) {
         const auto& e = s.recent[i];
-        ESP_LOGI(kTag, "SVSYNC EVENT seq=%lu uptime_ms=%lu state=%s reason=%s",
+        ESP_LOGI(kTag,
+                 "SVSYNC EVENT seq=%lu uptime_ms=%lu state=%s reason=%s "
+                 "event_phase_us=%ld event_MACpairs=%lu",
                  static_cast<unsigned long>(e.sequence),
                  static_cast<unsigned long>(e.monotonic_ms),
                  e.acquired ? "ACQUIRED" : "REVOKED",
-                 smp_synch_diag_reason_name(e.reason));
+                 smp_synch_diag_reason_name(e.reason),
+                 static_cast<long>(e.phase_error_us),
+                 static_cast<unsigned long>(e.mac_pairs));
     }
     ESP_LOGI(kTag, "SVSYNC END events=%lu", static_cast<unsigned long>(s.events));
 }
