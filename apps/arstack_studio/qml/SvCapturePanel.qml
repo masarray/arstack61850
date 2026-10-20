@@ -223,7 +223,10 @@ Rectangle {
                 }
                 Label {
                     Layout.columnSpan: 4
-                    text: "Wire capture saved · Physical synchronization is not yet verified"
+                    text: Number(capture.summary.sync_losses) > 0
+                        ? "SYNC UNSTABLE · " + String(capture.summary.sync_losses) +
+                          " loss event(s). Do not release; review phase/MAC evidence."
+                        : "Wire capture saved · Physical synchronization is not yet verified"
                     color: panel.theme.textSoft
                     font.family: panel.uiFont
                     font.pixelSize: 9
