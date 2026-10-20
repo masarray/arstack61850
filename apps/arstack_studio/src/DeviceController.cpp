@@ -814,6 +814,7 @@ bool DeviceController::startWithScenario(const QVariantMap& scenario) {
     scenarioProfileGeneration_ = profileGeneration_;
     if (!sendCommandBatch(commands, false, true)) { resetScenarioStart(); return false; }
     scenarioTimer_.start();
+    emit scenarioStateChanged();
     signalFrequencyHz_ = hz;
     return true;
 }
@@ -1693,7 +1694,10 @@ void DeviceController::resetScenarioStart() noexcept {
     scenarioSignalGeneration_ = 0;
     scenarioBoot_.clear();
     scenarioProfileGeneration_.clear();
-    if (wasPending) emit scenarioApplicationFinished();
+    if (wasPending) {
+        emit scenarioStateChanged();
+        emit scenarioApplicationFinished();
+    }
 }
 
 void DeviceController::failScenarioStart(const QString& message) {
