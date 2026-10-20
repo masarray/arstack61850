@@ -226,7 +226,7 @@ jobs:
           $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $stage 'firmware'
           $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $stage 'tools\espflash.exe'
           $env:ESPFLASH_SKIP_UPDATE_CHECK = 'true'
-          foreach ($check in @('--check-reference-template', '--check-firmware-contract', '--check-p0-policy', '--check-app-lifecycle')) {
+          foreach ($check in @('--check-reference-template', '--check-firmware-contract', '--check-p0-policy', '--check-clipboard', '--check-app-lifecycle')) {
             $probe = Start-Process -FilePath $exe -ArgumentList $check -Wait -PassThru
             Write-Host "PACKAGED_PREVIEW_CHECK=$check EXIT=$($probe.ExitCode)"
             if ($probe.ExitCode -ne 0) {
@@ -274,7 +274,7 @@ jobs:
           $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $installDir 'firmware'
           $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $installDir 'tools\espflash.exe'
           $env:ESPFLASH_SKIP_UPDATE_CHECK = 'true'
-          foreach ($check in @('--check-firmware-contract', '--check-p0-policy', '--check-app-lifecycle')) {
+          foreach ($check in @('--check-firmware-contract', '--check-p0-policy', '--check-clipboard', '--check-app-lifecycle')) {
             $probe = Start-Process -FilePath $exe -ArgumentList $check -Wait -PassThru
             if ($probe.ExitCode -ne 0) { throw "Installed preview failed $check code $($probe.ExitCode)" }
           }
