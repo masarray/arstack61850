@@ -26,7 +26,7 @@ Rectangle {
         RowLayout {
             Layout.fillWidth: true
             Label {
-                text: "SV WIRE CAPTURE"
+                text: "SV + PTP WIRE CAPTURE"
                 color: panel.theme.text
                 font.family: panel.uiFont
                 font.pixelSize: 12
@@ -43,7 +43,7 @@ Rectangle {
         }
         Label {
             Layout.fillWidth: true
-            text: "Capture genuine IEC 61850 SV Ethernet frames. No injector commands are sent. Requires Wireshark dumpcap + Npcap and a TAP/SPAN receiving the injector traffic."
+            text: "Capture independent IEC 61850 SV and PTP Ethernet traffic in one timeline. No injector commands are sent. Requires Wireshark dumpcap + Npcap and a TAP/SPAN receiving the traffic."
             wrapMode: Text.WordWrap
             color: panel.theme.textSoft
             font.family: panel.uiFont
@@ -106,7 +106,7 @@ Rectangle {
                 theme: panel.theme
                 uiFont: panel.uiFont
                 text: capture.capturing ? "Capturing…" :
-                      capture.processing ? "Exporting…" : "Capture SV + CSV"
+                      capture.processing ? "Exporting…" : "Capture SV + PTP"
                 tone: "accent"
                 enabled: !capture.capturing && !capture.processing && adapter.currentIndex >= 0
                 onClicked: {
@@ -164,7 +164,7 @@ Rectangle {
         }
         Label {
             Layout.fillWidth: true
-            text: "Exports: filtered .pcap + 8-channel samples.csv + seconds.csv + report.json. CSV is 1:20 sampled only for 3600 s; the PCAP always retains all packets. A capture is not a physical PASS."
+            text: "Exports: SV+PTP .pcap, 4I+4V samples.csv, seconds.csv, concise events.csv and report.json. For 3600 s the sample CSV is 1:20; raw PCAP preserves every packet. PTP traffic alone never proves clock lock or physical PASS."
             wrapMode: Text.WordWrap
             color: panel.theme.muted
             font.family: panel.uiFont
