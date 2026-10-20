@@ -484,10 +484,10 @@ SurfacePanel {
                     NumericField { id: domainField; theme: panel.theme; monoFont: panel.uiFont; text: panel.device.ptpDomain === "-" ? "0" : panel.device.ptpDomain; validator: IntValidator { bottom: 0; top: 255 } }
                     Label { text: "transportSpecific"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: transportField; theme: panel.theme; monoFont: panel.uiFont; text: panel.device.ptpTransportSpecific === "-" ? "0" : String(Number(panel.device.ptpTransportSpecific)); validator: IntValidator { bottom: 0; top: 15 } }
-                    Label { text: "Announce interval (ms)"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
-                    NumericField { id: announceField; enabled: modeCombo.currentIndex !== 0; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 100; top: 10000 } }
-                    Label { text: "Sync interval (ms)"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
-                    NumericField { id: syncField; enabled: modeCombo.currentIndex !== 0; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 20; top: 5000 } }
+                    Label { text: "Announce interval (ms)"; visible: modeCombo.currentIndex !== 0; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
+                    NumericField { id: announceField; visible: modeCombo.currentIndex !== 0; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 100; top: 10000 } }
+                    Label { text: "Sync interval (ms)"; visible: modeCombo.currentIndex !== 0; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
+                    NumericField { id: syncField; visible: modeCombo.currentIndex !== 0; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 20; top: 5000 } }
                     StudioDarkCheckBox { id: vlanCheck; theme: panel.theme; uiFont: panel.uiFont; text: "VLAN" }
                     NumericField { id: vlanField; enabled: vlanCheck.checked; theme: panel.theme; monoFont: panel.uiFont; text: "100"; validator: IntValidator { bottom: 1; top: 4094 } }
                     Label { text: "VLAN PCP"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
