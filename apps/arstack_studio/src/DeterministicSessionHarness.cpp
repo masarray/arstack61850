@@ -52,6 +52,10 @@ public:
             {"PTP source rejection survives verified safety STOP", ptpSourceReasonSurvivesSafetyStop()},
             {"PTP rejected config never starts", ptpGuidedRejectedConfigStops()},
             {"PTP STOP cancels pending start after verified readback", ptpGuidedStopCancelsStart()},
+            {"PTP stale board role rejection triggers one verified recovery", ptpStaleRuntimeOneRecovery()},
+            {"PTP stale runtime recovery cannot loop on second rejection", ptpStaleRuntimeNoRetryLoop()},
+            {"PTP runtime recovery requires STOPPED evidence", ptpStaleRuntimeStopUnverified()},
+            {"PTP user STOP cancels automatic recovery intent", ptpStaleRuntimeStopCancelsRecovery()},
             {"legacy bare SV START refuses stale eight-channel state", legacyBareStartFailsClosed()},
             {"SV commit ACK/readback START chain is generation bound", svTransactionAckChain()},
             {"SV stale ACK and mismatched firmware readback fail closed", svTransactionNegativeAcks()},
@@ -818,6 +822,91 @@ private:
     static QString ptpStoppedStatus() {
         return QStringLiteral(
             "PTP status=STOPPED Announce=0 Sync=0 FollowUp=0 PdelayFrames=0 TXfail=0");
+    }
+
+    static bool ptpStaleRuntimeOneRecovery() {
+        Fixture f;
+        if (!setupGuidedPtp(f, QStringLiteral("SOURCE"))) return false;
+        auto& d = f.device;
+        // Board was still transmitting, but desktop had cached OFF.
+        d.processLine(QStringLiteral(
+            "E (246315) ar_smv_profile: PTPROLE rejected: stop PTP before changing operating role"));
+        if (!d.ptpStarting() || !d.ptpRoleRecoveryAttempted_ ||
+            !d.ptpRestartAfterStop_ ||
+            d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_ack)
+            return false;
+        // Unrelated role ACK and pre-STOP telemetry must never advance.
+        d.processLine(QStringLiteral("PTPROLE accepted"));
+        d.processLine(QStringLiteral(
+            "PTP status=RUNNING Announce=61 Sync=61 FollowUp=61 PdelayFrames=0 TXfail=1"));
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_ack)
+            return false;
+        d.processLine(QStringLiteral("PTP stop requested"));
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_readback)
+            return false;
+        d.processLine(ptpStoppedStatus());
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_role_ack ||
+            d.ptpRestartAfterStop_ || !d.ptpRoleRecoveryAttempted_)
+            return false;
+        d.processLine(QStringLiteral("PTPROLE accepted"));
+        d.processLine(QStringLiteral("PTPROLE role=SOURCE value=0 running=0"));
+        d.processLine(QStringLiteral("PTP configuration accepted"));
+        d.processLine(QStringLiteral("PTP start accepted"));
+        d.processLine(ptpRoleEvidence(QStringLiteral("SOURCE")));
+        d.processLine(QStringLiteral(
+            "PTP status=RUNNING Announce=1 Sync=1 FollowUp=1 PdelayFrames=0 TXfail=0"));
+        return !d.ptpStarting() && d.ptpRunning_ &&
+            d.ptpRole_ == QStringLiteral("SOURCE") &&
+            !d.ptpRoleRecoveryAttempted_;
+    }
+
+    static bool ptpStaleRuntimeNoRetryLoop() {
+        Fixture f;
+        if (!setupGuidedPtp(f, QStringLiteral("SOURCE"))) return false;
+        auto& d = f.device;
+        const QString stale = QStringLiteral(
+            "PTPROLE rejected: stop PTP before changing operating role");
+        d.processLine(stale);
+        d.processLine(QStringLiteral("PTP stop requested"));
+        d.processLine(ptpStoppedStatus());
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_role_ack)
+            return false;
+        d.processLine(stale);
+        return !d.ptpStarting() && !d.ptpRestartAfterStop_ &&
+            d.ptpLastStartFailure_.contains(stale);
+    }
+
+    static bool ptpStaleRuntimeStopUnverified() {
+        Fixture f;
+        if (!setupGuidedPtp(f, QStringLiteral("SOURCE"))) return false;
+        auto& d = f.device;
+        d.processLine(QStringLiteral(
+            "PTPROLE rejected: stop PTP before changing operating role"));
+        d.processLine(QStringLiteral("PTP stop requested"));
+        // Timeout is deterministic; no fake STOPPED readback accepted.
+        if (!QMetaObject::invokeMethod(
+                &d.ptpStartTimer_, "timeout", Qt::DirectConnection)) return false;
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::stop_unconfirmed ||
+            !d.ptpStarting() || !d.ptpRestartAfterStop_ ||
+            f.session.requestStartPtpConfigured(QStringLiteral("SOURCE"), ptpValidProfile()))
+            return false;
+        return d.ptpStatus_.contains(QStringLiteral("unverified"));
+    }
+
+    static bool ptpStaleRuntimeStopCancelsRecovery() {
+        Fixture f;
+        if (!setupGuidedPtp(f, QStringLiteral("SOURCE"))) return false;
+        auto& d = f.device;
+        d.processLine(QStringLiteral(
+            "PTPROLE rejected: stop PTP before changing operating role"));
+        if (!d.ptpRestartAfterStop_) return false;
+        if (!f.session.requestStopPtp() || d.ptpRestartAfterStop_) return false;
+        d.processLine(QStringLiteral("PTP stop requested"));
+        d.processLine(ptpStoppedStatus());
+        d.processLine(QStringLiteral("PTPROLE accepted"));
+        return !d.ptpStarting() &&
+            d.ptpStartStage_ == DeviceController::PtpStartStage::idle &&
+            d.ptpStatus_.contains(QStringLiteral("confirmed by board"));
     }
 
     static bool ptpGuidedStopCancelsStart() {
