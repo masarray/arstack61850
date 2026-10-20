@@ -1528,12 +1528,37 @@ void telemetry_task(void*) {
     std::int64_t previous_tick_time_us = 0;
     bool rate_baseline_valid = false;
     TimingStats baseline_stats{};
+    std::uint32_t last_flight_events_reported = 0U;
 #if AR_SV_TX_EGRESS_SUPPORTED
     std::uint32_t previously_reported_egress = 0U;
 #endif
 
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(1000));
+        // No serial logging on the real-time publisher or phase ISR.
+        // Auto-surface each change in the flight recorder once per second,
+        // even if the operator forgets to request Inspect SV lock. The full
+        // event ring remains available on demand through Studio.
+        const auto flight = ar::esp32p4::smv::smp_synch_diag_snapshot();
+        if (flight.events != last_flight_events_reported) {
+            const auto changes = flight.events - last_flight_events_reported;
+            last_flight_events_reported = flight.events;
+            if (flight.recent_count > 0U) {
+                const auto& latest = flight.recent[flight.recent_count - 1U];
+                ESP_LOGW(kTag,
+                    "SVSYNC FLIGHT transitions=%lu latest_seq=%lu state=%s reason=%s "
+                    "uptime_ms=%lu phase_us=%ld uncertainty_us=%lu MACpairs=%lu clean=%lu",
+                    static_cast<unsigned long>(changes),
+                    static_cast<unsigned long>(latest.sequence),
+                    latest.acquired ? "ACQUIRED" : "REVOKED",
+                    ar::esp32p4::smv::smp_synch_diag_reason_name(latest.reason),
+                    static_cast<unsigned long>(latest.monotonic_ms),
+                    static_cast<long>(flight.phase_error_us),
+                    static_cast<unsigned long>(flight.uncertainty_us),
+                    static_cast<unsigned long>(flight.mac_pairs),
+                    static_cast<unsigned long>(flight.clean_epochs));
+            }
+        }
         TimingStats snapshot{};
         portENTER_CRITICAL(&g_stats_mux);
         snapshot = g_interval_stats;
