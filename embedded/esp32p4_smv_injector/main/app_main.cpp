@@ -1408,7 +1408,9 @@ void sv_ptp_phase_observer_task(void* argument) {
                         decision.epoch_second_continuous,
                     notified_session, current_faults, lease.generation,
                     observation.last_sv_epoch_generation);
-                if (!stable_local && smp_synch_source_local_qualified()) {
+                if (!stable_local &&
+                    (smp_synch_source_local_qualified() ||
+                     smp_synch_receiver_timeline_qualified())) {
                     ESP_LOGW(kTag,
                              "SV/PTP LOCAL REVOKED reason=phase_or_MAC_evidence "
                              "phase=%ldus uncertainty=%luus tracking=%u "
@@ -1437,7 +1439,8 @@ void sv_ptp_phase_observer_task(void* argument) {
             }
             committed = true;
         } else if (session_matches) {
-            if (smp_synch_source_local_qualified()) {
+            if (smp_synch_source_local_qualified() ||
+                smp_synch_receiver_timeline_qualified()) {
                 ESP_LOGW(kTag,
                          "SV/PTP LOCAL REVOKED reason=phase_handoff_or_source_race "
                          "accepted=%u session=%lu fault_gen=%lu source_gen=%lu",
@@ -1471,7 +1474,8 @@ void sv_ptp_phase_observer_task(void* argument) {
             (accepted_epochs % 5U) == 0U;
         const bool preflight_telemetry = !live_tx_running() &&
             (accepted_epochs % 2U) == 0U;
-        if (lease.role == PtpAuthorityRole::source &&
+        if ((lease.role == PtpAuthorityRole::source ||
+             lease.role == PtpAuthorityRole::receiver) &&
             (early_observation || still_acquiring ||
              preflight_telemetry || auto_local != previous_auto_local ||
              (accepted_epochs % 60U) == 0U)) {
