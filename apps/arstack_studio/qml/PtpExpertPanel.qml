@@ -27,7 +27,7 @@ SurfacePanel {
         return 0
     }
 
-    function ptpProfile() {
+    function ptpProfile(role) {
         return {
             domain: Number(domainField.text),
             transportSpecific: Number(transportField.text),
@@ -36,21 +36,26 @@ SurfacePanel {
             vlanPriority: Number(pcpField.text),
             announceIntervalMs: Number(announceField.text),
             syncIntervalMs: Number(syncField.text),
-            respondToPeerDelay: pdelayCheck.checked
+            // IEC/IEEE 61850-9-3 SOURCE always requires Pdelay capability.
+            // An optional bench-only mode must never be silently substituted.
+            respondToPeerDelay: role === "SOURCE" ? true : pdelayCheck.checked
         }
     }
 
     function applyProfile() {
-        return panel.session && panel.session.requestConfigurePtp(panel.ptpProfile())
+        return panel.session && panel.session.requestConfigurePtp(
+            panel.ptpProfile(panel.activeRole))
     }
 
     function startRole(role) {
         if (!panel.session || !panel.device.ptpAvailable || !panel.device.deviceVerified
                 || panel.device.ptpRunning || panel.startPending || panel.session.updatingFirmware)
             return false
-        const accepted = panel.session.requestStartPtpConfigured(role, panel.ptpProfile())
+        const accepted = panel.session.requestStartPtpConfigured(role, panel.ptpProfile(role))
         if (!accepted && panel.controller)
-            panel.controller.showMessage("PTP could not start: " + panel.device.ptpStatus, true)
+            panel.controller.showMessage("PTP could not start: " +
+                (panel.device.ptpLastStartFailure.length > 0
+                    ? panel.device.ptpLastStartFailure : panel.device.ptpStatus), true)
         return Boolean(accepted)
     }
 
@@ -125,17 +130,27 @@ SurfacePanel {
                     theme: panel.theme
                     uiFont: panel.uiFont
                     text: "PTP"
-                    checked: Boolean(panel.device.ptpRunning)
+                    // Command intent is amber while START is awaiting actual
+                    // board ACK/readback; GREEN is used only after RUNNING.
+                    checked: Boolean(panel.device.ptpRunning ||
+                        (panel.startPending && !panel.stopPending))
+                    busy: Boolean(panel.startPending)
                     enabled: panel.session && panel.device.ptpAvailable
                         && !panel.startPending && !panel.session.updatingFirmware
                     ToolTip.visible: hovered
-                    ToolTip.text: "PTP on/off · board verified"
+                    ToolTip.text: panel.startPending ? "Waiting for verified PTP startup"
+                        : "PTP on/off · verified by board"
                     onClicked: {
                         const wantsRunning = checked
-                        checked = Qt.binding(function() { return Boolean(panel.device.ptpRunning) })
                         if (wantsRunning) panel.startSelectedMode()
                         else if (panel.session && !panel.session.requestStopPtp() && panel.controller)
                             panel.controller.showMessage("PTP stop was not accepted. Copy diagnostics.", true)
+                        // Switch check state remains owned by board telemetry
+                        // + pending transaction, not a momentary QML click.
+                        checked = Qt.binding(function() {
+                            return Boolean(panel.device.ptpRunning ||
+                                (panel.startPending && !panel.stopPending))
+                        })
                     }
                 }
                 StateBadge {
@@ -474,18 +489,25 @@ SurfacePanel {
                     NumericField { id: vlanField; enabled: vlanCheck.checked; theme: panel.theme; monoFont: panel.uiFont; text: "100"; validator: IntValidator { bottom: 1; top: 4094 } }
                     Label { text: "VLAN PCP"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: pcpField; enabled: vlanCheck.checked; theme: panel.theme; monoFont: panel.uiFont; text: "4"; validator: IntValidator { bottom: 0; top: 7 } }
+                    Label {
+                        visible: modeCombo.currentIndex === 0
+                        Layout.columnSpan: 4
+                        text: "SOURCE profile: 1 s Announce · 1 s Sync · hardware Pdelay REQUIRED"
+                        color: panel.theme.textSoft
+                        font.family: panel.uiFont
+                        font.pixelSize: 10
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
                     StudioDarkCheckBox {
                         id: pdelayCheck
+                        visible: modeCombo.currentIndex !== 0
                         theme: panel.theme
                         uiFont: panel.uiFont
-                        text: "Require hardware peer-delay responses"
-                        // SOURCE can issue Announce/Sync without RX Pdelay support.
-                        // Do not silently force optional hardware capability from
-                        // a hidden Advanced control during ordinary SOURCE START.
-                        // Relay profiles requiring Pdelay must opt in explicitly.
-                        checked: false
+                        text: "Peer-delay exchange"
+                        checked: true
                         ToolTip.visible: hovered
-                        ToolTip.text: "Requires ESP32-P4 RX hardware timestamps. If unavailable, PTP START must fail safely."
+                        ToolTip.text: "SOURCE always requires hardware Pdelay; other roles are configurable."
                     }
                     CalmButton {
                         theme: panel.theme
