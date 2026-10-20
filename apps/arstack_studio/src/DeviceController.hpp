@@ -435,6 +435,7 @@ private:
     QString pendingPtpRole_;
     QString pendingPtpConfig_;
     bool ptpRuntimeRoleSeen_{false};
+    bool ptpRuntimeRunningSeen_{false};
     bool ioWorkerReady_{false};
     bool ioWorkerAffinityValid_{false};
     bool shuttingDown_{false};
