@@ -62,9 +62,9 @@ def main() -> None:
             and "local_acquisition.observe(" in firmware_source
             and "local_acquisition.reset();" in firmware_source
             and "clean=%lu/%lu" in firmware_source
-            and "kRequiredCleanEpochs = 3U" in sv_gate
+            and "kRequiredCleanEpochs = 10U" in sv_gate
             and "check_no_intermitttent_local_at_start()" in sv_tests,
-            "LOCAL REF startup must require three clean real epochs and immediately revoke on faults")
+            "LOCAL REF startup must require ten clean real epochs and immediately revoke on faults")
     phase_header = (project_root / "include/ariec61850/time_sync/sv_ptp_phase_authority.hpp").read_text(encoding="utf-8")
     phase_tests = (project_root / "tests/test_sv_ptp_phase_authority.cpp").read_text(encoding="utf-8")
     require("g_preflight_phase_clock_active" in firmware_source
