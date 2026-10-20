@@ -432,7 +432,8 @@ void handle_ptp_command(char* save) noexcept {
         config.sync_interval_ms = values[6];
         config.respond_to_peer_delay = values[7] != 0U;
         if (!ar_ptp_lab_configure(&config)) {
-            ESP_LOGE(kTag, "PTP configuration rejected: stop PTP first or correct the profile");
+            ESP_LOGE(kTag, "PTP configuration rejected: reason=%s",
+                     ar_ptp_lab_last_config_error());
             return;
         }
         ESP_LOGI(kTag, "PTP configuration accepted");
