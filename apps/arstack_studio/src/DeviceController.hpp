@@ -51,6 +51,7 @@ class DeviceController : public QObject {
     Q_PROPERTY(QStringList capabilities READ capabilities NOTIFY deviceIdentityChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(bool running READ running NOTIFY runningChanged)
+    Q_PROPERTY(bool scenarioApplying READ scenarioApplying NOTIFY scenarioStateChanged)
     Q_PROPERTY(QString portName READ portName NOTIFY connectedChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(QString logText READ logText NOTIFY logTextChanged)
@@ -302,6 +303,7 @@ signals:
     void profileDeploymentProgress();
     void ptpStateChanged();
     void deviceMessage(const QString& message);
+    void scenarioStateChanged();
     void scenarioApplicationFinished();
     void portReleased(quint64 generation, const QString& portName);
 
