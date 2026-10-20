@@ -54,6 +54,7 @@ class DeviceController : public QObject {
     Q_PROPERTY(QString portName READ portName NOTIFY connectedChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(QString logText READ logText NOTIFY logTextChanged)
+    Q_PROPERTY(QString syncDiagnostics READ syncDiagnostics NOTIFY syncDiagnosticsChanged)
     Q_PROPERTY(QString fps READ fps NOTIFY telemetryChanged)
     Q_PROPERTY(QString missed READ missed NOTIFY telemetryChanged)
     Q_PROPERTY(QString txFailures READ txFailures NOTIFY telemetryChanged)
@@ -139,6 +140,7 @@ public:
     [[nodiscard]] QString portName() const;
     [[nodiscard]] QString lastError() const;
     [[nodiscard]] QString logText() const;
+    [[nodiscard]] QString syncDiagnostics() const { return syncDiagnostics_; }
     [[nodiscard]] QString fps() const;
     [[nodiscard]] QString missed() const;
     [[nodiscard]] QString txFailures() const;
@@ -259,6 +261,7 @@ public:
         return sendCommand(QStringLiteral("PROFILE PTPROLE %1").arg(role));
     }
 
+    bool sendPtpDiagnostics() { return sendCommand(QStringLiteral("PTP DIAG")); }
     bool sendSmpSynchShow() {
         return sendCommand(QStringLiteral("PROFILE SHOW"));
     }
@@ -287,6 +290,7 @@ signals:
     void runningChanged();
     void lastErrorChanged();
     void logTextChanged();
+    void syncDiagnosticsChanged();
     void telemetryChanged();
     void profileStateChanged();
     void profileDeploymentProgress();
@@ -389,6 +393,7 @@ private:
     DeviceIdentity identity_;
     QString lastError_;
     QString logText_;
+    QString syncDiagnostics_{QStringLiteral("Select Inspect SV lock to read on-board causes.")};
     QString fps_{QStringLiteral("—")};
     QString missed_{QStringLiteral("—")};
     QString txFailures_{QStringLiteral("—")};
