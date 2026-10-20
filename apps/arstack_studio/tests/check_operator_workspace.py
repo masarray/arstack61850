@@ -477,6 +477,21 @@ def main() -> None:
             'ptpRuntimeRunningSeen_' in device_control_cpp and
             'if (!ptpRuntimeRoleSeen_ || !ptpRuntimeRunningSeen_' in device_control_cpp,
             "PTP errors must originate on board and two-order runtime proofs must be joined")
+    ptp_source = source("PtpExpertPanel.qml")
+    ptp_device = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
+    clipboard_cpp = (STUDIO / "src/StudioClipboard.cpp").read_text(encoding="utf-8")
+    qt_workflow = (STUDIO.parent.parent / ".github/workflows/arstack-studio-qt.yml").read_text(encoding="utf-8")
+    require("ptpRestartAfterStop_" in ptp_device and
+            "beginPtpStopVerification(true)" in ptp_device and
+            "PTPROLE rejected: stop PTP before changing operating role" in ptp_device and
+            "manual STOP is required" in ptp_device,
+            "PTP stale board runtime must follow bounded STOP + readback + role recovery")
+    require("import ARStack.Studio 1.0" in ptp_source and
+            "StudioClipboard.copyText(evidence)" in ptp_source and
+            "diagnosticFallback.open()" in ptp_source and
+            "clipboard->text(QClipboard::Clipboard) == text" in clipboard_cpp and
+            "arstack_clipboard_harness" in qt_workflow,
+            "Time Sync must use registered clipboard and verify a native OS readback")
     print("Studio operator workspace contract: PASS")
 
 
