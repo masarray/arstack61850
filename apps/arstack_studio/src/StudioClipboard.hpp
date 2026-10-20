@@ -9,5 +9,7 @@ class StudioClipboard final : public QObject {
     Q_OBJECT
 public:
     using QObject::QObject;
-    Q_INVOKABLE void copyText(const QString& text) const;
+    // Return success only if the OS clipboard can read back the exact value.
+    // Never claim a successful diagnostic copy merely because setText returned.
+    Q_INVOKABLE bool copyText(const QString& text) const;
 };
