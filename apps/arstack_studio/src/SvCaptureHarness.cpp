@@ -98,7 +98,8 @@ public:
             const QByteArray wire = packet(counts[i], i == 2 ? 1 : 0);
             QByteArray header;
             le32(header, 1000);
-            le32(header, quint32(i) * 250);
+            // Recreate observed field PCAP startup timestamp stall.
+            le32(header, i == 0 ? 0U : i == 1 ? 42389U : 42639U);
             le32(header, quint32(wire.size()));
             le32(header, quint32(wire.size()));
             file.write(header);
@@ -143,6 +144,8 @@ public:
             parsed.value("ptp_l2_frames").toDouble() == 1 &&
             parsed.value("ptp_l2_message_counts").toObject().value("SYNC").toDouble() == 1 &&
             parsed.value("sync_transition_count").toDouble() == 1 &&
+            parsed.value("host_timestamp_gaps_over_1ms").toDouble() == 1 &&
+            parsed.value("max_host_timestamp_gap_us").toDouble() == 42389 &&
             parsed.value("malformed_frames").toDouble() == 0 &&
             parsed.value("wire_channel_measurements").toObject().contains("IA") &&
             std::abs(parsed.value("wire_channel_measurements").toObject()
@@ -162,6 +165,7 @@ public:
             csvRows.contains("ARSTACK_SV01") &&
             secondsRows.contains("utc_second,sv_frames,missing_smpcnt") &&
             eventRows.contains("SAMPLE_GAP") &&
+            eventRows.contains("HOST_CAPTURE_INTERVAL") &&
             eventRows.contains("SMPSYNCH_CHANGE") &&
             eventRows.contains("PTP_SYNC") &&
             eventRows.contains("sequence=4660") &&
