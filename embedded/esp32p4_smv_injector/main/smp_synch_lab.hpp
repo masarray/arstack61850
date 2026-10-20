@@ -4,8 +4,8 @@
 
 #include "ariec61850/time_sync/smp_synch_policy.hpp"
 #include <array>
+#include <cstddef>
 #include <cstdint>
-
 #include <optional>
 
 namespace ar::esp32p4::smv {
