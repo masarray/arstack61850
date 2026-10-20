@@ -1437,9 +1437,22 @@ bool DeviceController::startPtpConfigured(const QString& requestedRole,
 void DeviceController::advancePtpStartup(const QString& line) {
     if (!ptpStarting() || ptpStartStage_ == PtpStartStage::stop_unconfirmed) return;
     if (ptpStartStage_ == PtpStartStage::awaiting_preflight) {
+        // PTP SHOW provides measured PTP2 role before status. Only adopt an
+        // already-active transmitter if THIS preflight saw the expected role;
+        // historical UI role cannot authorize mutation or claim an exact role.
+        const auto roleProof = kPtpMeasuredStateExpression.match(line);
+        if (roleProof.hasMatch())
+            ptpRuntimeRoleSeen_ = roleProof.captured(1).toUpper() == pendingPtpRole_;
         const auto actual = kPtpStatusExpression.match(line);
         if (!actual.hasMatch()) return;
         if (actual.captured(1).compare(QStringLiteral("RUNNING"), Qt::CaseInsensitive) == 0) {
+            if (ptpRuntimeRoleSeen_) {
+                const QString existingRole = pendingPtpRole_;
+                resetPtpStartup();
+                ptpStatus_ = QStringLiteral("PTP %1 already active on board; external sync unqualified").arg(existingRole);
+                emit ptpStateChanged();
+                return; // No redundant role/config/start, no surprise STOP.
+            }
             ptpLastStartFailure_ = QStringLiteral(
                 "Board PTP is already RUNNING. Click Stop PTP, wait for verified STOPPED, then retry Start.");
             ptpStatus_ = ptpLastStartFailure_;
@@ -1497,6 +1510,19 @@ void DeviceController::advancePtpStartup(const QString& line) {
         line.contains(QStringLiteral("PTP start rejected"), Qt::CaseInsensitive) ||
         line.contains(QStringLiteral("PTP unavailable"), Qt::CaseInsensitive);
     if (rejected) {
+        if (line.contains(QStringLiteral("PTPROLE rejected: stop PTP before changing operating role"),
+                          Qt::CaseInsensitive)) {
+            // A physical role rejection is positive evidence the timing runtime
+            // is active. Do not reset it to OFF, and never auto-stop a source
+            // that the current Studio transaction has not proven it owns.
+            ptpLastStartFailure_ = QStringLiteral("Board PTP is still RUNNING: ") + line;
+            resetPtpStartup();
+            ptpRunning_ = true;
+            ptpStatus_ = QStringLiteral("PTP active on board; verify STOP before changing role");
+            emit ptpStateChanged();
+            setError(ptpLastStartFailure_);
+            return;
+        }
         const bool rollback = ptpStartStage_ == PtpStartStage::awaiting_start ||
                               ptpStartStage_ == PtpStartStage::awaiting_runtime;
         const QString step = ptpStartPhase();
