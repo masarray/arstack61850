@@ -44,6 +44,8 @@ public:
             {"stale generation release -> ignored", staleReleaseGenerationIsIgnored()},
             {"firmware probe before serial release -> blocked", firmwareProbeRequiresReleasedPort()},
             {"PTP staged START requires role/config/runtime ACKs", ptpGuidedStartNeedsAcks()},
+            {"PTP SOURCE invalid 9-3 profile rejects before serial", ptpSourceProfilePreflight()},
+
             {"PTP stale role readback cannot bypass ACK", ptpStaleRoleReadbackBlocked()},
             {"PTP runtime requires matching PTP2 role", ptpRuntimeRoleEvidenceRequired()},
             {"PTP RUNNING before PTP2 is bounded success", ptpRuntimeOutOfOrderProof()},
@@ -635,6 +637,36 @@ private:
         f.device.ptpAvailable_ = true;
         f.device.ioWorkerReady_ = true; // No actual COM opened by this harness.
         return f.session.requestStartPtpConfigured(role, ptpValidProfile());
+    }
+
+    static bool ptpSourceProfilePreflight() {
+        Fixture f;
+        if (!f.profileReady) return false;
+        seedVerified(f, identity(), QStringLiteral("COM7"), false);
+        f.device.ptpAvailable_ = true;
+        f.device.ioWorkerReady_ = true; // Test transport: no external COM.
+        auto& d = f.device;
+        auto invalid = ptpValidProfile();
+        invalid[QStringLiteral("respondToPeerDelay")] = false;
+        if (f.session.requestStartPtpConfigured(QStringLiteral("SOURCE"), invalid) ||
+            d.ptpStarting() || d.ptpRunning_ ||
+            !d.ptpLastStartFailure_.contains(QStringLiteral("hardware peer-delay")) ||
+            !d.ptpStatus_.startsWith(QStringLiteral("PTP profile rejected")))
+            return false;
+        invalid = ptpValidProfile();
+        invalid[QStringLiteral("syncIntervalMs")] = 250;
+        if (f.session.requestStartPtpConfigured(QStringLiteral("SOURCE"), invalid) ||
+            d.ptpStarting() || d.ptpRunning_) return false;
+        invalid = ptpValidProfile();
+        invalid[QStringLiteral("announceIntervalMs")] = 2000;
+        if (f.session.requestStartPtpConfigured(QStringLiteral("SOURCE"), invalid) ||
+            d.ptpStarting() || d.ptpRunning_) return false;
+        // A valid SOURCE profile must immediately permit a fresh attempt.
+        if (!f.session.requestStartPtpConfigured(QStringLiteral("SOURCE"),
+                                                  ptpValidProfile()) ||
+            d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_role_ack ||
+            !d.ptpLastStartFailure_.isEmpty()) return false;
+        return true;
     }
 
     static QString ptpRoleEvidence(const QString& role) {
