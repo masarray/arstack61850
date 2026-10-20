@@ -6,6 +6,7 @@
 #include <QProcess>
 #include <QStringList>
 #include <QVariantMap>
+#include <QVariantList>
 
 class SvCaptureController : public QObject {
     Q_OBJECT
@@ -31,6 +32,7 @@ public:
     Q_INVOKABLE void refreshInterfaces();
     Q_INVOKABLE bool startCapture(int index, int seconds, const QVariantMap& studioTelemetry);
     Q_INVOKABLE void abortCapture();
+    Q_INVOKABLE void sampleTelemetry(const QVariantMap& passiveSnapshot);
     Q_INVOKABLE void openOutputFolder();
 
 signals:
@@ -46,7 +48,8 @@ private:
     static QVariantMap decodePcap(const QString& pcapFile, const QString& csvFile,
                                  const QString& secondsFile, const QString& eventsFile, const QString& jsonFile,
                                  int requestedSeconds, const QString& adapter,
-                                 const QVariantMap& studioTelemetry);
+                                 const QVariantMap& studioTelemetry,
+                                 const QVariantList& studioTelemetrySeries);
     QProcess discovery_;
     QProcess capture_;
     QFutureWatcher<QVariantMap> decoder_;
@@ -63,6 +66,7 @@ private:
     QString activeJson_;
     QString activeAdapter_;
     QVariantMap activeStudioTelemetry_;
+    QVariantList activeStudioTelemetrySeries_;
     QString dumpcap_;
     int activeSecondsRequested_{0};
     bool abortRequested_{false};
