@@ -92,6 +92,25 @@ enum class PtpSourceStartReason : std::uint8_t {
 };
 std::atomic<PtpSourceStartReason> g_source_start_reason{
     PtpSourceStartReason::not_attempted};
+
+// Control-path only: compact last failure, not a second configuration state
+// machine. Every rejection is classified before its generic UI projection.
+enum class PtpConfigFailure : std::uint8_t {
+    none, active_runtime, source_power_profile, invalid_profile,
+    raced_runtime_activation
+};
+std::atomic<PtpConfigFailure> g_ptp_config_failure{PtpConfigFailure::none};
+[[nodiscard]] const char* ptp_config_failure_name(const PtpConfigFailure code) noexcept {
+    switch (code) {
+    case PtpConfigFailure::none: return "NONE";
+    case PtpConfigFailure::active_runtime: return "PTP_RUNTIME_ALREADY_ACTIVE";
+    case PtpConfigFailure::source_power_profile:
+        return "SOURCE_REQUIRES_1S_ANNOUNCE_1S_SYNC_AND_PDELAY";
+    case PtpConfigFailure::invalid_profile: return "INVALID_OR_UNSUPPORTED_PTP_PROFILE";
+    case PtpConfigFailure::raced_runtime_activation: return "PTP_RUNTIME_ACTIVATED_DURING_CONFIG";
+    }
+    return "UNKNOWN";
+}
 [[nodiscard]] const char* source_start_reason_name(
     const PtpSourceStartReason reason) noexcept {
     switch (reason) {
@@ -920,21 +939,39 @@ void stop_ptp_lab() noexcept {
 }
 
 [[nodiscard]] bool configure_ptp_lab(const ar_ptp_lab_config_t& config) {
-    if (g_ptp_started.load(std::memory_order_acquire)) return false;
+    if (g_ptp_started.load(std::memory_order_acquire)) {
+        g_ptp_config_failure.store(
+            PtpConfigFailure::active_runtime, std::memory_order_release);
+        return false;
+    }
 
     std::string error;
     if (!validate_runtime_config(config, error)) {
+        const bool invalid_source_cadence =
+            config.role == AR_PTP_ROLE_LAB_SOURCE &&
+            !inspect_ptp_power_profile_cadence(
+                config.announce_interval_ms, config.sync_interval_ms,
+                config.respond_to_peer_delay).compatible();
+        // Nonstandard experimental builds are not the public SOURCE
+        // admission profile. Other errors retain an independent reason.
+        g_ptp_config_failure.store(
+            invalid_source_cadence ? PtpConfigFailure::source_power_profile :
+                                     PtpConfigFailure::invalid_profile,
+            std::memory_order_release);
         ESP_LOGE(kTag, "PTP runtime configuration rejected: %s", error.c_str());
         return false;
     }
 
     portENTER_CRITICAL(&g_control_mux);
     if (g_ptp_started.load(std::memory_order_relaxed)) {
+        g_ptp_config_failure.store(
+            PtpConfigFailure::raced_runtime_activation, std::memory_order_release);
         portEXIT_CRITICAL(&g_control_mux);
         return false;
     }
     g_runtime_config_override = config;
     g_runtime_config_override_valid = true;
+    g_ptp_config_failure.store(PtpConfigFailure::none, std::memory_order_release);
     portEXIT_CRITICAL(&g_control_mux);
     return true;
 }
@@ -950,6 +987,10 @@ extern "C" void ar_ptp_lab_get_default_config(ar_ptp_lab_config_t* config) {
 extern "C" bool ar_ptp_lab_configure(const ar_ptp_lab_config_t* config) {
     if (config == nullptr) return false;
     return ar::esp32p4::smv::configure_ptp_lab(*config);
+}
+extern "C" const char* ar_ptp_lab_last_config_error(void) {
+    return ar::esp32p4::smv::ptp_config_failure_name(
+        ar::esp32p4::smv::g_ptp_config_failure.load(std::memory_order_acquire));
 }
 
 extern "C" bool ar_ptp_lab_get_config(ar_ptp_lab_config_t* config) {
