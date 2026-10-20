@@ -46,6 +46,7 @@ public:
             {"PTP staged START requires role/config/runtime ACKs", ptpGuidedStartNeedsAcks()},
             {"PTP stale role readback cannot bypass ACK", ptpStaleRoleReadbackBlocked()},
             {"PTP runtime requires matching PTP2 role", ptpRuntimeRoleEvidenceRequired()},
+            {"PTP RUNNING before PTP2 is bounded success", ptpRuntimeOutOfOrderProof()},
             {"PTP rejected config never starts", ptpGuidedRejectedConfigStops()},
             {"PTP STOP cancels pending start after verified readback", ptpGuidedStopCancelsStart()},
             {"legacy bare SV START refuses stale eight-channel state", legacyBareStartFailsClosed()},
@@ -666,12 +667,18 @@ private:
         if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_runtime) return false;
         d.processLine(QStringLiteral(
             "PTP status=RUNNING Announce=1 Sync=1 FollowUp=1 PdelayFrames=0 TXfail=0"));
-        // Missing PTP2 evidence after START must trigger a verified rollback,
-        // not silently clear state while the board might still transmit.
-        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_ack ||
-            !d.ptpStarting() ||
+        // The first RUNNING readback is not enough without PTP2; it is not
+        // an error either. A bounded deadline must trigger safety STOP if
+        // the additional role evidence never arrives.
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_runtime ||
+            !d.ptpStarting() || !d.ptpRuntimeRunningSeen_ ||
+            d.ptpRuntimeRoleSeen_ ||
             f.session.requestStartPtpConfigured(QStringLiteral("SOURCE"), ptpValidProfile()) ||
             d.startPtp() || d.setPtpRole(QStringLiteral("MONITOR"))) return false;
+        if (!QMetaObject::invokeMethod(
+                &d.ptpStartTimer_, "timeout", Qt::DirectConnection)) return false;
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_ack ||
+            !d.ptpStarting()) return false;
         d.processLine(QStringLiteral("PTP stop requested"));
         d.processLine(ptpStoppedStatus());
         if (d.ptpStarting() || d.ptpRunning_) return false;
@@ -688,6 +695,26 @@ private:
         d.processLine(ptpStoppedStatus());
         return !d.ptpStarting() && !d.ptpRunning_ &&
             d.ptpStatus_.contains(QStringLiteral("confirmed by board"));
+    }
+
+    static bool ptpRuntimeOutOfOrderProof() {
+        Fixture f;
+        if (!setupGuidedPtp(f, QStringLiteral("SOURCE"))) return false;
+        auto& d = f.device;
+        d.processLine(QStringLiteral("PTPROLE accepted"));
+        d.processLine(QStringLiteral("PTPROLE role=SOURCE value=0 running=0"));
+        d.processLine(QStringLiteral("PTP configuration accepted"));
+        d.processLine(QStringLiteral("PTP start accepted"));
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_runtime)
+            return false;
+        d.processLine(QStringLiteral(
+            "PTP status=RUNNING Announce=1 Sync=1 FollowUp=1 PdelayFrames=0 TXfail=0"));
+        // Real firmware sends PTP status before the periodic PTP2 line.
+        if (!d.ptpStarting() || !d.ptpRuntimeRunningSeen_ ||
+            d.ptpRuntimeRoleSeen_) return false;
+        d.processLine(ptpRoleEvidence(QStringLiteral("SOURCE")));
+        return !d.ptpStarting() && d.ptpRunning_ &&
+            d.ptpStatus_.contains(QStringLiteral("external timing still unqualified"));
     }
 
     static bool ptpGuidedStartNeedsAcks() {
