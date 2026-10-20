@@ -425,6 +425,24 @@ def main() -> None:
             "QDesktopServices::openUrl(" in capture_cpp and
             "QString findDumpcap()" in capture_cpp,
             "Studio capture results must derive from production wire decoder with click-only setup")
+    # Physical bench findings: flash succeeded but USB identity returned
+    # later; an unverified Start was hijacked into an offline preview.
+    smart = (STUDIO / "src/SmartSessionController.cpp").read_text(encoding="utf-8")
+    smart_h = (STUDIO / "src/SmartSessionController.hpp").read_text(encoding="utf-8")
+    workflow = source("WorkflowBar.qml")
+    require("postFlashVerificationPending_" in smart_h and
+            "if (postFlashVerificationPending_ && !device_->deviceVerified())" in smart and
+            "postFlashVerificationPending_ = true;" in smart and
+            "Firmware written; awaiting board identity" in smart and
+            "if (firmwareIsCurrent())" in smart and
+            "Exact bundled firmware build verified after delayed USB reconnection" in smart,
+            "successful flash must recover delayed USB identity WITHOUT reflash or a fake VERIFIED state")
+    require('"Connecting"' in ribbon and
+            '"Preview"' in ribbon and
+            'bar.session.state === "WAITING FOR DEVICE" && !bar.device.discovering' in ribbon and
+            "bar.session.firmwareVerificationPending" in ribbon and
+            "smartSession.firmwareVerificationPending" in workflow,
+            "Start must not be silently converted to offline preview during real-board connection")
     print("Studio operator workspace contract: PASS")
 
 
