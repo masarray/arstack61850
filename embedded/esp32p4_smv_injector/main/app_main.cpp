@@ -123,6 +123,15 @@ constexpr std::uint32_t kStatsMergeEvery = 400U;
 constexpr std::uint32_t kTransportFailureStopThreshold = 400U; // 100 ms at 4 kHz
 constexpr std::uint32_t kTimerResolutionHz = 1000000U;
 
+// A single fail-closed operation for both AUTO roles. In particular, keep
+// receiver invalidation INSIDE the same conditional as SOURCE invalidation:
+// clearing it unconditionally after a valid sparse MAC TX stamp would make
+// RECEIVER qualification impossible at every evidence epoch.
+inline void revoke_sv_auto_claims() noexcept {
+    smp_synch_set_source_local_qualified(false);
+    smp_synch_set_receiver_timeline_qualified(false);
+}
+
 EventGroupHandle_t g_link_events = nullptr;
 portMUX_TYPE g_stats_mux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -702,8 +711,7 @@ void stop_sample_clock(gptimer_handle_t& timer) noexcept {
 #endif
     // Release the wire claim before teardown; old MAC evidence never
     // survives STOP/START, even when the same SOURCE later restarts.
-    smp_synch_set_source_local_qualified(false);
-            smp_synch_set_receiver_timeline_qualified(false);
+    revoke_sv_auto_claims();
     if (timer == nullptr) return;
 #if AR_SV_PTP_PHASE_SUPPORTED
     // Serialize teardown with the non-ISR phase observer, so a GPTimer
@@ -974,8 +982,7 @@ void publisher_task(void* argument) {
                 1U, std::memory_order_release);
             g_sample_clock_context.phase_authority_valid.store(
                 false, std::memory_order_release);
-            smp_synch_set_source_local_qualified(false);
-            smp_synch_set_receiver_timeline_qualified(false);
+            revoke_sv_auto_claims();
 #endif
             missed_slots = static_cast<std::uint64_t>(pending_ticks - 1U);
             canonical_sample_count = static_cast<std::uint16_t>(
@@ -1002,8 +1009,7 @@ void publisher_task(void* argument) {
                 1U, std::memory_order_release);
             g_sample_clock_context.phase_authority_valid.store(
                 false, std::memory_order_release);
-            smp_synch_set_source_local_qualified(false);
-            smp_synch_set_receiver_timeline_qualified(false);
+            revoke_sv_auto_claims();
 #endif
 #if CONFIG_AR_SMV_BROADCAST_MIRROR
             ++local.mirror_fail;
@@ -1026,8 +1032,7 @@ void publisher_task(void* argument) {
                       PtpAuthorityRole::source &&
                   ar_ptp_lab_source_generation() !=
                       g_sample_clock_context.armed_ptp_clock.generation))) {
-                smp_synch_set_source_local_qualified(false);
-            smp_synch_set_receiver_timeline_qualified(false);
+                revoke_sv_auto_claims();
             }
 #endif
             const auto sync_decision = smp_synch_lab_decision();
@@ -1123,8 +1128,7 @@ void publisher_task(void* argument) {
                 g_local_sync_evidence.observe(egress, result, phase_ns);
                 portEXIT_CRITICAL(&g_tx_egress_mux);
                 if (result != ar::iec61850::time_sync::SvTxEvidenceResult::measured)
-                    smp_synch_set_source_local_qualified(false);
-            smp_synch_set_receiver_timeline_qualified(false);
+                    revoke_sv_auto_claims();
             }
 #else
             const esp_err_t canonical_result =
@@ -1143,8 +1147,7 @@ void publisher_task(void* argument) {
                     1U, std::memory_order_release);
                 g_sample_clock_context.phase_authority_valid.store(
                     false, std::memory_order_release);
-                smp_synch_set_source_local_qualified(false);
-            smp_synch_set_receiver_timeline_qualified(false);
+                revoke_sv_auto_claims();
 #endif
             }
 
@@ -1206,8 +1209,7 @@ void revoke_sv_phase_session(const std::uint32_t expected_session) noexcept {
             false, std::memory_order_release);
         g_sample_clock_context.requested_slew_ticks.store(
             0, std::memory_order_relaxed);
-        smp_synch_set_source_local_qualified(false);
-            smp_synch_set_receiver_timeline_qualified(false);
+        revoke_sv_auto_claims();
     }
     xSemaphoreGive(g_phase_timer_mutex);
 }
@@ -1431,8 +1433,7 @@ void sv_ptp_phase_observer_task(void* argument) {
                     stable_local && lease.role == PtpAuthorityRole::receiver);
             } else {
                 local_acquisition.reset();
-                smp_synch_set_source_local_qualified(false);
-            smp_synch_set_receiver_timeline_qualified(false);
+                revoke_sv_auto_claims();
             }
             committed = true;
         } else if (session_matches) {
@@ -1450,8 +1451,7 @@ void sv_ptp_phase_observer_task(void* argument) {
             g_sample_clock_context.requested_slew_ticks.store(
                 0, std::memory_order_relaxed);
             local_acquisition.reset();
-            smp_synch_set_source_local_qualified(false);
-            smp_synch_set_receiver_timeline_qualified(false);
+            revoke_sv_auto_claims();
         }
         xSemaphoreGive(g_phase_timer_mutex);
         if (!committed) {
