@@ -135,7 +135,7 @@ DeviceController::DeviceController(QObject* parent) : QObject(parent) {
         if (ptpStartStage_ == PtpStartStage::stop_unconfirmed) return;
         const bool rollback = ptpStartStage_ == PtpStartStage::awaiting_start ||
                               ptpStartStage_ == PtpStartStage::awaiting_runtime;
-        failPtpStartup(QStringLiteral("PTP acknowledgement timed out. Start cancelled."), rollback);
+        failPtpStartup(QStringLiteral("PTP %1 timed out; START not verified.").arg(ptpStartPhase()), rollback);
     });
     ptpStopPollTimer_.setSingleShot(true);
     connect(&ptpStopPollTimer_, &QTimer::timeout, this, [this] {
@@ -453,6 +453,21 @@ QString DeviceController::profileDeploymentProgressSummary() const {
 bool DeviceController::ptpAvailable() const noexcept { return ptpAvailable_; }
 bool DeviceController::ptpRunning() const noexcept { return ptpRunning_; }
 QString DeviceController::ptpStatus() const { return ptpStatus_; }
+QString DeviceController::ptpStartPhase() const {
+    switch (ptpStartStage_) {
+    case PtpStartStage::idle: return QStringLiteral("IDLE");
+    case PtpStartStage::awaiting_preflight: return QStringLiteral("VERIFY_STOPPED");
+    case PtpStartStage::awaiting_role_ack: return QStringLiteral("ROLE_ACK");
+    case PtpStartStage::awaiting_role_readback: return QStringLiteral("ROLE_READBACK");
+    case PtpStartStage::awaiting_config: return QStringLiteral("CONFIG_ACK");
+    case PtpStartStage::awaiting_start: return QStringLiteral("START_ACK");
+    case PtpStartStage::awaiting_runtime: return QStringLiteral("RUNTIME_READBACK");
+    case PtpStartStage::awaiting_stop_ack: return QStringLiteral("STOP_ACK");
+    case PtpStartStage::awaiting_stop_readback: return QStringLiteral("STOP_READBACK");
+    case PtpStartStage::stop_unconfirmed: return QStringLiteral("STOP_UNVERIFIED");
+    }
+    return QStringLiteral("UNKNOWN");
+}
 QString DeviceController::ptpDomain() const { return ptpDomain_; }
 QString DeviceController::ptpTransportSpecific() const { return ptpTransportSpecific_; }
 QString DeviceController::ptpVlan() const { return ptpVlan_; }
@@ -1404,11 +1419,14 @@ bool DeviceController::startPtpConfigured(const QString& requestedRole,
     ptpLastStartFailure_.clear();
     pendingPtpRole_ = role;
     pendingPtpConfig_ = command;
-    ptpStartStage_ = PtpStartStage::awaiting_role_ack;
-    ptpStatus_ = QStringLiteral("Waiting for board to accept PTP mode...");
+    // Verify actual firmware runtime before selecting another role. A stale
+    // local OFF flag after reconnect must not provoke a rejected PTPROLE or
+    // force-stop a transmitter still running on the board.
+    ptpStartStage_ = PtpStartStage::awaiting_preflight;
+    ptpStatus_ = QStringLiteral("Checking actual board PTP runtime before START...");
     emit ptpStateChanged();
-    if (!sendCommand(QStringLiteral("PROFILE PTPROLE %1").arg(role))) {
-        failPtpStartup(QStringLiteral("Could not queue PTP role selection."), false);
+    if (!sendPtpShow()) {
+        failPtpStartup(QStringLiteral("Could not queue PTP preflight readback."), false);
         return false;
     }
     ptpStartTimer_.start(5000);
@@ -1417,6 +1435,30 @@ bool DeviceController::startPtpConfigured(const QString& requestedRole,
 
 void DeviceController::advancePtpStartup(const QString& line) {
     if (!ptpStarting() || ptpStartStage_ == PtpStartStage::stop_unconfirmed) return;
+    if (ptpStartStage_ == PtpStartStage::awaiting_preflight) {
+        const auto actual = kPtpStatusExpression.match(line);
+        if (!actual.hasMatch()) return;
+        if (actual.captured(1).compare(QStringLiteral("RUNNING"), Qt::CaseInsensitive) == 0) {
+            ptpLastStartFailure_ = QStringLiteral(
+                "Board PTP is already RUNNING. Click Stop PTP, wait for verified STOPPED, then retry Start.");
+            ptpStatus_ = ptpLastStartFailure_;
+            resetPtpStartup();
+            emit ptpStateChanged();
+            setError(ptpLastStartFailure_);
+            return;
+        }
+        if (actual.captured(1).compare(QStringLiteral("STOPPED"), Qt::CaseInsensitive) != 0)
+            return;
+        ptpStartStage_ = PtpStartStage::awaiting_role_ack;
+        ptpStatus_ = QStringLiteral("Board STOPPED confirmed. Selecting PTP mode...");
+        emit ptpStateChanged();
+        if (!sendCommand(QStringLiteral("PROFILE PTPROLE %1").arg(pendingPtpRole_))) {
+            failPtpStartup(QStringLiteral("Could not queue PTP role selection after STOPPED readback."), false);
+            return;
+        }
+        ptpStartTimer_.start(5000);
+        return;
+    }
     if (ptpStartStage_ == PtpStartStage::awaiting_stop_ack) {
         // Firmware emits "PTP stop requested", not "PTP stop accepted".
         // A stale STOPPED status from an older SHOW cannot confirm this STOP.
@@ -1456,7 +1498,8 @@ void DeviceController::advancePtpStartup(const QString& line) {
     if (rejected) {
         const bool rollback = ptpStartStage_ == PtpStartStage::awaiting_start ||
                               ptpStartStage_ == PtpStartStage::awaiting_runtime;
-        failPtpStartup(QStringLiteral("Board rejected command: %1").arg(line), rollback);
+        const QString step = ptpStartPhase();
+        failPtpStartup(QStringLiteral("Board rejected PTP %1 command: %2").arg(step, line), rollback);
         return;
     }
     if (ptpStartStage_ == PtpStartStage::awaiting_role_ack) {
