@@ -334,6 +334,13 @@ ApplicationWindow {
         workflowBar.openEngineeringDialog()
     }
 
+    function openCapture() {
+        // A single first-class Studio capture workspace. Reuse the same
+        // lifetime-owned panel even while changing advanced tabs.
+        profilePanel.showCapture()
+        openConfiguration()
+    }
+
     function openConfiguration() {
         configurationWindow.show()
         configurationWindow.raise()
