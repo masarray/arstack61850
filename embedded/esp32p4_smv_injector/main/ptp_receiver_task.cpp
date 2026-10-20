@@ -524,7 +524,10 @@ esp_err_t receiver_input_info(
 
 void publish_measured_sync(const ReceiverContext& context) noexcept {
     if (context.config.role != AR_PTP_ROLE_TIME_RECEIVER ||
-        !context.discipline.has_value()) {
+        !context.discipline.has_value() ||
+        context.discipline->status().state != PtpDisciplineState::locked) {
+        // HOLDOVER without an independently instrumented time-error bound
+        // is not a license to retain SV AUTO synchronism.
         smp_synch_lab_set_measured(std::nullopt);
         return;
     }
