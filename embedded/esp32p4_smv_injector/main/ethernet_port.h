@@ -19,6 +19,9 @@ extern "C" {
  */
 esp_eth_handle_t ar_esp32p4_eth_init(void);
 
+/** Read the existing Ethernet event-owner link state. No second PHY cache. */
+bool ar_esp32p4_eth_link_up(void);
+
 /** Restart the optional PTP lab runtime on the initialized Ethernet device. */
 bool ar_esp32p4_ptp_start(void);
 
