@@ -24,6 +24,17 @@ int main() {
     CHECK(!source.selected_source);
     e.runtime_ready = false;
     CHECK(!canonical_ptp_authority(e).clock_usable);
+    // Physical SOURCE task may remain RUNNING when its timestamp freshness
+    // expires. UI runtime is true, but the canonical timing lease must
+    // remain fail-closed until fresh evidence restores the clock.
+    e.runtime_ready = true;
+    e.generation = 0U;
+    e.clock_usable_claim = false;
+    CHECK(!canonical_ptp_authority(e).clock_usable);
+    e.generation = 18U; // even a stale nonzero generation is insufficient
+    CHECK(!canonical_ptp_authority(e).clock_usable);
+    e.clock_usable_claim = true;
+    CHECK(canonical_ptp_authority(e).clock_usable);
 
     e.role = PtpAuthorityRole::receiver;
     e.runtime_ready = true;
