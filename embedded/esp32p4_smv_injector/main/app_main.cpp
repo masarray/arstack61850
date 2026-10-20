@@ -1203,13 +1203,33 @@ void sv_ptp_phase_observer_task(void* argument) {
             g_sample_clock_context.publisher_fault_generation.load(
                 std::memory_order_acquire);
         const auto lease = read_ptp_epoch_clock_lease();
+        // Only the 1Hz phase observer emits transition diagnostics. Never
+        // log from ISR or the 4kHz TX path. Do not mask genuine evidence loss.
+        const auto revoke_with_reason = [&](const char* reason) {
+            const bool previously_local = previous_auto_local ||
+                smp_synch_source_local_qualified();
+            if (previously_local) {
+                ESP_LOGW(kTag,
+                         "SV/PTP LOCAL REVOKED reason=%s session=%lu fault_gen=%lu "
+                         "source_gen=%lu phase_epoch=%lu",
+                         reason,
+                         static_cast<unsigned long>(notified_session),
+                         static_cast<unsigned long>(current_faults),
+                         static_cast<unsigned long>(lease.generation),
+                         static_cast<unsigned long>(
+                             g_sample_clock_context.epoch_generation.load(
+                                 std::memory_order_acquire)));
+            }
+            static_cast<void>(controller.invalidate());
+            local_acquisition.reset();
+            revoke_sv_phase_session(notified_session);
+            previous_auto_local = false;
+        };
         // A role/GM/relock change revokes the previous PI integrator.
         if (!valid_sv_ptp_clock_lease(lease) ||
             !continuity.unchanged(notified_session, current_faults,
                                   lease.generation)) {
-            static_cast<void>(controller.invalidate());
-            local_acquisition.reset();
-            revoke_sv_phase_session(notified_session);
+            revoke_with_reason("source_lease_or_publisher_fault");
             continue;
         }
 
@@ -1218,9 +1238,7 @@ void sv_ptp_phase_observer_task(void* argument) {
              !g_preflight_phase_clock_active.load(std::memory_order_acquire)) ||
             (xEventGroupGetBits(g_link_events) & kLinkUpBit) == 0U ||
             !same_sv_ptp_clock_lease(lease, read_ptp_epoch_clock_lease())) {
-            static_cast<void>(controller.invalidate());
-            local_acquisition.reset();
-            revoke_sv_phase_session(notified_session);
+            revoke_with_reason("epoch_notification_or_link");
             continue;
         }
 
@@ -1268,9 +1286,7 @@ void sv_ptp_phase_observer_task(void* argument) {
         if (!evidence_valid ||
             !same_sv_ptp_clock_lease(armed_lease, lease) ||
             !same_sv_ptp_clock_lease(lease, read_ptp_epoch_clock_lease())) {
-            static_cast<void>(controller.invalidate());
-            local_acquisition.reset();
-            revoke_sv_phase_session(notified_session);
+            revoke_with_reason("ptp_time_read_or_lease_changed");
             continue;
         }
 
@@ -1345,6 +1361,22 @@ void sv_ptp_phase_observer_task(void* argument) {
                         decision.epoch_second_continuous,
                     notified_session, current_faults, lease.generation,
                     observation.last_sv_epoch_generation);
+                if (!stable_local && smp_synch_source_local_qualified()) {
+                    ESP_LOGW(kTag,
+                             "SV/PTP LOCAL REVOKED reason=phase_or_MAC_evidence "
+                             "phase=%ldus uncertainty=%luus tracking=%u "
+                             "MACpairs=%lu qualified=%u continuous=%u "
+                             "fault_gen=%lu source_gen=%lu",
+                             static_cast<long>(decision.phase_error_us),
+                             static_cast<unsigned long>(
+                                 decision.observation_uncertainty_us),
+                             decision.software_tracking ? 1U : 0U,
+                             static_cast<unsigned long>(mac_pairs),
+                             source_local_qualified ? 1U : 0U,
+                             decision.epoch_second_continuous ? 1U : 0U,
+                             static_cast<unsigned long>(current_faults),
+                             static_cast<unsigned long>(lease.generation));
+                }
                 smp_synch_set_source_local_qualified(stable_local);
             } else {
                 local_acquisition.reset();
@@ -1352,6 +1384,15 @@ void sv_ptp_phase_observer_task(void* argument) {
             }
             committed = true;
         } else if (session_matches) {
+            if (smp_synch_source_local_qualified()) {
+                ESP_LOGW(kTag,
+                         "SV/PTP LOCAL REVOKED reason=phase_handoff_or_source_race "
+                         "accepted=%u session=%lu fault_gen=%lu source_gen=%lu",
+                         decision.accepted ? 1U : 0U,
+                         static_cast<unsigned long>(notified_session),
+                         static_cast<unsigned long>(current_faults),
+                         static_cast<unsigned long>(lease.generation));
+            }
             g_sample_clock_context.phase_authority_valid.store(
                 false, std::memory_order_release);
             g_sample_clock_context.requested_slew_ticks.store(
