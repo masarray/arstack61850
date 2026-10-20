@@ -425,6 +425,23 @@ def main() -> None:
             "QDesktopServices::openUrl(" in capture_cpp and
             "QString findDumpcap()" in capture_cpp,
             "Studio capture results must derive from production wire decoder with click-only setup")
+    ptp_src = source("PtpExpertPanel.qml")
+    ptp_fw = (STUDIO.parent.parent / "embedded/esp32p4_smv_injector/main/live_control.cpp").read_text(encoding="utf-8")
+    ptp_sync = (STUDIO.parent.parent / "embedded/esp32p4_smv_injector/main/smp_synch_lab.cpp").read_text(encoding="utf-8")
+    dev_h = (STUDIO / "src/DeviceController.hpp").read_text(encoding="utf-8")
+    dev_cpp = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
+    session_h = (STUDIO / "src/SmartSessionController.hpp").read_text(encoding="utf-8")
+    require('text: "Inspect SV lock"' in ptp_src and
+            "panel.session.requestSyncDiagnostics()" in ptp_src and
+            "panel.device.syncDiagnostics" in ptp_src and
+            'std::strcmp(subcommand, "DIAG")' in ptp_fw and
+            '"SVSYNC EVENT seq=' in ptp_fw and
+            "record_transition(" in ptp_sync and
+            "Q_PROPERTY(QString syncDiagnostics" in dev_h and
+            "SVSYNC DIAG " in dev_cpp and
+            "requestSyncDiagnostics()" in session_h,
+            "Studio must expose the physical firmware's internal, reason-coded "
+            "lock flight recorder without external scripts")
     print("Studio operator workspace contract: PASS")
 
 
