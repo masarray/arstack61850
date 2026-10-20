@@ -798,6 +798,7 @@ ApplicationWindow {
                 id: profilePanel
                 anchors.fill: parent
                 theme: studioTheme
+                signalFrequency: root.signalFrequency
                 controller: root
                 device: device
                 profiles: sclProfiles
