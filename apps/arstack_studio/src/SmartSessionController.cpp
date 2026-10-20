@@ -118,8 +118,21 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
             return;
         }
         if (updateReconnectAttempts_ >= kMaxUpdateReconnectAttempts) {
-            latchFirmwareFailure(QStringLiteral(
-                "Firmware was written, but Studio could not reconnect and verify the ESP32-P4. Reconnect USB and retry firmware setup."));
+            // Flash write and ROM verification already succeeded. A delayed
+            // Windows USB CDC identity is NOT grounds to claim failed flash.
+            // Retire the installer timeout, but let semantic-only discovery
+            // continue. Never retry erase/write automatically.
+            reconnectTimer_.stop();
+            updateRequested_ = false;
+            updateWasOptional_ = false;
+            updateStage_ = UpdateStage::idle;
+            postFlashVerificationPending_ = true;
+            setupError_ = false;
+            setupErrorStatus_.clear();
+            lastFirmwareUpdateResult_ = QStringLiteral(
+                "Firmware written; waiting for post-reset ESP32-P4 identity. "
+                "Press RESET once or reconnect USB; Studio will check the exact build automatically. "
+                "Do not flash again.");
             emit firmwareUpdateFinished(false);
             reconcile();
             return;
@@ -139,6 +152,7 @@ void SmartSessionController::shutdown() {
     if (shuttingDown_) return;
     shuttingDown_ = true;
     started_ = false;
+    postFlashVerificationPending_ = false;
     discoveryTimer_.stop();
     prepareTimer_.stop();
     reconnectTimer_.stop();
@@ -514,6 +528,7 @@ bool SmartSessionController::beginFirmwareOperation(const QString& portName) {
     if (device_ == nullptr || firmware_ == nullptr || port.isEmpty() || firmware_->busy()) return false;
 
     updatePort_ = port;
+    postFlashVerificationPending_ = false;
     updateRequested_ = true;
     updateReconnectAttempts_ = 0;
     pendingReleaseGeneration_ = 0;
@@ -674,6 +689,20 @@ void SmartSessionController::reconnectDeviceSignals() {
     connect(device_, &DeviceController::deviceVerifiedChanged, this, [this] {
         if (device_ != nullptr && device_->deviceVerified()) {
             if (portOwner_ != PortOwner::firmwareTool) setPortOwner(PortOwner::deviceSession);
+            if (postFlashVerificationPending_) {
+                postFlashVerificationPending_ = false;
+                refreshFirmwareIdentity();
+                if (firmwareIsCurrent()) {
+                    lastFirmwareUpdateResult_ = QStringLiteral(
+                        "Exact bundled firmware build verified after delayed USB reconnection.");
+                    emit firmwareUpdateFinished(true);
+                } else {
+                    lastFirmwareUpdateResult_ = QStringLiteral(
+                        "Board reconnected but firmware does not match the bundled build. "
+                        "Review identity before attempting any firmware operation.");
+                    emit firmwareUpdateFinished(false);
+                }
+            }
             clearBlankBoardContext();
             refreshFirmwareIdentity();
             profileSyncBootId_.clear();
@@ -990,6 +1019,7 @@ QString SmartSessionController::diagnosticsText() const {
 
 void SmartSessionController::latchFirmwareFailure(QString message) {
     reconnectTimer_.stop();
+    postFlashVerificationPending_ = false;
     const bool optionalOperation = updateWasOptional_;
     updateRequested_ = false;
     updateWasOptional_ = false;
@@ -1232,6 +1262,14 @@ void SmartSessionController::reconcile() {
         return;
     }
 
+    if (postFlashVerificationPending_ && !device_->deviceVerified()) {
+        setPresentation(
+            QStringLiteral("CONNECTING"),
+            QStringLiteral("Firmware written; awaiting board identity. "
+                           "Press RESET or reconnect USB. Studio checks identity, never auto-reflashes."),
+            false, false);
+        return;
+    }
     if (device_->discovering() || (device_->connected() && !device_->deviceVerified())) {
         setPresentation(QStringLiteral("CONNECTING"), device_->discoveryStatus(), false, false);
         return;
