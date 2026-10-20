@@ -2,6 +2,7 @@
 
 #include "ariec61850/sampled_values/live_signal_transaction.hpp"
 #include "ariec61850/sampled_values/profile_identity.hpp"
+#include "ariec61850/time_sync/ptp_power_profile.hpp"
 #include "DeviceController.hpp"
 
 #include "DeviceIoWorker.hpp"
@@ -93,6 +94,19 @@ const QRegularExpression kSmpSynchExpression{
 
 [[nodiscard]] bool finitePositive(const double value) noexcept {
     return std::isfinite(value) && value > 0.0;
+}
+
+// Same portable SOURCE admission contract as ESP32-P4 firmware, before any
+// command is sent. Unsupported profiles never start a half-transaction.
+[[nodiscard]] QString sourcePtpProfileError(const QVariantMap& profile) {
+    const auto p = ar::iec61850::time_sync::inspect_ptp_power_profile_cadence(
+        profile.value(QStringLiteral("announceIntervalMs")).toUInt(),
+        profile.value(QStringLiteral("syncIntervalMs")).toUInt(),
+        profile.value(QStringLiteral("respondToPeerDelay")).toBool());
+    if (p.compatible()) return {};
+    return QStringLiteral(
+        "IEC/IEEE 61850-9-3 SOURCE requires Announce 1000 ms, Sync 1000 ms "
+        "and hardware peer-delay responses. Review Advanced PTP profile.");
 }
 } // namespace
 
@@ -1370,7 +1384,21 @@ bool DeviceController::startPtpConfigured(const QString& requestedRole,
     }
     const QString command = ptpConfigCommand(profile);
     if (command.isEmpty()) {
-        setError(QStringLiteral("Invalid PTP settings. Check domain, VLAN and timing intervals."));
+        const QString reason = QStringLiteral(
+            "Invalid PTP settings. Check domain, VLAN and timing intervals.");
+        ptpLastStartFailure_ = reason;
+        ptpStatus_ = QStringLiteral("PTP profile rejected: %1").arg(reason);
+        emit ptpStateChanged();
+        setError(reason);
+        return false;
+    }
+    const QString contractError = role == QStringLiteral("SOURCE")
+        ? sourcePtpProfileError(profile) : QString{};
+    if (!contractError.isEmpty()) {
+        ptpLastStartFailure_ = contractError;
+        ptpStatus_ = QStringLiteral("PTP profile rejected: %1").arg(contractError);
+        emit ptpStateChanged();
+        setError(contractError);
         return false;
     }
     ptpLastStartFailure_.clear();
@@ -1527,6 +1555,13 @@ bool DeviceController::configurePtp(const QVariantMap& profile) {
     if (command.isEmpty()) {
         setError(QStringLiteral("PTP expert profile is outside firmware safety bounds."));
         return false;
+    }
+    if (ptpRole_ == QStringLiteral("SOURCE")) {
+        const QString contractError = sourcePtpProfileError(profile);
+        if (!contractError.isEmpty()) {
+            setError(contractError);
+            return false;
+        }
     }
     return sendCommand(command);
 }
