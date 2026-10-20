@@ -458,7 +458,11 @@ def main() -> None:
             "Studio must show the real exact ESP32-P4 build and never mistake "
             "protocol compatibility for verified bundled firmware")
     eth_fw = (STUDIO.parent.parent / "embedded/esp32p4_smv_injector/main/ethernet_port.c").read_text(encoding="utf-8")
-    require("ETH_CMD_G_LINK_STATUS" in eth_fw and
+    eth_owner = (STUDIO.parent.parent / "embedded/esp32p4_smv_injector/main/app_main.cpp").read_text(encoding="utf-8")
+    require("ar_esp32p4_eth_link_up()" in eth_fw and
+            "ar_esp32p4_eth_link_up(void)" in eth_owner and
+            "xEventGroupGetBits(g_link_events)" in eth_owner and
+            "ETH_CMD_G_LINK_STATUS" not in eth_fw and
             "Ethernet PHY link DOWN" in eth_fw and
             "Ethernet PHY UP" in eth_fw and
             "ptpFailureReason_" in dev_cpp and
