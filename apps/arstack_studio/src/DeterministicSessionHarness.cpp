@@ -47,6 +47,7 @@ public:
             {"PTP stale role readback cannot bypass ACK", ptpStaleRoleReadbackBlocked()},
             {"PTP runtime requires matching PTP2 role", ptpRuntimeRoleEvidenceRequired()},
             {"PTP RUNNING before PTP2 is bounded success", ptpRuntimeOutOfOrderProof()},
+            {"PTP source rejection survives verified safety STOP", ptpSourceReasonSurvivesSafetyStop()},
             {"PTP rejected config never starts", ptpGuidedRejectedConfigStops()},
             {"PTP STOP cancels pending start after verified readback", ptpGuidedStopCancelsStart()},
             {"legacy bare SV START refuses stale eight-channel state", legacyBareStartFailsClosed()},
@@ -697,6 +698,27 @@ private:
             d.ptpStatus_.contains(QStringLiteral("confirmed by board"));
     }
 
+    static bool ptpSourceReasonSurvivesSafetyStop() {
+        Fixture f;
+        if (!setupGuidedPtp(f, QStringLiteral("SOURCE"))) return false;
+        auto& d = f.device;
+        d.processLine(QStringLiteral("PTPROLE accepted"));
+        d.processLine(QStringLiteral("PTPROLE role=SOURCE value=0 running=0"));
+        d.processLine(QStringLiteral("PTP configuration accepted"));
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_start) return false;
+        d.processLine(QStringLiteral(
+            "PTP start rejected: source_reason=PDELAY_RX_TIMESTAMP_UNAVAILABLE"));
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_ack ||
+            !d.ptpLastStartFailure_.contains(QStringLiteral("PDELAY_RX_TIMESTAMP_UNAVAILABLE")))
+            return false;
+        d.processLine(QStringLiteral("PTP stop requested"));
+        d.processLine(ptpStoppedStatus());
+        if (d.ptpStarting() || d.ptpRunning_) return false;
+        return d.ptpLastStartFailure_.contains(
+                   QStringLiteral("PDELAY_RX_TIMESTAMP_UNAVAILABLE")) &&
+            d.ptpStatus_.contains(QStringLiteral("confirmed by board"));
+    }
+
     static bool ptpRuntimeOutOfOrderProof() {
         Fixture f;
         if (!setupGuidedPtp(f, QStringLiteral("SOURCE"))) return false;
@@ -749,9 +771,16 @@ private:
         d.processLine(QStringLiteral("PTPROLE role=SOURCE value=0 running=0"));
         if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_config) return false;
         d.processLine(QStringLiteral("PTP configuration rejected: invalid profile"));
-        return !d.ptpStarting() && !d.ptpRunning_ &&
-            d.ptpStatus_.startsWith(QStringLiteral("PTP start failed")) &&
-            d.ptpStatus_.contains(QStringLiteral("invalid profile"));
+        if (d.ptpStarting() || d.ptpRunning_ ||
+            !d.ptpStatus_.startsWith(QStringLiteral("PTP start failed")) ||
+            !d.ptpStatus_.contains(QStringLiteral("invalid profile")) ||
+            !d.ptpLastStartFailure_.contains(QStringLiteral("invalid profile")))
+            return false;
+        // A later STOP readback must never erase the reason an earlier START
+        // failed. It is reset only at the next explicit START or new boot.
+        if (!f.session.requestStartPtpConfigured(QStringLiteral("SOURCE"), ptpValidProfile()))
+            return false;
+        return d.ptpLastStartFailure_.isEmpty();
     }
 
     static QString ptpStoppedStatus() {
