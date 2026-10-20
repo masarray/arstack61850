@@ -716,7 +716,19 @@ ApplicationWindow {
                     font.pixelSize: 9
                 }
                 Item { Layout.fillWidth: true }
-                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "Copy diagnostics"; onClicked: StudioClipboard.copyText(workflowBar.session.diagnosticsText()) }
+                CalmButton {
+                    theme: studioTheme
+                    uiFont: root.uiFont
+                    text: "Copy diagnostics"
+                    onClicked: {
+                        const snapshot = workflowBar.session ? workflowBar.session.diagnosticsText() : ""
+                        if (StudioClipboard.copyText(snapshot)) {
+                            root.showMessage("Diagnostics copied to clipboard.", false)
+                        } else {
+                            root.showMessage("Clipboard unavailable. Select text below and press Ctrl+C.", true)
+                        }
+                    }
+                }
                 CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "Clear"; onClicked: device.clearLog() }
             }
             ScrollView {
@@ -724,7 +736,13 @@ ApplicationWindow {
                 Layout.fillHeight: true
                 TextArea {
                     readOnly: true
-                    text: device.logText
+                    // Include the complete same session/PTP snapshot used by
+                    // the Copy button, rather than showing only raw serial lines.
+                    // Selectable fall-back remains available if native clipboard
+                    // ownership is denied by Windows or another process.
+                    text: diagnosticsDialog.visible && workflowBar.session
+                        ? workflowBar.session.diagnosticsText() : device.logText
+                    selectByMouse: true
                     color: studioTheme.textSoft
                     selectionColor: studioTheme.accent
                     font.family: root.monoFont
