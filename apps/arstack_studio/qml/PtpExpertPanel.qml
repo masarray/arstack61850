@@ -12,6 +12,7 @@ SurfacePanel {
     property string monoFont: "Inter"
     property var roleValues: ["SOURCE", "RECEIVER", "MONITOR"]
     property bool advancedVisible: false
+    property string diagnosticFallbackText: ""
     readonly property bool startPending: panel.device && panel.device.ptpStarting
 
     function roleIndex(role) {
@@ -96,6 +97,30 @@ SurfacePanel {
         repeat: true
         running: panel.startPending || panel.device.ptpRunning
         onTriggered: if (panel.session) panel.session.requestPtpRefresh()
+    }
+
+    Dialog {
+        id: diagnosticFallback
+        parent: Overlay.overlay
+        anchors.centerIn: Overlay.overlay
+        modal: true
+        title: "PTP diagnostics · select and copy"
+        standardButtons: Dialog.Close
+        width: Math.min(760, Overlay.overlay.width - 32)
+        height: Math.min(480, Overlay.overlay.height - 32)
+        contentItem: ScrollView {
+            clip: true
+            TextArea {
+                id: diagnosticFallbackEditor
+                readOnly: true
+                selectByMouse: true
+                wrapMode: TextEdit.NoWrap
+                font.family: panel.monoFont
+                font.pixelSize: 11
+                text: panel.diagnosticFallbackText
+            }
+        }
+        onOpened: diagnosticFallbackEditor.selectAll()
     }
 
     ScrollView {
@@ -333,8 +358,20 @@ SurfacePanel {
                     text: "Copy diagnostics"
                     enabled: panel.session && panel.device.deviceVerified
                     onClicked: {
-                        StudioClipboard.copyText(panel.session.diagnosticsText())
-                        if (panel.controller) panel.controller.showMessage("PTP and firmware diagnostics copied.", false)
+                        const evidence = panel.session.diagnosticsText()
+                        if (StudioClipboard.copyText(evidence)) {
+                            if (panel.controller)
+                                panel.controller.showMessage("PTP diagnostics copied to clipboard.", false)
+                        } else {
+                            // Windows may temporarily deny clipboard ownership.
+                            // Keep the complete text selectable in Studio instead
+                            // of claiming success or asking for external scripts.
+                            panel.diagnosticFallbackText = evidence
+                            diagnosticFallback.open()
+                            if (panel.controller)
+                                panel.controller.showMessage(
+                                    "Clipboard unavailable. Diagnostic text is open: select and copy it.", true)
+                        }
                     }
                 }
                 Item { Layout.fillWidth: true }
