@@ -1356,7 +1356,14 @@ void DeviceController::failPtpStartup(const QString& reason, const bool rollback
     case PtpStartStage::stop_unconfirmed: stage = QStringLiteral("PTP STOP unverified"); break;
     case PtpStartStage::idle: stage = QStringLiteral("PTP startup"); break;
     }
-    ptpFailureReason_ = QStringLiteral("%1: %2").arg(stage, reason).left(300);
+    // If the board already reported measured SOURCE counters or a PHY-DOWN
+    // condition, retain that more useful observation across its subsequent
+    // generic failure/rollback log.
+    const bool hasDetailedEvidence =
+        ptpFailureReason_.contains(QStringLiteral("Announce=")) ||
+        ptpFailureReason_.contains(QStringLiteral("Ethernet PHY link DOWN"));
+    const QString observedCause = hasDetailedEvidence ? ptpFailureReason_ : reason;
+    ptpFailureReason_ = QStringLiteral("%1: %2").arg(stage, observedCause).left(300);
     setError(ptpFailureReason_);
     if (rollback && connected_ && sessionGeneration_ != 0) {
         static_cast<void>(beginPtpStopVerification());
