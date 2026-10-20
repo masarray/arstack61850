@@ -90,17 +90,25 @@ Rectangle {
         RibbonAction {
             theme: bar.theme
             uiFont: bar.uiFont
-            text: bar.workflow.startQueued ? "Starting" : "Start"
-            tone: !bar.device.deviceVerified ? "accent"
-                : bar.session.startReady ? "success" : "neutral"
+            // A connecting physical board must NEVER turn START into an
+            // unrelated offline preview which looks like a lost first click.
+            text: bar.workflow.startQueued ? "Starting…"
+                : bar.session.state === "CONNECTING" || bar.session.state === "CHECKING DEVICE"
+                  || bar.session.firmwareVerificationPending ? "Connecting"
+                : !bar.device.deviceVerified ? "Preview" : "Start"
+            tone: bar.session.startReady ? "success"
+                : bar.device.deviceVerified ? "neutral" : "accent"
             iconSource: Qt.resolvedUrl("../assets/material/play_arrow.svg")
             enabled: !bar.workflow.injectionRunning && !bar.workflow.startQueued && !bar.controller.offlinePreviewRunning
                 && !bar.session.updatingFirmware && !bar.session.updateNeedsBootloaderHelp
-            toolTipText: !enabled && bar.device.deviceVerified ? bar.workflow.startReason() : ""
+                && (bar.device.deviceVerified ||
+                    (bar.session.state === "WAITING FOR DEVICE" && !bar.device.discovering))
+            toolTipText: !enabled ? bar.workflow.startReason() :
+                !bar.device.deviceVerified ? "Offline preview only; no Ethernet SV output" : ""
             onClicked: {
                 if (!bar.device.deviceVerified) {
-                    // The footer already identifies preview-only operation.
-                    bar.controller.offlinePreviewRunning = true
+                    if (bar.session.state === "WAITING FOR DEVICE" && !bar.device.discovering)
+                        bar.controller.offlinePreviewRunning = true
                 } else bar.workflow.requestStart()
             }
         }
