@@ -84,7 +84,6 @@ Rectangle {
             Layout.leftMargin: 9
             Layout.rightMargin: 9
             spacing: 6
-            Item { Layout.preferredWidth: 25 }
             Label {
                 text: "CH"
                 Layout.preferredWidth: 46
@@ -126,7 +125,6 @@ Rectangle {
                 property string sid: model.signalId
                 property real mag: model.magnitude
                 property real angle: model.phase
-                property bool channelEnabled: model.enabled
                 property real signalQuality: model.quality
                 property color phaseColor: matrix.phaseColorFor(rowIndex)
                 property bool selected: matrix.controller.activeSignal === signalRow.sid
@@ -270,23 +268,6 @@ Rectangle {
                     anchors.leftMargin: 9
                     anchors.rightMargin: 9
                     spacing: 6
-
-                    StudioDarkCheckBox {
-                        theme: matrix.theme
-                        uiFont: matrix.uiFont
-                        Layout.preferredWidth: 25
-                        Layout.alignment: Qt.AlignVCenter
-                        checked: signalRow.channelEnabled
-                        ToolTip.visible: false
-                        onToggled: {
-                            matrix.sourceModel.setProperty(signalRow.rowIndex, "enabled", checked)
-                            matrix.controller.selectSignal(matrix.groupIndex, signalRow.rowIndex)
-                            matrix.controller.refreshPreview()
-                            matrix.controller.markScenarioDirty()
-                            if (matrix.session && matrix.session.liveControlReady && !matrix.controller.pendingApply)
-                                matrix.session.requestSetEnabled(signalRow.sid, checked)
-                        }
-                    }
 
                     RowLayout {
                         Layout.preferredWidth: 46
