@@ -115,6 +115,7 @@ qt_add_qml_module(arstack_studio
         qml/StudioActionMenu.qml
         qml/StudioMenuDivider.qml
         qml/StudioPtpSwitch.qml
+        qml/StudioLinkSwitch.qml
         qml/StudioTimingTray.qml
         qml/DeviceExpertPanel.qml
         qml/SvCapturePanel.qml
