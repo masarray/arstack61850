@@ -16,7 +16,8 @@ std::atomic<std::uint8_t> g_mode{
     static_cast<std::uint8_t>(SvSyncPolicyMode::external_ptp_auto)};
 // -1 means PTP-P2 has not supplied measured lock evidence yet.
 std::atomic<int> g_measured_value{-1};
-// Fail-closed until an independent SV timeline/phase acceptance gate exists.
+// Separate from RECEIVER PTP discipline: a valid GM clock is not a
+// verified canonical SV sampling/egress timeline.
 std::atomic_bool g_sv_timeline_phase_qualified{false};
 std::atomic_bool g_source_local_qualified{false};
 
@@ -53,7 +54,15 @@ std::atomic_bool g_source_local_qualified{false};
 } // namespace
 
 void smp_synch_lab_set_mode(const SvSyncPolicyMode mode) noexcept {
-    g_mode.store(static_cast<std::uint8_t>(mode), std::memory_order_release);
+    const auto old = g_mode.exchange(
+        static_cast<std::uint8_t>(mode), std::memory_order_acq_rel);
+    if (old != static_cast<std::uint8_t>(mode)) {
+        // A manual override must not preserve a historical AUTO proof when
+        // the operator switches back. Fresh source/phase/MAC evidence is
+        // required for the next automatic assertion.
+        g_source_local_qualified.store(false, std::memory_order_release);
+        g_sv_timeline_phase_qualified.store(false, std::memory_order_release);
+    }
 }
 
 SvSyncPolicyMode smp_synch_lab_mode() noexcept {
@@ -88,6 +97,14 @@ void smp_synch_set_source_local_qualified(const bool qualified) noexcept {
 
 bool smp_synch_source_local_qualified() noexcept {
     return g_source_local_qualified.load(std::memory_order_acquire);
+}
+
+void smp_synch_set_receiver_timeline_qualified(const bool qualified) noexcept {
+    g_sv_timeline_phase_qualified.store(qualified, std::memory_order_release);
+}
+
+bool smp_synch_receiver_timeline_qualified() noexcept {
+    return g_sv_timeline_phase_qualified.load(std::memory_order_acquire);
 }
 
 } // namespace ar::esp32p4::smv
