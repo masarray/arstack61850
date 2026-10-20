@@ -3,6 +3,7 @@
 #include "live_control.hpp"
 #include "ethernet_port.h"
 #include "profile_control.hpp"
+#include "smp_synch_lab.hpp"
 #include "ariec61850/sampled_values/live_signal_transaction.hpp"
 
 #include "esp_app_desc.h"
@@ -238,7 +239,7 @@ void print_help() noexcept {
     ESP_LOGI(kTag, "  ENABLE <channel> <0|1>");
     ESP_LOGI(kTag, "  QUALITY <channel> <uint32/0xhex>");
     ESP_LOGI(kTag, "  SHAPE CT <0|1> <dc_permille> <harmonic_permille> <order> <clip_permille>");
-    ESP_LOGI(kTag, "  PTP SHOW | PTP START | PTP STOP");
+    ESP_LOGI(kTag, "  PTP SHOW | PTP DIAG | PTP START | PTP STOP");
     ESP_LOGI(kTag, "  PTP CONFIG <domain> <transport> <vlan> <vid> <pcp> <announce_ms> <sync_ms> <pdelay>");
     ESP_LOGI(kTag, "GUI profile deployment uses bounded PROFILE subcommands while STOPPED.");
 }
@@ -311,6 +312,45 @@ void print_ptp_state() noexcept {
 #endif
 }
 
+void print_sv_sync_diagnostics() noexcept {
+    // Operator-triggered read-only snapshot of the ACTUAL internal gate.
+    // Never read MAC descriptors or add any polling to the 4kHz publisher.
+    const auto s = smp_synch_diag_snapshot();
+    ESP_LOGI(kTag,
+        "SVSYNC DIAG events=%lu acquired=%lu revoked=%lu source=%u receiver=%u "
+        "phase_us=%ld uncertainty_us=%lu mac_pairs=%lu clean=%lu epoch=%lu "
+        "accepted=%u tracking=%u",
+        static_cast<unsigned long>(s.events),
+        static_cast<unsigned long>(s.acquisitions),
+        static_cast<unsigned long>(s.losses),
+        smp_synch_source_local_qualified() ? 1U : 0U,
+        smp_synch_receiver_timeline_qualified() ? 1U : 0U,
+        static_cast<long>(s.phase_error_us),
+        static_cast<unsigned long>(s.uncertainty_us),
+        static_cast<unsigned long>(s.mac_pairs),
+        static_cast<unsigned long>(s.clean_epochs),
+        static_cast<unsigned long>(s.sample_epoch),
+        s.phase_accepted ? 1U : 0U,
+        s.software_tracking ? 1U : 0U);
+    for (std::size_t i = 1U;
+         i < static_cast<std::size_t>(SvSyncLossReason::count); ++i) {
+        if (s.cause_counts[i] == 0U) continue;
+        const auto reason = static_cast<SvSyncLossReason>(i);
+        ESP_LOGI(kTag, "SVSYNC CAUSE reason=%s count=%lu",
+                 smp_synch_diag_reason_name(reason),
+                 static_cast<unsigned long>(s.cause_counts[i]));
+    }
+    for (std::size_t i = 0U; i < s.recent_count; ++i) {
+        const auto& e = s.recent[i];
+        ESP_LOGI(kTag, "SVSYNC EVENT seq=%lu uptime_ms=%lu state=%s reason=%s",
+                 static_cast<unsigned long>(e.sequence),
+                 static_cast<unsigned long>(e.monotonic_ms),
+                 e.acquired ? "ACQUIRED" : "REVOKED",
+                 smp_synch_diag_reason_name(e.reason));
+    }
+    ESP_LOGI(kTag, "SVSYNC END events=%lu", static_cast<unsigned long>(s.events));
+}
+
 void handle_ptp_command(char* save) noexcept {
     char* subcommand = strtok_r(nullptr, kTokenDelimiters.data(), &save);
     if (subcommand == nullptr) {
@@ -322,6 +362,11 @@ void handle_ptp_command(char* save) noexcept {
     if (std::strcmp(subcommand, "SHOW") == 0) {
         if (has_extra_token(&save)) ESP_LOGE(kTag, "Usage: PTP SHOW");
         else print_ptp_state();
+        return;
+    }
+    if (std::strcmp(subcommand, "DIAG") == 0) {
+        if (has_extra_token(&save)) ESP_LOGE(kTag, "Usage: PTP DIAG");
+        else print_sv_sync_diagnostics();
         return;
     }
 #if CONFIG_AR_PTP_LAB_TX
