@@ -126,6 +126,7 @@ void stop_active_ptp_roles() noexcept {
     // Operator STOP or role handoff revokes the transmitted AUTO local-sync
     // claim immediately, independent of the slower phase observer cadence.
     smp_synch_set_source_local_qualified(false);
+    smp_synch_set_receiver_timeline_qualified(false);
     if (ar_ptp_source_runtime_active()) {
         ar_ptp_source_stop();
     }
