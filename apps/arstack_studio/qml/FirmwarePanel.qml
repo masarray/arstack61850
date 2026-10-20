@@ -254,7 +254,7 @@ SurfacePanel {
                     implicitWidth: 172
                     text: panel.session && (panel.session.firmwareUpdateRequired || panel.session.firmwareUpdateAvailable)
                         ? (panel.session.firmwareUpdateRequired ? "Update firmware" : "Install bundled build")
-                        : "Reinstall current"
+                        : "Reinstall bundled"
                     visible: panel.session &&
                              (panel.session.firmwareUpdateRequired || panel.session.firmwareUpdateAvailable || panel.session.firmwareReinstallAvailable)
                     enabled: visible && !panel.firmware.busy
@@ -328,7 +328,7 @@ SurfacePanel {
                 Label { text: "Protocol"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
                 Label { text: panel.firmware.expectedProtocol === "-" ? "-" : "v" + panel.firmware.expectedProtocol; color: panel.theme.text; font.family: panel.uiFont; font.pixelSize: 9 }
                 Label { text: "Target"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
-                Label { text: panel.firmware.targetChip; color: panel.theme.textSoft; font.family: panel.uiFont; font.pixelSize: 9 }
+                Label { text: panel.device.deviceVerified ? panel.device.deviceTarget : (panel.firmware.bundleReady ? "ESP32-P4 bundle" : "Unverified"); color: panel.theme.textSoft; font.family: panel.uiFont; font.pixelSize: 9 }
                 Label { text: "SHA-256"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 8 }
                 Label { Layout.columnSpan: 3; text: panel.firmware.firmwareSha256.length ? panel.firmware.firmwareSha256 : "-"; color: panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: 8; elide: Text.ElideMiddle }
             }
