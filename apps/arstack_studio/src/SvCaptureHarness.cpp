@@ -117,7 +117,9 @@ public:
         const auto result = SvCaptureController::decodePcap(
             pcap, csv, seconds, events, json, 120, QStringLiteral("TEST_ETHERNET"),
             {{QStringLiteral("firmware_build_id"), QStringLiteral("synthetic-fixture")},
-             {QStringLiteral("operator_frequency_hz_UNVERIFIED"), 50.0}});
+             {QStringLiteral("operator_frequency_hz_UNVERIFIED"), 50.0}},
+            {{{QStringLiteral("ptp_running"), false},
+              {QStringLiteral("device_missed"), QStringLiteral("0")}}});
         QFile reportFile(json), csvFile(csv), secondsFile(seconds), eventsFile(events);
         if (!reportFile.open(QIODevice::ReadOnly) ||
             !csvFile.open(QIODevice::ReadOnly) ||
@@ -145,6 +147,9 @@ public:
             parsed.value("wire_channel_measurements").toObject()
                 .value("IA").toObject().value("nonzero_quality_frame_count").toDouble() == 3 &&
             parsed.value("fundamental_reference_hz_UNVERIFIED").toDouble() == 50.0 &&
+            parsed.value("studio_telemetry_series_UNVERIFIED").toArray().size() == 1 &&
+            parsed.value("studio_telemetry_series_UNVERIFIED").toArray()[0]
+                .toObject().value("device_missed").toString() == "0" &&
             parsed.value("studio_telemetry_snapshot_UNVERIFIED").toObject()
                   .value("firmware_build_id").toString() == "synthetic-fixture" &&
             csvRows.contains("IA,IA_quality") &&
