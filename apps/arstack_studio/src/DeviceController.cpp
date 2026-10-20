@@ -1688,6 +1688,7 @@ void DeviceController::processLine(const QString& rawLine) {
     if (flightPos >= 0) {
         const QString flightLine = line.mid(flightPos).trimmed();
         if (flightLine.startsWith(QStringLiteral("SVSYNC FLIGHT "))) {
+            syncFlightLatest_ = flightLine;
             // Firmware emits one bounded fault summary from its telemetry
             // task when a lock edge occurs. Surface it even if Inspect has
             // not been clicked, never as a declaration of physical PASS.
@@ -1970,6 +1971,7 @@ void DeviceController::resetPtpState() {
     resetPtpStartup();
     syncDiagnostics_ = QStringLiteral(
         "No current-board SV lock evidence. Select Inspect SV lock after verification.");
+    syncFlightLatest_.clear();
     emit syncDiagnosticsChanged();
     ptpAvailable_ = false;
     ptpRunning_ = false;
