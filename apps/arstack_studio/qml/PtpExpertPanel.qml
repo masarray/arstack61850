@@ -464,7 +464,19 @@ SurfacePanel {
                     NumericField { id: vlanField; enabled: vlanCheck.checked; theme: panel.theme; monoFont: panel.uiFont; text: "100"; validator: IntValidator { bottom: 1; top: 4094 } }
                     Label { text: "VLAN PCP"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: pcpField; enabled: vlanCheck.checked; theme: panel.theme; monoFont: panel.uiFont; text: "4"; validator: IntValidator { bottom: 0; top: 7 } }
-                    StudioDarkCheckBox { id: pdelayCheck; theme: panel.theme; uiFont: panel.uiFont; text: "Peer-delay response"; checked: true }
+                    StudioDarkCheckBox {
+                        id: pdelayCheck
+                        theme: panel.theme
+                        uiFont: panel.uiFont
+                        text: "Require hardware peer-delay responses"
+                        // SOURCE can issue Announce/Sync without RX Pdelay support.
+                        // Do not silently force optional hardware capability from
+                        // a hidden Advanced control during ordinary SOURCE START.
+                        // Relay profiles requiring Pdelay must opt in explicitly.
+                        checked: false
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Requires ESP32-P4 RX hardware timestamps. If unavailable, PTP START must fail safely."
+                    }
                     CalmButton {
                         theme: panel.theme
                         uiFont: panel.uiFont
