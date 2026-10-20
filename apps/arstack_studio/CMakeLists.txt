@@ -55,6 +55,16 @@ qt_add_executable(arstack_session_harness
 )
 
 # Offline production wire decoder regression (no Npcap or hardware required).
+# Isolated platform GUI clipboard verification (same source linked in Studio).
+# No QML stubs, no fake service: tests actual QGuiApplication OS clipboard.
+qt_add_executable(arstack_clipboard_harness
+    src/ClipboardHarness.cpp
+    src/StudioClipboard.cpp
+    src/StudioClipboard.hpp
+)
+target_link_libraries(arstack_clipboard_harness PRIVATE Qt6::Core Qt6::Gui)
+target_compile_features(arstack_clipboard_harness PRIVATE cxx_std_20)
+
 qt_add_executable(arstack_capture_harness
     src/SvCaptureHarness.cpp
     src/SvCaptureController.cpp
