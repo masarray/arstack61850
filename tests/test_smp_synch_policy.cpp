@@ -115,6 +115,15 @@ void test_internal_sync_recorder_captures_cause_and_bounded_history() {
     require(after.recent[after.recent_count-1].reason == SvSyncLossReason::mac_egress &&
             !after.recent[after.recent_count-1].acquired,
             "newest loss must retain exact cause");
+    require(after.recent[after.recent_count-1].phase_error_us == -3 &&
+            after.recent[after.recent_count-1].mac_pairs == 4U &&
+            after.recent[after.recent_count-1].monotonic_ms == 1041U,
+            "each lock edge must preserve event-local phase, MAC and uptime");
+    require(smp_synch_diag_event_count() == after.events,
+            "fast event count must match full snapshot");
+    require(smp_synch_diag_reason_name(SvSyncLossReason::mac_missing_timestamp) !=
+            smp_synch_diag_reason_name(SvSyncLossReason::mac_ptp_clock_step),
+            "missing TX timestamp and clock step must have distinct labels");
     require(after.phase_error_us == -3 && after.uncertainty_us == 2U &&
             after.mac_pairs == 4U && after.clean_epochs == 10U &&
             after.sample_epoch == 101U && after.phase_accepted &&
