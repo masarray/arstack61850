@@ -458,12 +458,17 @@ def main() -> None:
             "Installed build differs from this Studio package" in firmware_panel and
             'panel.device.ptpStatus.indexOf("PTP start failed")' in ptp_panel and
             'ptpLastStartFailure' in ptp_panel and
-            'checked: false' in ptp_panel and
-            'Require hardware peer-delay responses' in ptp_panel,
-            "Firmware tab must show exact build and SOURCE Pdelay must be explicit")
+            'respondToPeerDelay: role === "SOURCE" ? true : pdelayCheck.checked' in ptp_panel and
+            "SOURCE profile: 1 s Announce" in ptp_panel and
+            "sourcePtpProfileError" in device_control_cpp and
+            "ptpRuntimeRunningSeen_" in device_control_cpp and
+            "busy: Boolean(panel.startPending)" in ptp_panel,
+            "Firmware tab must show build provenance and SOURCE 9-3 preflight")
     ptp_firmware = (STUDIO.parent.parent / "embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp").read_text(encoding="utf-8")
     ptp_console = (STUDIO.parent.parent / "embedded/esp32p4_smv_injector/main/live_control.cpp").read_text(encoding="utf-8")
-    require('PDELAY_RX_TIMESTAMP_UNAVAILABLE' in ptp_firmware and
+    require('SOURCE_REQUIRES_1S_ANNOUNCE_1S_SYNC_AND_PDELAY' in ptp_firmware and
+            'ar_ptp_lab_last_config_error()' in ptp_console and
+            'PDELAY_RX_TIMESTAMP_UNAVAILABLE' in ptp_firmware and
             'SOURCE_TX_EVIDENCE_TIMEOUT' in ptp_firmware and
             'IEEE1588_CLOCK_UNAVAILABLE' in ptp_firmware and
             'PTP start rejected: source_reason=%s' in ptp_console and
