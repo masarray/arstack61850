@@ -4,6 +4,7 @@
 
 #include <QCoreApplication>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
@@ -118,8 +119,10 @@ public:
             pcap, csv, seconds, events, json, 120, QStringLiteral("TEST_ETHERNET"),
             {{QStringLiteral("firmware_build_id"), QStringLiteral("synthetic-fixture")},
              {QStringLiteral("operator_frequency_hz_UNVERIFIED"), 50.0}},
-            {{{QStringLiteral("ptp_running"), false},
-              {QStringLiteral("device_missed"), QStringLiteral("0")}}});
+            QVariantList{QVariant(QVariantMap{
+                {QStringLiteral("ptp_running"), false},
+                {QStringLiteral("device_missed"), QStringLiteral("0")}
+            })});
         QFile reportFile(json), csvFile(csv), secondsFile(seconds), eventsFile(events);
         if (!reportFile.open(QIODevice::ReadOnly) ||
             !csvFile.open(QIODevice::ReadOnly) ||
