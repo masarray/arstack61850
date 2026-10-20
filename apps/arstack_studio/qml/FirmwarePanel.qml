@@ -21,6 +21,12 @@ SurfacePanel {
         !panel.session.firmwareUpdateResult.startsWith("Exact bundled firmware build verified")
 
     readonly property bool hasPort: firmwarePort.currentText.length > 0
+    readonly property string packageBuild: panel.session ? panel.session.expectedFirmwareBuildId : ""
+    readonly property string installedBuild: panel.device.deviceVerified
+        ? panel.device.firmwareBuildId : ""
+    readonly property bool exactBuildMatch: panel.device.deviceVerified &&
+        panel.packageBuild.length > 0 &&
+        panel.installedBuild.toLowerCase() === panel.packageBuild.toLowerCase()
 
     component StepBadge: Rectangle {
         property string stepText: "1"
@@ -99,7 +105,8 @@ SurfacePanel {
                     Label {
                         Layout.fillWidth: true
                         text: panel.firmware.bundleReady
-                            ? "Bundled firmware v" + panel.firmware.firmwareVersion + " · ready"
+                            ? "Bundled firmware v" + panel.firmware.firmwareVersion +
+                              " · build " + (panel.packageBuild.length ? panel.packageBuild : "unknown")
                             : "Firmware package unavailable"
                         elide: Text.ElideRight
                         color: panel.theme.text
@@ -113,7 +120,7 @@ SurfacePanel {
 
         Rectangle {
             Layout.fillWidth: true
-            implicitHeight: 112
+            implicitHeight: 130
             radius: 9
             color: panel.theme.surface2
             border.width: 1
@@ -143,7 +150,8 @@ SurfacePanel {
                     Label {
                         Layout.fillWidth: true
                         text: panel.device.deviceVerified
-                            ? panel.device.deviceProduct + " · firmware v" + panel.device.firmwareVersion
+                            ? panel.device.deviceProduct + " · v" + panel.device.firmwareVersion +
+                              " · build " + (panel.installedBuild.length ? panel.installedBuild : "unknown")
                             : (panel.hasPort ? firmwarePort.currentText + " · not verified"
                                              : "Connect ESP32-P4 via USB.")
                         color: panel.device.deviceVerified ? panel.theme.green : panel.theme.muted
@@ -152,6 +160,16 @@ SurfacePanel {
                         wrapMode: Text.WordWrap
                     }
 
+                    Label {
+                        Layout.fillWidth: true
+                        visible: panel.device.deviceVerified
+                        text: panel.exactBuildMatch
+                            ? "Exact bundled build verified on this board"
+                            : "Installed build differs from this Studio package"
+                        color: panel.exactBuildMatch ? panel.theme.green : panel.theme.amber
+                        font.family: panel.uiFont
+                        font.pixelSize: 9
+                    }
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 8
