@@ -8,6 +8,7 @@ Rectangle {
     id: panel
     property var theme
     property var device
+    property real signalFrequency: 50.0
     property string uiFont: "Inter"
     property string monoFont: "Inter"
     color: theme.surface2
@@ -114,6 +115,7 @@ Rectangle {
                                 : captureDuration.currentIndex === 0 ? 30 : 120
                     capture.startCapture(adapter.currentIndex, seconds, {
                         "captured_utc": new Date().toISOString(),
+                        "operator_frequency_hz_UNVERIFIED": panel.signalFrequency,
                         "firmware_version": panel.device ? panel.device.firmwareVersion : "",
                         "firmware_build_id": panel.device ? panel.device.firmwareBuildId : "",
                         "boot_id": panel.device ? panel.device.bootId : "",
