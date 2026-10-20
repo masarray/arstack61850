@@ -68,6 +68,7 @@ class DeviceController : public QObject {
     Q_PROPERTY(bool ptpRunning READ ptpRunning NOTIFY ptpStateChanged)
     Q_PROPERTY(bool ptpStarting READ ptpStarting NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpStatus READ ptpStatus NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpFailureReason READ ptpFailureReason NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpDomain READ ptpDomain NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpTransportSpecific READ ptpTransportSpecific NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpVlan READ ptpVlan NOTIFY ptpStateChanged)
@@ -156,6 +157,7 @@ public:
     [[nodiscard]] bool ptpRunning() const noexcept;
     [[nodiscard]] bool ptpStarting() const noexcept { return ptpStartStage_ != PtpStartStage::idle; }
     [[nodiscard]] QString ptpStatus() const;
+    [[nodiscard]] QString ptpFailureReason() const { return ptpFailureReason_; }
     [[nodiscard]] QString ptpDomain() const;
     [[nodiscard]] QString ptpTransportSpecific() const;
     [[nodiscard]] QString ptpVlan() const;
@@ -435,6 +437,7 @@ private:
     QString pendingPtpRole_;
     QString pendingPtpConfig_;
     bool ptpRuntimeRoleSeen_{false};
+    bool ptpRuntimeRunningSeen_{false};
     bool ioWorkerReady_{false};
     bool ioWorkerAffinityValid_{false};
     bool shuttingDown_{false};
@@ -442,6 +445,7 @@ private:
     bool pendingAutoDetect_{false};
     double signalFrequencyHz_{50.0};
     QString ptpStatus_{QStringLiteral("Waiting for device")};
+    QString ptpFailureReason_;
     QString ptpDomain_{QStringLiteral("-")};
     QString ptpTransportSpecific_{QStringLiteral("-")};
     QString ptpVlan_{QStringLiteral("-")};
