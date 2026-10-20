@@ -73,7 +73,7 @@ config AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL
     default n
     depends on AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL && !AR_SMV_BROADCAST_MIRROR && !AR_SMV_DIAGNOSTIC_PROBES
     help
-        Diagnostic only: once per 16 canonical smpCnt-zero epochs, use the
+        Diagnostic only: once per 2 canonical smpCnt-zero epochs, use the
         ESP32-P4 MAC extended TX API to request a descriptor timestamp on
         the actual SV frame, while all other frames use the regular TX path.
         The ESP-IDF 5.x driver busy-waits for the selected descriptor, which
