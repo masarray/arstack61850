@@ -253,7 +253,7 @@ def main() -> None:
             "main window must expose timing and frequency context controls")
     require("function startPtpRole(role) { return timingPanel.startRole(role) }" in config
             and "const accepted = profilePanel.startPtpRole(role)" in main_qml
-            and "requestStartPtpConfigured(role, panel.ptpProfile())" in expert,
+            and "requestStartPtpConfigured(role, panel.ptpProfile(role))" in expert,
             "main PTP must reuse the existing verified Advanced profile")
     require("checked = Qt.binding(function()" in tray
             and "tray.controller.requestStopPtp()" in tray
