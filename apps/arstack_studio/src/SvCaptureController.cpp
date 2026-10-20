@@ -18,7 +18,9 @@
 #include <QTimer>
 
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <numbers>
 #include <limits>
 #include <utility>
 
@@ -389,6 +391,27 @@ QVariantMap SvCaptureController::decodePcap(
     // Preserve every raw PCAP packet. 3600s CSV exports only every 20th
     // validated frame; per-second counters always use every frame.
     const quint64 csvStride = requestedSeconds >= 3600 ? 20 : 1;
+    // The frequency is operator context, NOT wire authority. Every numerical
+    // measurement below is computed from the actual 8x64-bit SV wire payload.
+    bool frequencyValid = false;
+    const double intendedHz = studioTelemetry
+        .value(QStringLiteral("operator_frequency_hz_UNVERIFIED"))
+        .toDouble(&frequencyValid);
+    frequencyValid = frequencyValid && std::isfinite(intendedHz) &&
+                     intendedHz > 0.0 && intendedHz <= 1000.0;
+    std::array<double, 4000> sineBasis{}, cosineBasis{};
+    if (frequencyValid) {
+        for (std::size_t i = 0; i < sineBasis.size(); ++i) {
+            const double rad = 2.0 * std::numbers::pi * intendedHz *
+                static_cast<double>(i) / 4000.0;
+            sineBasis[i] = std::sin(rad);
+            cosineBasis[i] = std::cos(rad);
+        }
+    }
+    std::array<double, 8> powerSums{}, sums{}, sinSums{}, cosSums{};
+    std::array<quint64, 8> nonzeroQualityCounts{};
+    std::array<qint32, 8> minimums{}, maximums{};
+    quint64 hostGapEvents = 0, maximumHostGapUs = 0;
     quint64 matched = 0, malformed = 0, missing = 0, duplicates = 0;
     quint64 firstTimestamp = 0, lastTimestamp = 0, csvRows = 0;
     QHash<QString, quint32> previousCounters;
@@ -500,6 +523,15 @@ QVariantMap SvCaptureController::decodePcap(
             const quint32 diff = (record.count + kSampleWrap - previous.value()) % kSampleWrap;
             const auto oldTimestamp = previousTimestamps.value(streamKey);
             const quint64 hostDelta = timestamp >= oldTimestamp ? timestamp - oldTimestamp : 0;
+            maximumHostGapUs = std::max(maximumHostGapUs, hostDelta);
+            if (hostDelta > 1000) {
+                ++hostGapEvents;
+                eventStream << timestamp << ",HOST_CAPTURE_INTERVAL,"
+                            << record.src << ',' << record.svId << ','
+                            << previous.value() << ',' << record.count
+                            << ",0," << hostDelta
+                            << ",host_timestamp_not_hardware_egress\n";
+            }
             if (diff == 0) {
                 ++duplicates;
                 ++bucketDuplicates;
@@ -547,6 +579,22 @@ QVariantMap SvCaptureController::decodePcap(
         previousCounters.insert(streamKey, record.count);
         previousSync.insert(streamKey, record.synch);
         previousTimestamps.insert(streamKey, timestamp);
+        for (std::size_t i = 0; i < kChannels.size(); ++i) {
+            const auto value = record.values[i];
+            if (matched == 1) minimums[i] = maximums[i] = value;
+            else {
+                minimums[i] = std::min(minimums[i], value);
+                maximums[i] = std::max(maximums[i], value);
+            }
+            const double x = static_cast<double>(value);
+            powerSums[i] += x * x;
+            sums[i] += x;
+            if (frequencyValid && record.count < 4000U) {
+                sinSums[i] += x * sineBasis[record.count];
+                cosSums[i] += x * cosineBasis[record.count];
+            }
+            if (record.qualities[i] != 0U) ++nonzeroQualityCounts[i];
+        }
         if ((matched - 1) % csvStride != 0) continue;
         ++csvRows;
         stream << timestamp << ',' << record.src << ',' << record.dst << ','
@@ -574,6 +622,29 @@ QVariantMap SvCaptureController::decodePcap(
     eventsCsv.close();
     const double span = matched > 1 ? (lastTimestamp - firstTimestamp) / 1000000.0 : 0.;
     const double observedFps = span > 0 ? (matched - 1) / span : 0.;
+    QVariantMap channelMeasurements;
+    if (matched > 0) {
+        for (std::size_t i = 0; i < kChannels.size(); ++i) {
+            const double n = static_cast<double>(matched);
+            QVariantMap item{
+                {QStringLiteral("min_wire_counts"), minimums[i]},
+                {QStringLiteral("max_wire_counts"), maximums[i]},
+                {QStringLiteral("mean_wire_counts"), sums[i] / n},
+                {QStringLiteral("rms_wire_counts"), std::sqrt(powerSums[i] / n)},
+                {QStringLiteral("nonzero_quality_frame_count"), qulonglong(nonzeroQualityCounts[i])}
+            };
+            if (frequencyValid) {
+                const double a = 2.0 * sinSums[i] / n;
+                const double b = 2.0 * cosSums[i] / n;
+                const double amplitude = std::hypot(a, b) / std::sqrt(2.0);
+                item.insert(QStringLiteral("fundamental_rms_wire_counts"), amplitude);
+                item.insert(QStringLiteral("fundamental_phase_degrees"),
+                    amplitude <= 0.001 ? QVariant{} :
+                    QVariant(std::atan2(b, a) * 180.0 / std::numbers::pi));
+            }
+            channelMeasurements.insert(QString::fromLatin1(kChannels[i]), item);
+        }
+    }
     QVariantMap report{
         {QStringLiteral("schema"), QStringLiteral("arstack.sv.capture.v2")},
         {QStringLiteral("source"), QStringLiteral("independent ethernet PCAP via dumpcap/Npcap")},
@@ -585,6 +656,16 @@ QVariantMap SvCaptureController::decodePcap(
         {QStringLiteral("seconds_csv"), secondsFile},
         {QStringLiteral("events_csv"), eventsFile},
         {QStringLiteral("ptp_l2_frames"), qulonglong(ptpFrames)},
+        {QStringLiteral("wire_channel_measurements"), channelMeasurements},
+        {QStringLiteral("fundamental_reference_hz_UNVERIFIED"),
+            frequencyValid ? QVariant(intendedHz) : QVariant{}},
+        {QStringLiteral("fundamental_reference_note"),
+            QStringLiteral("Fundamental fits use the operator scenario frequency "
+                           "and smpCnt at assumed 4000 fps; they do not establish "
+                           "physical timing, phasor calibration or CT shaping. "
+                           "If frequency changes mid-capture, re-capture steady state.")},
+        {QStringLiteral("host_timestamp_gaps_over_1ms"), qulonglong(hostGapEvents)},
+        {QStringLiteral("max_host_timestamp_gap_us"), qulonglong(maximumHostGapUs)},
         {QStringLiteral("ptp_malformed_frames"), qulonglong(malformedPtp)},
         {QStringLiteral("ptp_l2_message_counts"), ptpMessageCounts},
         {QStringLiteral("sync_transition_count"), qulonglong(syncTransitions)},
