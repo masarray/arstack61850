@@ -93,7 +93,7 @@ public:
         le32(global, 65535);
         le32(global, 1);
         file.write(global);
-        const std::array<quint16, 3> counts{3999, 0, 2};
+        const std::array<quint16, 4> counts{3999, 0, 2, 3};
         for (int i = 0; i < 3; ++i) {
             const QByteArray wire = packet(counts[i], i == 2 ? 1 : 0);
             QByteArray header;
@@ -134,16 +134,17 @@ public:
         const QByteArray secondsRows = secondsFile.readAll();
         const QByteArray eventRows = eventsFile.readAll();
         const bool ok =
-            parsed.value("sv_frames").toDouble() == 3 &&
+            parsed.value("sv_frames").toDouble() == 4 &&
             parsed.value("missing_sample_counts").toDouble() == 1 &&
             parsed.value("duplicate_sample_counts").toDouble() == 0 &&
-            parsed.value("csv_rows").toDouble() == 3 &&
+            parsed.value("csv_rows").toDouble() == 4 &&
             parsed.value("physical_acceptance").toBool() == false &&
             parsed.value("schema").toString() == "arstack.sv.capture.v2" &&
             parsed.value("status").toString() == "CAPTURED_WITH_ANOMALIES" &&
             parsed.value("ptp_l2_frames").toDouble() == 1 &&
             parsed.value("ptp_l2_message_counts").toObject().value("SYNC").toDouble() == 1 &&
-            parsed.value("sync_transition_count").toDouble() == 1 &&
+            parsed.value("sync_transition_count").toDouble() == 2 &&
+            parsed.value("sync_loss_count").toDouble() == 1 &&
             parsed.value("host_timestamp_gaps_over_1ms").toDouble() == 1 &&
             parsed.value("max_host_timestamp_gap_us").toDouble() == 42389 &&
             parsed.value("malformed_frames").toDouble() == 0 &&
@@ -151,7 +152,7 @@ public:
             std::abs(parsed.value("wire_channel_measurements").toObject()
                 .value("IA").toObject().value("rms_wire_counts").toDouble() - 1200.0) < 0.01 &&
             parsed.value("wire_channel_measurements").toObject()
-                .value("IA").toObject().value("nonzero_quality_frame_count").toDouble() == 3 &&
+                .value("IA").toObject().value("nonzero_quality_frame_count").toDouble() == 4 &&
             parsed.value("fundamental_reference_hz_UNVERIFIED").toDouble() == 50.0 &&
             parsed.value("studio_telemetry_series_UNVERIFIED").toArray().size() == 1 &&
             parsed.value("studio_telemetry_series_UNVERIFIED").toArray()[0]
@@ -167,15 +168,17 @@ public:
             eventRows.contains("SAMPLE_GAP") &&
             eventRows.contains("HOST_CAPTURE_INTERVAL") &&
             eventRows.contains("SMPSYNCH_CHANGE") &&
+            eventRows.contains("1_to_0") &&
             eventRows.contains("PTP_SYNC") &&
             eventRows.contains("sequence=4660") &&
-            result.value("status").toString().contains("3 SV / 1 PTP") &&
+            result.value("status").toString().contains("4 SV / 1 PTP") &&
             // The SAME production report powers the beginner-friendly
             // in-Studio summary: this is on-wire evidence, not a PASS badge.
-            result.value("summary").toMap().value("sv_frames").toULongLong() == 3 &&
+            result.value("summary").toMap().value("sv_frames").toULongLong() == 4 &&
             result.value("summary").toMap().value("ptp_frames").toULongLong() == 1 &&
             result.value("summary").toMap().value("missing_samples").toULongLong() == 1 &&
-            result.value("summary").toMap().value("sync_transitions").toULongLong() == 1 &&
+            result.value("summary").toMap().value("sync_transitions").toULongLong() == 2 &&
+            result.value("summary").toMap().value("sync_losses").toULongLong() == 1 &&
             !result.value("summary").toMap().value("physical_acceptance").toBool();
         if (!ok) qCritical() << "Failed production PCAP fixture:" << result << parsed;
         return ok;
