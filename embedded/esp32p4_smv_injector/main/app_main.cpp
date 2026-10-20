@@ -897,21 +897,25 @@ void publisher_task(void* argument) {
 #if AR_SV_PTP_PHASE_SUPPORTED
             const auto profile = runtime_profile_snapshot();
             const auto lease = read_ptp_epoch_clock_lease();
-            const bool auto_source_ready = SvAutoPreflightPolicy::can_prepare(
+            // An external-GM RECEIVER can pre-steer its dry sample clock
+            // after disciplined LOCKED/selected-GM lease, just like SOURCE.
+            // No canonical SV frame or smpSynch claim is emitted pre-START.
+            const bool auto_clock_ready = SvAutoPreflightPolicy::can_prepare(
                 smp_synch_lab_mode() == SvSyncPolicyMode::external_ptp_auto,
-                lease.role == PtpAuthorityRole::source &&
+                (lease.role == PtpAuthorityRole::source ||
+                 lease.role == PtpAuthorityRole::receiver) &&
                     valid_sv_ptp_clock_lease(lease) &&
                     (xEventGroupGetBits(g_link_events) & kLinkUpBit) != 0U,
                 runtime_profile_validate(profile), profile.publisher_rate_hz,
                 profile.sample_counter_modulus);
-            if (preflight_clock && (!auto_source_ready ||
+            if (preflight_clock && (!auto_clock_ready ||
                 preflight_rate_hz != profile.publisher_rate_hz ||
                 !same_sv_ptp_clock_lease(
                     g_sample_clock_context.armed_ptp_clock, lease))) {
                 stop_sample_clock(sample_clock);
                 preflight_clock = false;
             }
-            if (sample_clock == nullptr && auto_source_ready) {
+            if (sample_clock == nullptr && auto_clock_ready) {
                 bool aligned = false;
                 sample_clock = start_sample_clock(
                     task_handle, profile.publisher_rate_hz, eth_handle,
