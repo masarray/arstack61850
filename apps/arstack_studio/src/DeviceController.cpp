@@ -1349,7 +1349,7 @@ void DeviceController::failPtpStartup(const QString& reason, const bool rollback
     }
     resetPtpStartup();
     ptpRunning_ = false;
-    ptpStatus_ = QStringLiteral("PTP start failed");
+    ptpStatus_ = QStringLiteral("PTP start failed: %1").arg(reason);
     emit ptpStateChanged();
 }
 
@@ -1423,7 +1423,7 @@ void DeviceController::advancePtpStartup(const QString& line) {
     if (rejected) {
         const bool rollback = ptpStartStage_ == PtpStartStage::awaiting_start ||
                               ptpStartStage_ == PtpStartStage::awaiting_runtime;
-        failPtpStartup(QStringLiteral("Board rejected PTP mode, settings or start."), rollback);
+        failPtpStartup(QStringLiteral("Board rejected command: %1").arg(line), rollback);
         return;
     }
     if (ptpStartStage_ == PtpStartStage::awaiting_role_ack) {
@@ -1432,6 +1432,12 @@ void DeviceController::advancePtpStartup(const QString& line) {
             ptpStartStage_ = PtpStartStage::awaiting_role_readback;
             ptpStatus_ = QStringLiteral("Confirming PTP mode on board...");
             emit ptpStateChanged();
+            // Explicit role readback is mandatory; ACK alone cannot prove
+            // the firmware role. Do not rely on unrelated periodic polling.
+            if (!sendCommand(QStringLiteral("PROFILE SHOW"))) {
+                failPtpStartup(QStringLiteral("Could not request verified PTP role readback."), false);
+                return;
+            }
             ptpStartTimer_.start(5000);
         }
         return;
@@ -1943,7 +1949,7 @@ void DeviceController::processLine(const QString& rawLine) {
     }
     if (line.contains(QStringLiteral("PTP start rejected"), Qt::CaseInsensitive) || line.contains(QStringLiteral("PTP source readiness timeout"), Qt::CaseInsensitive)) {
         ptpRunning_ = false;
-        ptpStatus_ = QStringLiteral("PTP start failed");
+        ptpStatus_ = QStringLiteral("PTP start failed: %1").arg(line);
         emit ptpStateChanged();
         setError(ptpRole_ == QStringLiteral("SOURCE")
             ? QStringLiteral("PTP source did not emit Announce/Sync/Follow_Up. Check the Ethernet link and retry Start PTP Source.")
