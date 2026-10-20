@@ -209,6 +209,10 @@ struct SampleClockContext final {
     std::atomic<std::int32_t> cumulative_slew_ticks{0};
     std::atomic<std::uint32_t> publisher_fault_generation{0U};
     std::atomic<bool> phase_authority_valid{false};
+    // Last successfully observed sample epoch (published only by the 1Hz
+    // control-plane observer). The 4kHz producer checks freshness without
+    // waiting for that observer or consulting blocking MAC/PTP APIs.
+    std::atomic<std::uint32_t> last_phase_observed_epoch{0U};
     // Immutable for one monitored timer session; read under phase mutex.
     SvPtpClockLease armed_ptp_clock{};
     SvBoundedSlewCursor phase_slew{};
@@ -617,6 +621,7 @@ gptimer_handle_t start_sample_clock(
     g_sample_clock_context.cumulative_slew_ticks.store(0, std::memory_order_relaxed);
     g_sample_clock_context.publisher_fault_generation.store(0U, std::memory_order_relaxed);
     g_sample_clock_context.phase_authority_valid.store(false, std::memory_order_relaxed);
+    g_sample_clock_context.last_phase_observed_epoch.store(0U, std::memory_order_relaxed);
     g_sample_clock_context.armed_ptp_clock = {};
     g_sample_clock_context.phase_index = 0U;
     g_sample_clock_context.previous_phase_healthy = false;
@@ -708,6 +713,8 @@ void stop_sample_clock(gptimer_handle_t& timer) noexcept {
         0, std::memory_order_relaxed);
     g_sample_clock_context.phase_authority_valid.store(
         false, std::memory_order_release);
+    g_sample_clock_context.last_phase_observed_epoch.store(
+        0U, std::memory_order_release);
     g_sample_clock_context.armed_ptp_clock = {};
 #endif
     static_cast<void>(gptimer_stop(timer));
@@ -1000,6 +1007,11 @@ void publisher_task(void* argument) {
             if (smp_synch_source_local_qualified() &&
                 (!g_sample_clock_context.phase_authority_valid.load(
                      std::memory_order_acquire) ||
+                 !ar::iec61850::time_sync::SvPhaseObservationFreshness::fresh(
+                     g_sample_clock_context.last_phase_observed_epoch.load(
+                         std::memory_order_acquire),
+                     g_sample_clock_context.epoch_generation.load(
+                         std::memory_order_acquire)) ||
                  ar_ptp_lab_source_generation() !=
                      g_sample_clock_context.armed_ptp_clock.generation)) {
                 smp_synch_set_source_local_qualified(false);
@@ -1344,6 +1356,10 @@ void sv_ptp_phase_observer_task(void* argument) {
             // The PRE-START clock must truly steer while SV TX is OFF.
             // The old live_tx_running() gate invalidated its servo on every
             // 1Hz observation; capture verified 120s of smpSynch=0.
+            g_sample_clock_context.last_phase_observed_epoch.store(
+                decision.epoch_second_continuous
+                    ? observation.last_sv_epoch_generation : 0U,
+                std::memory_order_release);
             g_sample_clock_context.phase_authority_valid.store(
                 decision.epoch_second_continuous, std::memory_order_release);
             g_sample_clock_context.requested_slew_ticks.store(
