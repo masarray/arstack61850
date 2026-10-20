@@ -844,7 +844,20 @@ void start_ptp_lab(const esp_eth_handle_t eth_handle) {
         if (source_has_fresh_evidence() || !g_ptp_started.load(std::memory_order_acquire)) return;
         vTaskDelay(pdMS_TO_TICKS(10));
     }
-    ESP_LOGE(kTag, "PTP source readiness timeout: no verified Announce/Sync/Follow_Up TX");
+    // Diagnosable FROM the firmware at the failed START edge. No extra
+    // polling, allocations, or logging in the PTP TX/4kHz SV hot path.
+    ESP_LOGE(kTag,
+             "PTP source readiness timeout: no verified Announce/Sync/Follow_Up TX "
+             "Announce=%llu Sync=%llu FollowUp=%llu TXfail=%llu ready=%u",
+             static_cast<unsigned long long>(
+                 g_announce_sent.load(std::memory_order_relaxed)),
+             static_cast<unsigned long long>(
+                 g_sync_sent.load(std::memory_order_relaxed)),
+             static_cast<unsigned long long>(
+                 g_follow_up_sent.load(std::memory_order_relaxed)),
+             static_cast<unsigned long long>(
+                 g_tx_failure_count.load(std::memory_order_relaxed)),
+             g_ptp_ready.load(std::memory_order_acquire) ? 1U : 0U);
     stop_ptp_lab();
 }
 
