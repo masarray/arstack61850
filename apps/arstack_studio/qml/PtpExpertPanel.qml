@@ -34,8 +34,11 @@ SurfacePanel {
             vlanEnabled: vlanCheck.checked,
             vlanId: Number(vlanField.text),
             vlanPriority: Number(pcpField.text),
-            announceIntervalMs: Number(announceField.text),
-            syncIntervalMs: Number(syncField.text),
+            // Standard SOURCE cadence is not operator-tunable in this
+            // process-bus profile. Expert Follower/Monitor fields remain
+            // configurable. Direct API callers are independently validated.
+            announceIntervalMs: role === "SOURCE" ? 1000 : Number(announceField.text),
+            syncIntervalMs: role === "SOURCE" ? 1000 : Number(syncField.text),
             // IEC/IEEE 61850-9-3 SOURCE always requires Pdelay capability.
             // An optional bench-only mode must never be silently substituted.
             respondToPeerDelay: role === "SOURCE" ? true : pdelayCheck.checked
@@ -482,9 +485,9 @@ SurfacePanel {
                     Label { text: "transportSpecific"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: transportField; theme: panel.theme; monoFont: panel.uiFont; text: panel.device.ptpTransportSpecific === "-" ? "0" : String(Number(panel.device.ptpTransportSpecific)); validator: IntValidator { bottom: 0; top: 15 } }
                     Label { text: "Announce interval (ms)"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
-                    NumericField { id: announceField; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 100; top: 10000 } }
+                    NumericField { id: announceField; enabled: modeCombo.currentIndex !== 0; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 100; top: 10000 } }
                     Label { text: "Sync interval (ms)"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
-                    NumericField { id: syncField; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 20; top: 5000 } }
+                    NumericField { id: syncField; enabled: modeCombo.currentIndex !== 0; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 20; top: 5000 } }
                     StudioDarkCheckBox { id: vlanCheck; theme: panel.theme; uiFont: panel.uiFont; text: "VLAN" }
                     NumericField { id: vlanField; enabled: vlanCheck.checked; theme: panel.theme; monoFont: panel.uiFont; text: "100"; validator: IntValidator { bottom: 1; top: 4094 } }
                     Label { text: "VLAN PCP"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
