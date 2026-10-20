@@ -83,6 +83,34 @@ struct PtpLabContext final {
 };
 
 PtpLabContext g_ptp_context{};
+enum class PtpSourceStartReason : std::uint8_t {
+    not_attempted, starting, ready, ethernet_missing, already_active,
+    ieee1588_clock_unavailable, mac_identity_unavailable,
+    invalid_runtime_profile, runtime_start_rejected,
+    pdelay_rx_timestamp_unavailable, source_tx_evidence_timeout,
+    source_task_create_failed, source_task_unsupported
+};
+std::atomic<PtpSourceStartReason> g_source_start_reason{
+    PtpSourceStartReason::not_attempted};
+[[nodiscard]] const char* source_start_reason_name(
+    const PtpSourceStartReason reason) noexcept {
+    switch (reason) {
+    case PtpSourceStartReason::not_attempted: return "NOT_ATTEMPTED";
+    case PtpSourceStartReason::starting: return "STARTING";
+    case PtpSourceStartReason::ready: return "READY_TX_EVIDENCE";
+    case PtpSourceStartReason::ethernet_missing: return "ETHERNET_HANDLE_MISSING";
+    case PtpSourceStartReason::already_active: return "SOURCE_TASK_ALREADY_ACTIVE";
+    case PtpSourceStartReason::ieee1588_clock_unavailable: return "IEEE1588_CLOCK_UNAVAILABLE";
+    case PtpSourceStartReason::mac_identity_unavailable: return "MAC_IDENTITY_UNAVAILABLE";
+    case PtpSourceStartReason::invalid_runtime_profile: return "INVALID_RUNTIME_PROFILE";
+    case PtpSourceStartReason::runtime_start_rejected: return "RUNTIME_START_REJECTED";
+    case PtpSourceStartReason::pdelay_rx_timestamp_unavailable: return "PDELAY_RX_TIMESTAMP_UNAVAILABLE";
+    case PtpSourceStartReason::source_tx_evidence_timeout: return "SOURCE_TX_EVIDENCE_TIMEOUT";
+    case PtpSourceStartReason::source_task_create_failed: return "SOURCE_TASK_CREATE_FAILED";
+    case PtpSourceStartReason::source_task_unsupported: return "SOURCE_TASK_UNSUPPORTED";
+    }
+    return "UNKNOWN";
+}
 std::atomic_bool g_ptp_started{false};
 std::atomic_bool g_ptp_ready{false};
 std::atomic<std::int64_t> g_ptp_last_announce_us{0LL};
@@ -580,6 +608,8 @@ void ptp_lab_task(void* argument) {
     vTaskDelay(kStartupDelay);
 
     if (!enable_hardware_ptp(context.eth_handle)) {
+        g_source_start_reason.store(
+            PtpSourceStartReason::ieee1588_clock_unavailable, std::memory_order_release);
         ESP_LOGE(kTag, "PTP lab broadcaster stopped: hardware timestamp clock unavailable");
         finish_runtime(context);
         vTaskDelete(nullptr);
@@ -594,6 +624,8 @@ void ptp_lab_task(void* argument) {
         ETH_CMD_G_MAC_ADDR,
         context.source_mac.data());
     if (mac_result != ESP_OK) {
+        g_source_start_reason.store(
+            PtpSourceStartReason::mac_identity_unavailable, std::memory_order_release);
         ESP_LOGE(kTag, "PTP lab broadcaster stopped: MAC address unavailable: %s",
                  esp_err_to_name(mac_result));
         finish_runtime(context);
@@ -603,6 +635,8 @@ void ptp_lab_task(void* argument) {
 
     auto profile = make_runtime_options(context.source_mac);
     if (!profile.has_value()) {
+        g_source_start_reason.store(
+            PtpSourceStartReason::invalid_runtime_profile, std::memory_order_release);
         finish_runtime(context);
         vTaskDelete(nullptr);
         return;
@@ -623,6 +657,8 @@ void ptp_lab_task(void* argument) {
     }
     context.runtime.emplace(std::move(*profile));
     if (!context.runtime->start()) {
+        g_source_start_reason.store(
+            PtpSourceStartReason::runtime_start_rejected, std::memory_order_release);
         ESP_LOGE(kTag,
                  "PTP runtime rejected profile: %s",
                  context.runtime->status().last_error.c_str());
@@ -663,6 +699,9 @@ void ptp_lab_task(void* argument) {
     // propagation time. Do not advertise a usable timing source when the
     // requested hardware RX/Pdelay path could not be established.
     if (options.respond_to_peer_delay && !pdelay_enabled) {
+        g_source_start_reason.store(
+            PtpSourceStartReason::pdelay_rx_timestamp_unavailable,
+            std::memory_order_release);
         ESP_LOGE(kTag, "PTP SOURCE rejected: required hardware Pdelay response path unavailable");
         finish_runtime(context);
         vTaskDelete(nullptr);
@@ -748,6 +787,8 @@ void ptp_lab_task(void* argument) {
             g_ptp_ready.store(false, std::memory_order_release);
         } else if (!was_ready) {
             g_ptp_source_generation.fetch_add(1U, std::memory_order_release);
+            g_source_start_reason.store(
+                PtpSourceStartReason::ready, std::memory_order_release);
             g_ptp_ready.store(true, std::memory_order_release);
         }
 
@@ -777,6 +818,8 @@ void ptp_lab_task(void* argument) {
 #else
 
 void ptp_lab_task(void*) {
+    g_source_start_reason.store(
+        PtpSourceStartReason::source_task_unsupported, std::memory_order_release);
     ESP_LOGE(kTag,
              "PTP lab broadcaster requires ESP32-P4 IEEE1588 support and the ESP-IDF 5.x EMAC timestamp adapter");
     g_ptp_accept_rx.store(false, std::memory_order_release);
@@ -791,15 +834,21 @@ void stop_ptp_lab() noexcept;
 
 void start_ptp_lab(const esp_eth_handle_t eth_handle) {
     if (eth_handle == nullptr) {
+        g_source_start_reason.store(
+            PtpSourceStartReason::ethernet_missing, std::memory_order_release);
         ESP_LOGE(kTag, "PTP lab broadcaster not started: Ethernet handle is null");
         return;
     }
 
     portENTER_CRITICAL(&g_control_mux);
     if (g_ptp_started.load(std::memory_order_relaxed)) {
+        g_source_start_reason.store(
+            PtpSourceStartReason::already_active, std::memory_order_release);
         portEXIT_CRITICAL(&g_control_mux);
         return;
     }
+    g_source_start_reason.store(
+        PtpSourceStartReason::starting, std::memory_order_release);
     g_ptp_started.store(true, std::memory_order_relaxed);
     portEXIT_CRITICAL(&g_control_mux);
 
@@ -835,6 +884,8 @@ void start_ptp_lab(const esp_eth_handle_t eth_handle) {
             0) != pdPASS) {
         g_ptp_context.task_handle = nullptr;
         g_ptp_started.store(false, std::memory_order_release);
+        g_source_start_reason.store(
+            PtpSourceStartReason::source_task_create_failed, std::memory_order_release);
         ESP_LOGE(kTag, "Failed to create PTP lab task on CPU0");
         return;
     }
@@ -844,6 +895,8 @@ void start_ptp_lab(const esp_eth_handle_t eth_handle) {
         if (source_has_fresh_evidence() || !g_ptp_started.load(std::memory_order_acquire)) return;
         vTaskDelay(pdMS_TO_TICKS(10));
     }
+    g_source_start_reason.store(
+        PtpSourceStartReason::source_tx_evidence_timeout, std::memory_order_release);
     ESP_LOGE(kTag, "PTP source readiness timeout: no verified Announce/Sync/Follow_Up TX");
     stop_ptp_lab();
 }
@@ -921,6 +974,11 @@ extern "C" bool ar_ptp_lab_is_running(void) {
 // Used only by the facade to prevent simultaneous EMAC timebase owners.
 extern "C" bool ar_ptp_source_runtime_active(void) {
     return ar::esp32p4::smv::g_ptp_started.load(std::memory_order_acquire);
+}
+
+extern "C" const char* ar_ptp_source_last_start_reason(void) {
+    return ar::esp32p4::smv::source_start_reason_name(
+        ar::esp32p4::smv::g_source_start_reason.load(std::memory_order_acquire));
 }
 
 extern "C" std::uint32_t ar_ptp_source_generation(void) {
