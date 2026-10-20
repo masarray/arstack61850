@@ -169,7 +169,14 @@ public:
             eventRows.contains("SMPSYNCH_CHANGE") &&
             eventRows.contains("PTP_SYNC") &&
             eventRows.contains("sequence=4660") &&
-            result.value("status").toString().contains("3 SV / 1 PTP");
+            result.value("status").toString().contains("3 SV / 1 PTP") &&
+            // The SAME production report powers the beginner-friendly
+            // in-Studio summary: this is on-wire evidence, not a PASS badge.
+            result.value("summary").toMap().value("sv_frames").toULongLong() == 3 &&
+            result.value("summary").toMap().value("ptp_frames").toULongLong() == 1 &&
+            result.value("summary").toMap().value("missing_samples").toULongLong() == 1 &&
+            result.value("summary").toMap().value("sync_transitions").toULongLong() == 1 &&
+            !result.value("summary").toMap().value("physical_acceptance").toBool();
         if (!ok) qCritical() << "Failed production PCAP fixture:" << result << parsed;
         return ok;
     }
