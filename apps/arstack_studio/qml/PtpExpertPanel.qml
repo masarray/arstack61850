@@ -285,6 +285,16 @@ SurfacePanel {
                     font.pixelSize: 11
                 }
 
+            Label {
+                Layout.fillWidth: true
+                visible: panel.session && panel.session.firmwareUpdateAvailable
+                text: "Updated matching ESP32-P4 firmware available in Firmware. Install it for current PTP fixes."
+                color: panel.theme.amber
+                font.family: panel.uiFont
+                font.pixelSize: 10
+                wrapMode: Text.WordWrap
+            }
+
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 8
