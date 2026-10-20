@@ -42,7 +42,8 @@ Rectangle {
             "ptp_offset_ns": panel.device ? panel.device.ptpOffsetNs : "",
             "device_fps": panel.device ? panel.device.fps : "",
             "device_missed": panel.device ? panel.device.missed : "",
-            "device_tx_failures": panel.device ? panel.device.txFailures : ""
+            "device_tx_failures": panel.device ? panel.device.txFailures : "",
+            "onboard_sync_flight_UNVERIFIED": panel.device ? panel.device.syncFlightLatest : ""
 
         }
     }
