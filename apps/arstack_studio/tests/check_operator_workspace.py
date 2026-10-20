@@ -445,6 +445,27 @@ def main() -> None:
             "syncFlightLatest_ = flightLine" in dev_cpp,
             "Studio must expose the physical firmware's internal, reason-coded "
             "lock flight recorder in Time Sync and correlate it passively with Capture")
+    # Board identity is not a firmware revision, and board-ready is not PTP-ready.
+    # Operators must see exact running/bundled build IDs without opening logs.
+    firmware_ui = source("FirmwarePanel.qml")
+    require("readonly property string bundledBuild" in firmware_ui and
+            "readonly property string installedBuild" in firmware_ui and
+            "readonly property bool exactBuildMatch" in firmware_ui and
+            '"Build " + panel.bundledBuild' in firmware_ui and
+            '"Installed build " + (panel.installedBuild' in firmware_ui and
+            "complete: panel.exactBuildMatch" in firmware_ui and
+            '"Reinstall bundled"' in firmware_ui,
+            "Studio must show the real exact ESP32-P4 build and never mistake "
+            "protocol compatibility for verified bundled firmware")
+    require("Q_PROPERTY(QString ptpFailureReason" in dev_h and
+            "ptpRuntimeRunningSeen_" in dev_h and
+            "ptpRuntimeRoleSeen_ = true" in dev_cpp and
+            "ptpRuntimeRunningSeen_ = true" in dev_cpp and
+            "if (!ptpRuntimeRoleSeen_ || !ptpRuntimeRunningSeen_" in dev_cpp and
+            "case PtpStartStage::awaiting_start:" in dev_cpp and
+            "panel.device.ptpFailureReason" in ptp_src,
+            "PTP startup must wait for both positive runtime facts, and show "
+            "the exact firmware error and failed stage in the operator UI")
     print("Studio operator workspace contract: PASS")
 
 
