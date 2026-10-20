@@ -1894,8 +1894,11 @@ void DeviceController::processLine(const QString& rawLine) {
                 failScenarioStart(QStringLiteral("Unexpected SV START ACK identity/hash."));
             return;
         }
-        resetScenarioStart();
+        // Publish verified RUNNING before clearing the pending START phase.
+        // Otherwise QML can briefly see neither RUNNING nor STARTING and
+        // bounce the button back to START during a successful ACK handoff.
         setRunning(true);
+        resetScenarioStart();
         return;
     }
 
