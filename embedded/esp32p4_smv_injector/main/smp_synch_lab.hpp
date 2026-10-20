@@ -40,12 +40,16 @@ enum class SvSyncLossReason : std::uint8_t {
     none, missed_slot, ethernet_link, observer_stale, mac_egress,
     canonical_tx, ptp_lease, observer_epoch, phase_or_mac,
     phase_handoff, publisher_stop, ptp_stop, operator_mode, other,
+    mac_missing_timestamp, mac_bad_epoch, mac_publisher_discontinuity,
+    mac_ptp_clock_step, mac_baseline_reset,
     count
 };
 constexpr std::size_t kSvSyncFlightEventCapacity = 16;
 struct SvSyncFlightEvent final {
     std::uint32_t sequence{};
     std::uint32_t monotonic_ms{};
+    std::int32_t phase_error_us{};
+    std::uint32_t mac_pairs{};
     SvSyncLossReason reason{SvSyncLossReason::none};
     bool acquired{};
 };
@@ -70,6 +74,7 @@ void smp_synch_diag_observe(std::int32_t phase_us, std::uint32_t uncertainty_us,
                            std::uint32_t mac_pairs, std::uint32_t clean_epochs,
                            std::uint32_t epoch, bool accepted, bool tracking) noexcept;
 [[nodiscard]] SvSyncFlightSnapshot smp_synch_diag_snapshot() noexcept;
+[[nodiscard]] std::uint32_t smp_synch_diag_event_count() noexcept;
 [[nodiscard]] const char* smp_synch_diag_reason_name(SvSyncLossReason reason) noexcept;
 void smp_synch_set_source_local_qualified(
     bool qualified, SvSyncLossReason reason = SvSyncLossReason::other,
