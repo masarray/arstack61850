@@ -11,6 +11,7 @@ Item {
     property var device
     property var profiles
     property var session
+    property real signalFrequency: 50.0
     property string uiFont: "Inter"
     property string monoFont: "Inter"
     property bool captureTabVisited: false
@@ -182,6 +183,7 @@ Item {
                     theme: hub.theme
                     device: hub.device
                     session: hub.session
+                    signalFrequency: hub.signalFrequency
                     uiFont: hub.uiFont
                     monoFont: hub.monoFont
                 }
