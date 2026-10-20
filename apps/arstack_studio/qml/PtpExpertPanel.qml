@@ -2,6 +2,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import ARStack.Studio 1.0
 
 SurfacePanel {
     id: panel
@@ -333,8 +334,15 @@ SurfacePanel {
                     text: "Copy diagnostics"
                     enabled: panel.session && panel.device.deviceVerified
                     onClicked: {
-                        StudioClipboard.copyText(panel.session.diagnosticsText())
-                        if (panel.controller) panel.controller.showMessage("PTP and firmware diagnostics copied.", false)
+                        const snapshot = panel.session ? panel.session.diagnosticsText() : ""
+                        if (StudioClipboard.copyText(snapshot)) {
+                            if (panel.controller)
+                                panel.controller.showMessage("PTP and firmware diagnostics copied.", false)
+                        } else if (panel.controller) {
+                            panel.controller.showMessage(
+                                "Windows clipboard unavailable. Select diagnostics in the opened window and press Ctrl+C.", true)
+                            panel.controller.openDiagnostics()
+                        }
                     }
                 }
                 Item { Layout.fillWidth: true }
