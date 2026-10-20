@@ -93,10 +93,17 @@ struct PtpPowerProfileCadence final {
     }
 };
 
-// IEC/IEEE 61850-9-3:2016 defaults for a singly-attached L2/P2P ordinary
-// clock: logAnnounceInterval=0, logSyncInterval=0; Pdelay_Req=1s is the
-// receiver's own setting. This function checks only publisher-exposed facts.
-// Domain and VLAN are deliberately NOT hardcoded: they must match the network.
+// IEC/IEEE 61850-9-3:2016 profile admission, common to Studio control
+// preflight and ESP32-P4 firmware. No clock-quality/IED-lock claim is made.
+// Domain/VLAN are intentionally configurable to match the process-bus LAN.
+[[nodiscard]] constexpr PtpPowerProfileCadence inspect_ptp_power_profile_cadence(
+    const std::uint32_t announce_ms, const std::uint32_t sync_ms,
+    const bool pdelay_responder) noexcept {
+    return {announce_ms == 1000U, sync_ms == 1000U, pdelay_responder};
+}
+
+// Adapter for the validated protocol runtime. Must not diverge from the
+// operator profile contract above.
 [[nodiscard]] constexpr PtpPowerProfileCadence inspect_ptp_power_profile_cadence(
     const PtpPublisherOptions& options) noexcept {
     using namespace std::chrono_literals;
