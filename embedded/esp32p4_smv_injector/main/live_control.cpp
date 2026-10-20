@@ -380,7 +380,15 @@ void handle_ptp_command(char* save) noexcept {
             return;
         }
         if (!ar_esp32p4_ptp_start()) {
-            ESP_LOGE(kTag, "PTP start rejected: Ethernet link or role runtime readiness failed");
+            ar_ptp_lab_config_t active{};
+            const bool is_source = ar_ptp_lab_get_config(&active) &&
+                active.role == AR_PTP_ROLE_LAB_SOURCE;
+            if (is_source) {
+                ESP_LOGE(kTag, "PTP start rejected: source_reason=%s",
+                         ar_ptp_source_last_start_reason());
+            } else {
+                ESP_LOGE(kTag, "PTP start rejected: receiver/monitor runtime unavailable");
+            }
         } else {
             ESP_LOGI(kTag, "PTP start accepted");
         }
