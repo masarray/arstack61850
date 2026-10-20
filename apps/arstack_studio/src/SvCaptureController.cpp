@@ -448,7 +448,7 @@ QVariantMap SvCaptureController::decodePcap(
     QHash<QString, quint32> previousCounters;
     QHash<QString, quint32> previousSync;
     QHash<QString, quint64> previousTimestamps;
-    quint64 ptpFrames = 0, malformedPtp = 0, syncTransitions = 0;
+    quint64 ptpFrames = 0, malformedPtp = 0, syncTransitions = 0, syncRevocations = 0;
     quint64 sampleJumpEvents = 0, backwardOrResetEvents = 0;
     QVariantMap ptpMessageCounts;
     QVariantList transitionTimeline;
@@ -594,6 +594,11 @@ QVariantMap SvCaptureController::decodePcap(
         const auto oldSync = previousSync.constFind(streamKey);
         if (oldSync != previousSync.cend() && oldSync.value() != record.synch) {
             ++syncTransitions;
+            // A demotion of advertised synchronized data to NOT_SYNCED is a
+            // physical-release blocker even when ALL smpCnt slots are present.
+            // A promotion from LOCAL(1) to GLOBAL(2) is NOT a loss.
+            if ((oldSync.value() == 1U || oldSync.value() == 2U) &&
+                record.synch == 0U) ++syncRevocations;
             eventStream << timestamp << ",SMPSYNCH_CHANGE,"
                         << record.src << ',' << record.svId
                         << ',' << record.count << ',' << record.count << ",0,0,"
@@ -704,6 +709,7 @@ QVariantMap SvCaptureController::decodePcap(
         {QStringLiteral("ptp_malformed_frames"), qulonglong(malformedPtp)},
         {QStringLiteral("ptp_l2_message_counts"), ptpMessageCounts},
         {QStringLiteral("sync_transition_count"), qulonglong(syncTransitions)},
+        {QStringLiteral("sync_loss_count"), qulonglong(syncRevocations)},
         {QStringLiteral("sync_transitions"), transitionTimeline},
         {QStringLiteral("counter_discontinuity_events"), qulonglong(sampleJumpEvents)},
         {QStringLiteral("counter_reset_or_reorder_events"), qulonglong(backwardOrResetEvents)},
@@ -730,7 +736,8 @@ QVariantMap SvCaptureController::decodePcap(
     };
     const bool usable = parseFailure.isEmpty() && matched > 0;
     const bool anomalies = missing > 0 || duplicates > 0 ||
-        malformed > 0 || malformedPtp > 0 || backwardOrResetEvents > 0;
+        malformed > 0 || malformedPtp > 0 || backwardOrResetEvents > 0 ||
+        syncRevocations > 0;
     report.insert(QStringLiteral("status"), !usable ? QStringLiteral("INVALID_CAPTURE")
         : anomalies ? QStringLiteral("CAPTURED_WITH_ANOMALIES")
                     : QStringLiteral("CAPTURED_NOT_ACCEPTED"));
@@ -750,6 +757,7 @@ QVariantMap SvCaptureController::decodePcap(
             {QStringLiteral("ptp_frames"), qulonglong(ptpFrames)},
             {QStringLiteral("missing_samples"), qulonglong(missing)},
             {QStringLiteral("sync_transitions"), qulonglong(syncTransitions)},
+            {QStringLiteral("sync_losses"), qulonglong(syncRevocations)},
             {QStringLiteral("observed_fps"), observedFps},
             {QStringLiteral("status"), report.value(QStringLiteral("status"))},
             {QStringLiteral("physical_acceptance"), false}
