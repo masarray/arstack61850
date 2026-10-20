@@ -723,7 +723,8 @@ private:
         if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_config) return false;
         d.processLine(QStringLiteral("PTP configuration rejected: invalid profile"));
         return !d.ptpStarting() && !d.ptpRunning_ &&
-            d.ptpStatus_ == QStringLiteral("PTP start failed");
+            d.ptpStatus_.startsWith(QStringLiteral("PTP start failed")) &&
+            d.ptpStatus_.contains(QStringLiteral("invalid profile"));
     }
 
     static QString ptpStoppedStatus() {
