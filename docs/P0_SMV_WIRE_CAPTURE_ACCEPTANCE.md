@@ -93,3 +93,54 @@ python3 -m unittest discover -s tests -p test_smv_wire_capture_audit.py -v
 
 Synthetic 50-Hz waveforms in these tests **do not** substitute for physical
 Ethernet measurements.
+
+
+## ARStack Studio one-click evidence V2 (SV + PTP)
+
+In **Advanced → Device**, use **Capture SV + PTP** to write the same-timeline
+L2 SV (0x88BA) and PTP (0x88F7) traffic, including one or two VLAN tags.
+This does not send any device command. The actual monitor adapter must receive
+both multicast groups: a TAP/SPAN that exposes SV but not PTP is not sufficient
+to correlate `smpSynch`.
+
+The exported bundle now contains:
+
+- `*.pcap`: lossless on-host packet data including SV and any observed PTP.
+- `*_report.json`: frame counts, PTP message categories, per-channel wire
+  min/max/mean/RMS/optional phasor estimate, quality word counts, and status
+  `CAPTURED_WITH_ANOMALIES` when loss, duplicates or malformed bytes are found.
+- `*_events.csv`: compact forensic events, one row per discontinuity,
+  duplicate, host capture timestamp gap (>1 ms), `smpSynch` change, and
+  observed PTP Sync/Follow_Up/Announce frame.
+- `*_seconds.csv`: entire-window per-second packet/loss summaries.
+- `*_samples.csv`: full 4I+4V values for 30/120s, 1-in-20 values for 3600s.
+
+**Upload `*_report.json` and `*_events.csv` first**. Include `*_seconds.csv`
+for rate analysis; attach the PCAP only when inspecting samples, BER, VLAN,
+transmit source, or timestamps. The large `*_samples.csv` is not required
+for first-stage triage because the report calculates eight-channel statistics
+directly from the raw packet decoder.
+
+### What a small packet gap means
+
+An observed transition such as `smpCnt=728 → 789` indicates 60 *missing
+captured sequence numbers*. It does **not** distinguish publisher frame loss,
+Ethernet switch/SPAN loss, NIC/driver queue overflow, or capture startup.
+A PC host gap (>1 ms) is not a hardware egress interval. Correlate with ESP32-P4
+canonical missed/fail counters recorded at both beginning and end, NIC/dropcap
+drop counters, and (where available) a hardware-timestamp TAP.
+
+### Synchronization interpretation
+
+`smpSynch=0` means no qualified sync advertised; `smpSynch=1` is a local
+clock claim and **is not evidence of external GM lock**. The initial Studio
+telemetry snapshot cannot describe a 120-second PTP transition; correlate
+`SMPSYNCH_CHANGE` events with live PTP Sync / Follow_Up / Announce packets,
+firmware PTP phase-acquisition logs and SOURCE qualification. A PTP capture
+alone still cannot demonstrate coherent SV/PTP phase, source traceability,
+or legitimate use of `smpSynch=2`. Never call such a capture a hardware PASS
+without independent timing and source evidence.
+
+The per-channel phasor estimates assume the GUI frequency recorded at capture
+start and a 4000 fps, 4000-count basis. They are not a calibrated magnitude
+contract or proof that operator inputs stayed unchanged during the capture.
