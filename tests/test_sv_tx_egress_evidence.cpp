@@ -119,6 +119,34 @@ void check_fast_source_auto_qualification_with_fresh_evidence() {
     REQUIRE(!gate.qualified(7U, 0U, 3U, 8U, true, 4U));
 }
 
+void check_external_gm_receiver_requires_real_sv_egress_and_phase() {
+    SvTxEgressEvidence tx;
+    SvLocalSyncEvidenceGate mac;
+    SvLocalRefAcquisition entry;
+    constexpr auto t0 = 1700000200U;
+    // A LOCKED/traceable external GM by itself never authorizes wire SV.
+    REQUIRE(!mac.qualified(7U, 0U, 3U, 1U, true, 2U));
+    REQUIRE(!entry.observe(false, 7U, 0U, 3U, 1U));
+    bool timeline = false;
+    for (std::uint32_t epoch = 2U; epoch <= 20U; ++epoch) {
+        if ((epoch % 2U) == 0U) {
+            const auto o = make_good(epoch, t0 + epoch, 90000U);
+            const auto result = tx.record(o);
+            mac.observe(o, result, tx.summary().last_phase_ns);
+        }
+        timeline = entry.observe(
+            mac.qualified(7U, 0U, 3U, epoch, true, 2U),
+            7U, 0U, 3U, epoch);
+    }
+    REQUIRE(timeline);
+    // A clock identity/GM or receiver discipline loss revokes immediately.
+    REQUIRE(!mac.qualified(7U, 0U, 4U, 20U, true, 2U));
+    REQUIRE(!entry.observe(false, 7U, 0U, 4U, 21U));
+    REQUIRE(!entry.observe(true, 7U, 1U, 4U, 22U));
+    REQUIRE(!entry.observe(true, 8U, 1U, 4U, 23U));
+    REQUIRE(!entry.observe(true, 8U, 1U, 4U, 23U));
+}
+
 void check_no_intermitttent_local_at_start() {
     SvLocalRefAcquisition gate;
     static_assert(SvLocalRefAcquisition::kRequiredCleanEpochs == 10U);
@@ -280,6 +308,7 @@ int main() {
     try {
         check_auto_local_sync_gate_requires_both_clocks_and_fresh_mac();
         check_fast_source_auto_qualification_with_fresh_evidence();
+        check_external_gm_receiver_requires_real_sv_egress_and_phase();
         check_no_intermitttent_local_at_start();
         check_local_only_after_ten_clean_seconds();
         check_baseline_and_contiguous_ptp();
