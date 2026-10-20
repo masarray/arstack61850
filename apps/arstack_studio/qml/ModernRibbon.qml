@@ -197,6 +197,16 @@ Rectangle {
         RibbonAction {
             theme: bar.theme
             uiFont: bar.uiFont
+            text: "Capture"
+            iconSource: Qt.resolvedUrl("../assets/material/monitor_heart.svg")
+            tone: "accent"
+            toolTipText: "Record independent Ethernet SV + PTP and review evidence in Studio"
+            onClicked: bar.controller.openCapture()
+        }
+
+        RibbonAction {
+            theme: bar.theme
+            uiFont: bar.uiFont
             text: "Advanced"
             iconOnly: false
             iconSource: Qt.resolvedUrl("../assets/material/settings.svg")
