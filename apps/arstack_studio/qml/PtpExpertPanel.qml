@@ -50,7 +50,7 @@ SurfacePanel {
             return false
         const accepted = panel.session.requestStartPtpConfigured(role, panel.ptpProfile())
         if (!accepted && panel.controller)
-            panel.controller.showMessage("PTP start blocked. Check timing diagnostics.", true)
+            panel.controller.showMessage("PTP could not start: " + panel.device.ptpStatus, true)
         return Boolean(accepted)
     }
 
@@ -80,7 +80,7 @@ SurfacePanel {
         : panel.device.ptpRunning
             ? (panel.receiverRole ? (panel.device.ptpDiscipline === "LOCKED" ? "BOARD LOCKED" : panel.device.ptpDiscipline)
                 : panel.activeRole + " ACTIVE")
-            : panel.device.ptpStatus === "PTP start failed" ? "START FAILED" : "OFF"
+            : panel.device.ptpStatus.indexOf("PTP start failed") === 0 ? "START FAILED" : "OFF"
 
     Timer {
         // Status refresh only. Native C++ verifies ACKs and owns timeouts.
