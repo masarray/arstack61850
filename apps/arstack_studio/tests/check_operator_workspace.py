@@ -439,9 +439,12 @@ def main() -> None:
             "record_transition(" in ptp_sync and
             "Q_PROPERTY(QString syncDiagnostics" in dev_h and
             "SVSYNC DIAG " in dev_cpp and
-            "requestSyncDiagnostics()" in session_h,
+            "requestSyncDiagnostics()" in session_h and
+            "onboard_sync_flight_UNVERIFIED" in capture_ui and
+            "syncFlightLatest" in dev_h and
+            "syncFlightLatest_ = flightLine" in dev_cpp,
             "Studio must expose the physical firmware's internal, reason-coded "
-            "lock flight recorder without external scripts")
+            "lock flight recorder in Time Sync and correlate it passively with Capture")
     print("Studio operator workspace contract: PASS")
 
 
