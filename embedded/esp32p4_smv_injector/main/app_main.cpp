@@ -1143,8 +1143,25 @@ void publisher_task(void* argument) {
                 const auto phase_ns = g_tx_egress_evidence.summary().last_phase_ns;
                 g_local_sync_evidence.observe(egress, result, phase_ns);
                 portEXIT_CRITICAL(&g_tx_egress_mux);
-                if (result != ar::iec61850::time_sync::SvTxEvidenceResult::measured)
-                    revoke_sv_auto_claims(SvSyncLossReason::mac_egress);
+                // Keep the EXACT real descriptor rejection class. This runs
+                // once every two seconds, never per-frame or in an ISR.
+                using Evidence = ar::iec61850::time_sync::SvTxEvidenceResult;
+                if (result != Evidence::measured) {
+                    const auto cause = result == Evidence::transmit_failed
+                        ? SvSyncLossReason::canonical_tx
+                        : result == Evidence::missing_hw_timestamp
+                            ? SvSyncLossReason::mac_missing_timestamp
+                        : result == Evidence::not_a_qualified_epoch
+                            ? SvSyncLossReason::mac_bad_epoch
+                        : result == Evidence::publisher_discontinuity
+                            ? SvSyncLossReason::mac_publisher_discontinuity
+                        : result == Evidence::ptp_clock_discontinuity
+                            ? SvSyncLossReason::mac_ptp_clock_step
+                        : result == Evidence::baseline_established
+                            ? SvSyncLossReason::mac_baseline_reset
+                        : SvSyncLossReason::mac_egress;
+                    revoke_sv_auto_claims(cause);
+                }
             }
 #else
             const esp_err_t canonical_result =
@@ -1445,6 +1462,15 @@ void sv_ptp_phase_observer_task(void* argument) {
                 // An external GM may yield LOCAL or GLOBAL only after both
                 // PTP discipline and this actual SV phase/MAC gate pass.
                 // SOURCE never promotes to GLOBAL through this path.
+                // Publish measured phase/MAC context BEFORE a lock edge,
+                // so each ring event snapshots the causally relevant
+                // observation rather than last second's cached values.
+                smp_synch_diag_observe(
+                    decision.phase_error_us, decision.observation_uncertainty_us,
+                    mac_pairs, local_acquisition.clean_epochs(),
+                    observation.last_sv_epoch_generation,
+                    decision.accepted && decision.epoch_second_continuous,
+                    decision.software_tracking);
                 const auto stamp_ms = static_cast<std::uint32_t>(
                     esp_timer_get_time() / 1000LL);
                 smp_synch_set_source_local_qualified(
@@ -1453,12 +1479,6 @@ void sv_ptp_phase_observer_task(void* argument) {
                 smp_synch_set_receiver_timeline_qualified(
                     stable_local && lease.role == PtpAuthorityRole::receiver,
                     SvSyncLossReason::phase_or_mac, stamp_ms);
-                smp_synch_diag_observe(
-                    decision.phase_error_us, decision.observation_uncertainty_us,
-                    mac_pairs, local_acquisition.clean_epochs(),
-                    observation.last_sv_epoch_generation,
-                    decision.accepted && decision.epoch_second_continuous,
-                    decision.software_tracking);
             } else {
                 local_acquisition.reset();
                 revoke_sv_auto_claims(SvSyncLossReason::publisher_stop);
@@ -1539,20 +1559,28 @@ void telemetry_task(void*) {
         // Auto-surface each change in the flight recorder once per second,
         // even if the operator forgets to request Inspect SV lock. The full
         // event ring remains available on demand through Studio.
-        const auto flight = ar::esp32p4::smv::smp_synch_diag_snapshot();
-        if (flight.events != last_flight_events_reported) {
-            const auto changes = flight.events - last_flight_events_reported;
-            last_flight_events_reported = flight.events;
-            if (flight.recent_count > 0U) {
+        // Do one atomic counter read per second during steady-state LOCK.
+        // Constructing a 16-event snapshot is only needed after a transition.
+        if (ar::esp32p4::smv::smp_synch_diag_event_count() !=
+                last_flight_events_reported) {
+            const auto flight = ar::esp32p4::smv::smp_synch_diag_snapshot();
+            if (flight.events != last_flight_events_reported &&
+                flight.recent_count > 0U &&
+                flight.recent[flight.recent_count - 1U].sequence == flight.events) {
+                const auto changes = flight.events - last_flight_events_reported;
+                last_flight_events_reported = flight.events;
                 const auto& latest = flight.recent[flight.recent_count - 1U];
                 ESP_LOGW(kTag,
                     "SVSYNC FLIGHT transitions=%lu latest_seq=%lu state=%s reason=%s "
-                    "uptime_ms=%lu phase_us=%ld uncertainty_us=%lu MACpairs=%lu clean=%lu",
+                    "uptime_ms=%lu event_phase_us=%ld event_MACpairs=%lu "
+                    "phase_us=%ld uncertainty_us=%lu MACpairs=%lu clean=%lu",
                     static_cast<unsigned long>(changes),
                     static_cast<unsigned long>(latest.sequence),
                     latest.acquired ? "ACQUIRED" : "REVOKED",
                     ar::esp32p4::smv::smp_synch_diag_reason_name(latest.reason),
                     static_cast<unsigned long>(latest.monotonic_ms),
+                    static_cast<long>(latest.phase_error_us),
+                    static_cast<unsigned long>(latest.mac_pairs),
                     static_cast<long>(flight.phase_error_us),
                     static_cast<unsigned long>(flight.uncertainty_us),
                     static_cast<unsigned long>(flight.mac_pairs),
