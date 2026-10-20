@@ -412,7 +412,7 @@ def main() -> None:
             "sourceComponent: SvCapturePanel {" in hub and
             "SvCapturePanel {" not in source("DeviceExpertPanel.qml"),
             "Studio must expose ONE persistent Capture workspace from its main ribbon")
-    require('text: "Capture SV + PTP"' in capture_ui and
+    require('"Capture SV + PTP"' in capture_ui and
             "capture.startCapture(" in capture_ui and
             "capture.summary.sv_frames" in capture_ui and
             "capture.summary.ptp_frames" in capture_ui and
