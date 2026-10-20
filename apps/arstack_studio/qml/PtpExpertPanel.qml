@@ -374,6 +374,16 @@ SurfacePanel {
                 }
             }
 
+            Label {
+                Layout.fillWidth: true
+                visible: panel.device.ptpLastStartFailure.length > 0
+                text: "PTP start did not complete · " + panel.device.ptpLastStartFailure
+                color: panel.theme.amber
+                font.family: panel.uiFont
+                font.pixelSize: 10
+                wrapMode: Text.WordWrap
+            }
+
             Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: 102
