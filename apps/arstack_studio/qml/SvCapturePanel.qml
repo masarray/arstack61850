@@ -22,7 +22,12 @@ Rectangle {
     // Read already-published Studio state passively. This never queues serial
     // commands; sample it at 1Hz so PTP/SV transitions can be time-correlated.
     function telemetrySnapshot() {
+        // Keep relevant embedded phase/egress diagnostics with the joint
+        // PCAP without issuing any extra serial commands. The final 1.5 KB is
+        // intentionally bounded at 1 Hz, including long endurance captures.
+        var logTail = panel.device ? String(panel.device.logText).slice(-1536) : ""
         return {
+            "firmware_log_tail_UNVERIFIED": logTail,
             "captured_utc": new Date().toISOString(),
             "operator_frequency_hz_UNVERIFIED": panel.signalFrequency,
             "firmware_version": panel.device ? panel.device.firmwareVersion : "",
