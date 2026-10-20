@@ -125,8 +125,10 @@ void fill_p2_defaults(ar_ptp_lab_config_t& config) noexcept {
 void stop_active_ptp_roles() noexcept {
     // Operator STOP or role handoff revokes the transmitted AUTO local-sync
     // claim immediately, independent of the slower phase observer cadence.
-    smp_synch_set_source_local_qualified(false);
-    smp_synch_set_receiver_timeline_qualified(false);
+    smp_synch_set_source_local_qualified(
+        false, ar::esp32p4::smv::SvSyncLossReason::ptp_stop);
+    smp_synch_set_receiver_timeline_qualified(
+        false, ar::esp32p4::smv::SvSyncLossReason::ptp_stop);
     if (ar_ptp_source_runtime_active()) {
         ar_ptp_source_stop();
     }
@@ -295,8 +297,10 @@ extern "C" void ar_ptp_lab_start(const esp_eth_handle_t eth_handle) {
 extern "C" void ar_ptp_lab_stop(void) {
     // A PTP stop must revoke both live SV timing claims BEFORE asynchronous
     // task teardown can complete, including external-GM receiver claims.
-    ar::esp32p4::smv::smp_synch_set_source_local_qualified(false);
-    ar::esp32p4::smv::smp_synch_set_receiver_timeline_qualified(false);
+    ar::esp32p4::smv::smp_synch_set_source_local_qualified(
+        false, ar::esp32p4::smv::SvSyncLossReason::ptp_stop);
+    ar::esp32p4::smv::smp_synch_set_receiver_timeline_qualified(
+        false, ar::esp32p4::smv::SvSyncLossReason::ptp_stop);
     // Publish the cancellation immediately. If START/config owns the
     // slot, that owner drains STOP at the atomic release boundary.
     if (ar::esp32p4::smv::g_role_control.request_stop_and_try_acquire()) {
