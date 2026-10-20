@@ -334,10 +334,15 @@ namespace {
         const auto after = ar_ptp_source_generation();
         status.role = AR_PTP_ROLE_LAB_SOURCE;
         status.discipline_state = AR_PTP_DISCIPLINE_UNLOCKED;
-        status.is_running = ok && status.is_running &&
+        // Operator RUNNING is physical runtime ownership, not a timing LOCK.
+        // Freshness may lapse while the SOURCE task continues to emit frames.
+        // A transient freshness miss must revoke its clock lease WITHOUT
+        // telling Studio that a still-active transmitter has stopped.
+        const bool source_clock_qualified = ok && status.is_running &&
             ar_ptp_source_is_running() && before != 0U && before == after;
-        status.timing_authority_generation = status.is_running ? after : 0U;
-        status.timing_authority_clock_usable = status.is_running;
+        status.is_running = ok && ar_ptp_source_runtime_active();
+        status.timing_authority_generation = source_clock_qualified ? after : 0U;
+        status.timing_authority_clock_usable = source_clock_qualified;
     } else if (ptp_receiver_runtime_active()) {
         ok = ptp_receiver_get_status(status);
     } else {
