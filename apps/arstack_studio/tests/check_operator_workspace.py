@@ -138,10 +138,10 @@ def main() -> None:
             "checkbox must keep one stable custom indicator on hover")
     require("anchors.centerIn: parent" in calm,
             "button caption needs horizontal centering")
-    require("root.sendSignal(group, row)" in main_qml
+    require("function sendSignal(group, row)" in main_qml
             and "Layout.fillHeight: false" in main_qml
             and "Layout.preferredHeight: 196" in main_qml,
-            "tables and live sent phases must use explicit bounded layout")
+            "tables and live sent phases must use explicit bounded layout without link-toggle replay")
     require('property bool ptpDefaultStartAttempted: false' in main_qml
             and 'root.startPtpRole("SOURCE")' in main_qml
             and "device.deviceVerified" in main_qml,
