@@ -44,7 +44,7 @@ private:
     void onCaptureFinished(int exitCode, QProcess::ExitStatus exitStatus);
     void decodeCapturedFile();
     static QVariantMap decodePcap(const QString& pcapFile, const QString& csvFile,
-                                 const QString& secondsFile, const QString& jsonFile,
+                                 const QString& secondsFile, const QString& eventsFile, const QString& jsonFile,
                                  int requestedSeconds, const QString& adapter,
                                  const QVariantMap& studioTelemetry);
     QProcess discovery_;
@@ -59,6 +59,7 @@ private:
     QString activePcap_;
     QString activeCsv_;
     QString activeSeconds_;
+    QString activeEvents_;
     QString activeJson_;
     QString activeAdapter_;
     QVariantMap activeStudioTelemetry_;
