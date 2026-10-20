@@ -19,6 +19,10 @@ Item {
     function openEngineeringFile() { profileInspector.openEngineeringFile() }
     function showRecovery() { expertTabs.currentIndex = 1 }
     function showTiming() { expertTabs.currentIndex = 3 }
+    function showCapture() {
+        captureTabVisited = true
+        expertTabs.currentIndex = 4
+    }
     // The Main tray always shares the Advanced PTP profile and verified
     // guided START state machine; never create an independent START sequence.
     function startPtpRole(role) { return timingPanel.startRole(role) }
@@ -132,6 +136,7 @@ Item {
             ExpertTab { text: "Firmware" }
             ExpertTab { text: "Waveform" }
             ExpertTab { text: "Time Sync" }
+            ExpertTab { text: "Capture" }
             ExpertTab { text: "Device" }
         }
 
@@ -175,18 +180,25 @@ Item {
                 monoFont: hub.monoFont
             }
             Loader {
-                // Never invoke Npcap interface discovery on the main Studio startup.
-                // Once opened, keep this item alive across tab switches so a running
-                // 120s/3600s capture cannot be aborted by merely browsing Advanced.
+                // Capture adapter discovery starts ONLY after the operator opens
+                // this workspace. Keep the worker alive during tab navigation,
+                // including sustained 3600 s captures, without another owner.
                 active: hub.captureTabVisited
-                sourceComponent: DeviceExpertPanel {
+                sourceComponent: SvCapturePanel {
                     theme: hub.theme
                     device: hub.device
-                    session: hub.session
                     signalFrequency: hub.signalFrequency
                     uiFont: hub.uiFont
                     monoFont: hub.monoFont
                 }
+            }
+            DeviceExpertPanel {
+                theme: hub.theme
+                device: hub.device
+                session: hub.session
+                signalFrequency: hub.signalFrequency
+                uiFont: hub.uiFont
+                monoFont: hub.monoFont
             }
         }
     }
