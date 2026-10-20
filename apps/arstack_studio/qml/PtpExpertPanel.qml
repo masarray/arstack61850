@@ -300,6 +300,18 @@ SurfacePanel {
                 CalmButton {
                     theme: panel.theme
                     uiFont: panel.uiFont
+                    text: "Inspect SV lock"
+                    enabled: panel.session && panel.device.deviceVerified &&
+                             !panel.session.updatingFirmware
+                    onClicked: {
+                        if (!panel.session.requestSyncDiagnostics() && panel.controller)
+                            panel.controller.showMessage(
+                                "SV lock inspection is waiting for an active configuration transaction to finish.", true)
+                    }
+                }
+                CalmButton {
+                    theme: panel.theme
+                    uiFont: panel.uiFont
                     text: "Copy diagnostics"
                     enabled: panel.session && panel.device.deviceVerified
                     onClicked: {
@@ -318,6 +330,47 @@ SurfacePanel {
                     font.pixelSize: 10
                     palette.windowText: panel.theme.text
                     palette.text: panel.theme.text
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                radius: 8
+                color: panel.theme.surface2
+                border.width: 1
+                border.color: panel.theme.lineSoft
+                implicitHeight: flightContent.implicitHeight + 24
+                ColumnLayout {
+                    id: flightContent
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.margins: 12
+                    spacing: 6
+                    Label {
+                        Layout.fillWidth: true
+                        text: "SV LOCK · INTERNAL FLIGHT RECORDER"
+                        color: panel.theme.text
+                        font.family: panel.uiFont
+                        font.pixelSize: 10
+                        font.weight: Font.DemiBold
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: panel.device.syncDiagnostics
+                        color: panel.theme.textSoft
+                        font.family: panel.monoFont
+                        font.pixelSize: 9
+                        wrapMode: Text.WrapAnywhere
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Board-internal reasons, not an independently certified PTP/IED lock."
+                        color: panel.theme.muted
+                        font.family: panel.uiFont
+                        font.pixelSize: 9
+                        wrapMode: Text.WordWrap
+                    }
                 }
             }
 
