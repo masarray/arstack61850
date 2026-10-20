@@ -94,8 +94,8 @@ public:
         le32(global, 1);
         file.write(global);
         const std::array<quint16, 4> counts{3999, 0, 2, 3};
-        for (int i = 0; i < 3; ++i) {
-            const QByteArray wire = packet(counts[i], i == 2 ? 1 : 0);
+        for (std::size_t i = 0; i < counts.size(); ++i) {
+            const QByteArray wire = packet(counts[i], i == 2U ? 1 : 0);
             QByteArray header;
             le32(header, 1000);
             // Recreate observed field PCAP startup timestamp stall.
