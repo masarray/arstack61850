@@ -37,4 +37,11 @@ void smp_synch_lab_set_measured(std::optional<SmpSynchValue> value) noexcept;
 void smp_synch_set_source_local_qualified(bool qualified) noexcept;
 [[nodiscard]] bool smp_synch_source_local_qualified() noexcept;
 
+/** RECEIVER AUTO only: independently qualified SV sample phase AND actual
+ * canonical TX MAC descriptor continuity. PTP discipline LOCKED alone is
+ * insufficient; optional GLOBAL still comes only from traceable GM evidence.
+ * This is the existing receiver timeline gate, not a second sync authority. */
+void smp_synch_set_receiver_timeline_qualified(bool qualified) noexcept;
+[[nodiscard]] bool smp_synch_receiver_timeline_qualified() noexcept;
+
 } // namespace ar::esp32p4::smv
