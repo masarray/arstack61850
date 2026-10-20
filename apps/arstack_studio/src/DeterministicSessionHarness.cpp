@@ -43,6 +43,7 @@ public:
             {"manual recovery intent stays optional and visible", manualRecoveryIntentArmsFirmwareOffer()},
             {"stale generation release -> ignored", staleReleaseGenerationIsIgnored()},
             {"firmware probe before serial release -> blocked", firmwareProbeRequiresReleasedPort()},
+            {"PTP preflight readback guards active board and deferred role commands", ptpBoardRuntimePreflight()},
             {"PTP staged START requires role/config/runtime ACKs", ptpGuidedStartNeedsAcks()},
             {"PTP SOURCE invalid 9-3 profile rejects before serial", ptpSourceProfilePreflight()},
 
@@ -636,7 +637,11 @@ private:
         seedVerified(f, identity(), QStringLiteral("COM7"), false);
         f.device.ptpAvailable_ = true;
         f.device.ioWorkerReady_ = true; // No actual COM opened by this harness.
-        return f.session.requestStartPtpConfigured(role, ptpValidProfile());
+        if (!f.session.requestStartPtpConfigured(role, ptpValidProfile()) ||
+            f.device.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_preflight)
+            return false;
+        f.device.processLine(ptpStoppedStatus());
+        return f.device.ptpStartStage_ == DeviceController::PtpStartStage::awaiting_role_ack;
     }
 
     static bool ptpSourceProfilePreflight() {
@@ -664,8 +669,11 @@ private:
         // A valid SOURCE profile must immediately permit a fresh attempt.
         if (!f.session.requestStartPtpConfigured(QStringLiteral("SOURCE"),
                                                   ptpValidProfile()) ||
-            d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_role_ack ||
+            d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_preflight ||
             !d.ptpLastStartFailure_.isEmpty()) return false;
+        d.processLine(ptpStoppedStatus());
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_role_ack)
+            return false;
         return true;
     }
 
@@ -717,6 +725,9 @@ private:
         if (d.ptpStarting() || d.ptpRunning_) return false;
         if (!f.session.requestStartPtpConfigured(QStringLiteral("SOURCE"), ptpValidProfile()))
             return false;
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_preflight)
+            return false;
+        d.processLine(ptpStoppedStatus());
         d.processLine(QStringLiteral("PTPROLE accepted"));
         d.processLine(QStringLiteral("PTPROLE role=SOURCE value=0 running=0"));
         d.processLine(QStringLiteral("PTP configuration accepted"));
@@ -769,6 +780,50 @@ private:
         d.processLine(ptpRoleEvidence(QStringLiteral("SOURCE")));
         return !d.ptpStarting() && d.ptpRunning_ &&
             d.ptpStatus_.contains(QStringLiteral("external timing still unqualified"));
+    }
+
+    static bool ptpBoardRuntimePreflight() {
+        Fixture running;
+        if (!running.profileReady) return false;
+        seedVerified(running, identity(), QStringLiteral("COM7"), false);
+        auto& d = running.device;
+        d.ptpAvailable_ = true;
+        d.ioWorkerReady_ = true;
+        if (!running.session.requestStartPtpConfigured(QStringLiteral("SOURCE"), ptpValidProfile()))
+            return false;
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_preflight ||
+            !d.ptpStarting()) return false;
+        // Stale ROLE and CONFIG chatter may not advance preflight.
+        d.processLine(QStringLiteral("PTPROLE accepted"));
+        d.processLine(QStringLiteral("PTP configuration accepted"));
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_preflight) return false;
+        d.processLine(QStringLiteral(
+            "PTP status=RUNNING Announce=1 Sync=1 FollowUp=1 PdelayFrames=0 TXfail=0"));
+        if (d.ptpStarting() || !d.ptpRunning_ ||
+            !d.ptpLastStartFailure_.contains(QStringLiteral("already RUNNING")) ||
+            d.ptpStartPhase() != QStringLiteral("IDLE")) return false;
+        // Do not auto-stop a real transmitter merely because GUI has an old
+        // local OFF state. Explicit verified STOP is the only recovery.
+        if (!d.stopPtp() ||
+            d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_ack)
+            return false;
+        d.processLine(QStringLiteral("PTP stop requested"));
+        d.processLine(ptpStoppedStatus());
+        if (d.ptpStarting() || d.ptpRunning_) return false;
+
+        Fixture timedOut;
+        if (!timedOut.profileReady) return false;
+        seedVerified(timedOut, identity(), QStringLiteral("COM7"), false);
+        timedOut.device.ptpAvailable_ = true;
+        timedOut.device.ioWorkerReady_ = true;
+        if (!timedOut.session.requestStartPtpConfigured(QStringLiteral("SOURCE"), ptpValidProfile()))
+            return false;
+        if (!QMetaObject::invokeMethod(
+                &timedOut.device.ptpStartTimer_, "timeout", Qt::DirectConnection))
+            return false;
+        return !timedOut.device.ptpStarting() &&
+               timedOut.device.ptpLastStartFailure_.contains(QStringLiteral("VERIFY_STOPPED")) &&
+               !timedOut.device.ptpRunning_;
     }
 
     static bool ptpGuidedStartNeedsAcks() {
