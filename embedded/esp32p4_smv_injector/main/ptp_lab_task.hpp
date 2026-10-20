@@ -108,6 +108,10 @@ void ar_ptp_lab_get_default_config(ar_ptp_lab_config_t* config);
  */
 bool ar_ptp_lab_configure(const ar_ptp_lab_config_t* config);
 
+/** Stable, allocation-free control-plane reason for last rejected profile.
+ * Return value remains readable after the failed CONFIG command. */
+const char* ar_ptp_lab_last_config_error(void);
+
 /** Return the currently selected runtime profile (override or Kconfig default). */
 bool ar_ptp_lab_get_config(ar_ptp_lab_config_t* config);
 
