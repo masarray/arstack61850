@@ -9,6 +9,7 @@
 #include "StudioDeviceController.hpp"
 #include "SvCaptureController.hpp"
 
+#include <QClipboard>
 #include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDebug>
@@ -532,6 +533,25 @@ int main(int argc, char* argv[]) {
     QCoreApplication::setApplicationName(QStringLiteral("ARStack Studio"));
     QCoreApplication::setApplicationVersion(QStringLiteral(ARSTACK_STUDIO_VERSION));
 #endif
+
+    if (hasArgument(argc, argv, "--check-clipboard")) {
+        // Headless-board independent Windows acceptance: clipboard copy must
+        // round-trip and an empty report must never be reported as copied.
+        StudioClipboard clipboard;
+        const QString sample = QStringLiteral(
+            "ARStack Studio diagnostics\\nPTP last failure: source_reason=PDELAY_RX_TIMESTAMP_UNAVAILABLE");
+        const bool copied = clipboard.copyText(sample);
+        const bool matches = QGuiApplication::clipboard() != nullptr &&
+            QGuiApplication::clipboard()->text(QClipboard::Clipboard) == sample;
+        const bool rejectsEmpty = !clipboard.copyText(QString{});
+        if (!copied || !matches || !rejectsEmpty) {
+            qCritical() << "Studio native clipboard regression: FAIL"
+                        << copied << matches << rejectsEmpty;
+            return 18;
+        }
+        qInfo() << "Studio native clipboard regression: PASS";
+        return 0;
+    }
 
     // S6 ownership starts before any firmware process, QML object, or serial
     // worker exists. A second Studio process therefore cannot race for the
