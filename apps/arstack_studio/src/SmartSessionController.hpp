@@ -21,6 +21,7 @@ class SmartSessionController : public QObject {
     Q_PROPERTY(QString state READ state NOTIFY stateChanged)
     Q_PROPERTY(QString statusText READ statusText NOTIFY stateChanged)
     Q_PROPERTY(bool startReady READ startReady NOTIFY stateChanged)
+    Q_PROPERTY(bool firmwareVerificationPending READ firmwareVerificationPending NOTIFY stateChanged)
     Q_PROPERTY(bool canDeployProfile READ canDeployProfile NOTIFY stateChanged)
     Q_PROPERTY(bool liveControlReady READ liveControlReady NOTIFY stateChanged)
     Q_PROPERTY(bool engineeringEditable READ engineeringEditable NOTIFY stateChanged)
@@ -76,6 +77,7 @@ public:
     [[nodiscard]] QString state() const;
     [[nodiscard]] QString statusText() const;
     [[nodiscard]] bool startReady() const noexcept;
+    [[nodiscard]] bool firmwareVerificationPending() const noexcept { return postFlashVerificationPending_; }
     [[nodiscard]] bool canDeployProfile() const noexcept;
     [[nodiscard]] bool liveControlReady() const noexcept;
     [[nodiscard]] bool engineeringEditable() const noexcept;
@@ -403,6 +405,7 @@ private:
     bool wasReady_{false};
     bool needsProfileSync_{true};
     bool updateRequested_{false};
+    bool postFlashVerificationPending_{false};
     bool updateWasOptional_{false};
     bool blankBoardDetected_{false};
     bool manualRecoveryArmed_{false};
