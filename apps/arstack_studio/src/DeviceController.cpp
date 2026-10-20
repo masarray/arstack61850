@@ -1961,11 +1961,17 @@ void DeviceController::processLine(const QString& rawLine) {
     }
     if (line.contains(QStringLiteral("PTP start rejected"), Qt::CaseInsensitive) ||
         line.contains(QStringLiteral("PTP source readiness timeout"), Qt::CaseInsensitive)) {
+        const QString boardReason =
+            line.mid(line.indexOf(QStringLiteral("PTP"))).left(300);
+        const bool detailedLinkCause = boardReason.contains(QStringLiteral("Ethernet PHY"));
+        // A later generic "Ethernet link or runtime readiness" message must
+        // not erase an earlier measured PHY link result or failure stage.
+        if (detailedLinkCause || ptpFailureReason_.isEmpty())
+            ptpFailureReason_ = boardReason;
         ptpRunning_ = false;
-        ptpFailureReason_ = line.mid(line.indexOf(QStringLiteral("PTP"))).left(300);
         ptpStatus_ = QStringLiteral("PTP start failed");
         emit ptpStateChanged();
-        setError(ptpFailureReason_);
+        setError(boardReason);
     }
 
     advancePtpStartup(line);
