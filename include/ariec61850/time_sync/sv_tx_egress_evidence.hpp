@@ -279,9 +279,15 @@ private:
 
 // Fail-closed entry filter: requires consecutive, independently qualified
 // real SV epochs before asserting LOCAL, but never delays loss of LOCAL.
+// Physical 120 s capture 2026-10-19 showed 0->1 at +22.096 s and 1->0
+// at +23.096 s before stable reacquisition at +32.096 s. Three epochs
+// permitted a one-second premature LOCAL advertisement. Demand a 10-second
+// stable window of independent MAC/phase evidence before the FIRST claim.
+// This is an *entry* stabilizer, not a loss-of-evidence hysteresis: any
+// invalid epoch/source/fault still revokes LOCAL immediately.
 class SvLocalRefAcquisition final {
 public:
-    static constexpr std::uint32_t kRequiredCleanEpochs = 3U;
+    static constexpr std::uint32_t kRequiredCleanEpochs = 10U;
     constexpr void reset() noexcept {
         count_ = 0U; session_ = 0U; faults_ = 0U;
         source_ = 0U; epoch_ = 0U;
