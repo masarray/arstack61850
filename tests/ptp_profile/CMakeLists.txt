@@ -30,7 +30,10 @@ target_link_libraries(ptp_runtime_tests PRIVATE ptp_profile_core)
 target_compile_features(ptp_runtime_tests PRIVATE cxx_std_20)
 
 add_executable(smp_synch_policy_tests
-    "${ARSTACK_ROOT}/tests/test_smp_synch_policy.cpp")
+    "${ARSTACK_ROOT}/tests/test_smp_synch_policy.cpp"
+    "${ARSTACK_ROOT}/embedded/esp32p4_smv_injector/main/smp_synch_lab.cpp")
+target_include_directories(smp_synch_policy_tests PRIVATE
+    "${ARSTACK_ROOT}/embedded/esp32p4_smv_injector/main")
 target_link_libraries(smp_synch_policy_tests PRIVATE ptp_profile_core)
 target_compile_features(smp_synch_policy_tests PRIVATE cxx_std_20)
 
