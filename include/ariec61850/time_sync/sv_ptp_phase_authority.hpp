@@ -235,6 +235,22 @@ private:
     SvPtpPhaseState state_{SvPtpPhaseState::acquiring};
 };
 
+// A stalled/late 1Hz phase observer must not leave smpSynch=1 on the 4kHz
+// wire indefinitely. Called by the publisher as an O(1) atomic-read-only
+// LAST-RESORT lease check; known source/fault/phase failures still revoke
+// immediately. This is not a new clock or qualification authority.
+struct SvPhaseObservationFreshness final {
+    static constexpr std::uint32_t kMaxUnobservedEpochs = 1U;
+    [[nodiscard]] static constexpr bool fresh(
+        const std::uint32_t observed_epoch,
+        const std::uint32_t current_epoch) noexcept {
+        // A zero generation is never a valid sampled PTP second. Unsigned
+        // subtraction naturally handles the 32-bit epoch counter rollover.
+        return observed_epoch != 0U && current_epoch != 0U &&
+            current_epoch - observed_epoch <= kMaxUnobservedEpochs;
+    }
+};
+
 // A control-plane gate for evidence that a canonical SV publisher has not
 // skipped sample slots or failed Ethernet TX since the previous observation.
 // A fresh session and any fault require re-acquisition; neither can inherit
