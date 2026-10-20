@@ -1309,6 +1309,7 @@ void DeviceController::resetPtpStartup() noexcept {
     pendingPtpRole_.clear();
     pendingPtpConfig_.clear();
     ptpRuntimeRoleSeen_ = false;
+    ptpRuntimeRunningSeen_ = false;
 }
 
 bool DeviceController::beginPtpStopVerification() {
@@ -1342,6 +1343,9 @@ void DeviceController::markPtpStopUnconfirmed(const QString& reason) {
 }
 
 void DeviceController::failPtpStartup(const QString& reason, const bool rollback) {
+    // Preserve the failure across STOP rollback. A generic FAILED badge is
+    // never sufficient for diagnosing firmware/transport problems.
+    ptpFailureReason_ = reason.left(300);
     setError(reason);
     if (rollback && connected_ && sessionGeneration_ != 0) {
         static_cast<void>(beginPtpStopVerification());
@@ -1369,6 +1373,7 @@ bool DeviceController::startPtpConfigured(const QString& requestedRole,
         setError(QStringLiteral("Invalid PTP settings. Check domain, VLAN and timing intervals."));
         return false;
     }
+    ptpFailureReason_.clear();
     pendingPtpRole_ = role;
     pendingPtpConfig_ = command;
     ptpStartStage_ = PtpStartStage::awaiting_role_ack;
@@ -1423,7 +1428,8 @@ void DeviceController::advancePtpStartup(const QString& line) {
     if (rejected) {
         const bool rollback = ptpStartStage_ == PtpStartStage::awaiting_start ||
                               ptpStartStage_ == PtpStartStage::awaiting_runtime;
-        failPtpStartup(QStringLiteral("Board rejected PTP mode, settings or start."), rollback);
+        failPtpStartup(QStringLiteral("Board PTP rejection: %1").arg(
+                           line.mid(line.indexOf(QStringLiteral("PTP"))).left(200)), rollback);
         return;
     }
     if (ptpStartStage_ == PtpStartStage::awaiting_role_ack) {
@@ -1469,6 +1475,7 @@ void DeviceController::advancePtpStartup(const QString& line) {
                line.contains(QStringLiteral("PTP start accepted"), Qt::CaseInsensitive)) {
         ptpStartStage_ = PtpStartStage::awaiting_runtime;
         ptpRuntimeRoleSeen_ = false;
+        ptpRuntimeRunningSeen_ = false;
         ptpStatus_ = QStringLiteral("Verifying live PTP role and runtime...");
         emit ptpStateChanged();
         if (!sendPtpShow()) {
@@ -1477,22 +1484,22 @@ void DeviceController::advancePtpStartup(const QString& line) {
         }
         ptpStartTimer_.start(5000);
     } else if (ptpStartStage_ == PtpStartStage::awaiting_runtime) {
+        // PTP2 and PTP STATUS arrive independently, with unsolicited older
+        // telemetry potentially interleaving. A STOPPED or old role line is
+        // NOT evidence of failure during an async START. Wait for BOTH fresh
+        // positive facts; the existing absolute timeout remains fail-closed.
         const auto roleEvidence = kPtpMeasuredStateExpression.match(line);
-        if (roleEvidence.hasMatch()) {
-            if (roleEvidence.captured(1).toUpper() != pendingPtpRole_) {
-                failPtpStartup(QStringLiteral("PTP runtime role differs from the selected mode."), true);
-                return;
-            }
+        if (roleEvidence.hasMatch() &&
+            roleEvidence.captured(1).toUpper() == pendingPtpRole_)
             ptpRuntimeRoleSeen_ = true;
-            return;
-        }
-        const auto readback = kPtpStatusExpression.match(line);
-        if (!readback.hasMatch()) return;
-        if (!ptpRuntimeRoleSeen_ || !ptpRunning_ || ptpRole_ != pendingPtpRole_) {
-            failPtpStartup(QStringLiteral("PTP requires matching PTP2 role and RUNNING readback."), true);
-            return;
-        }
+        const auto statusEvidence = kPtpStatusExpression.match(line);
+        if (statusEvidence.hasMatch() &&
+            statusEvidence.captured(1).toUpper() == QStringLiteral("RUNNING"))
+            ptpRuntimeRunningSeen_ = true;
+        if (!ptpRuntimeRoleSeen_ || !ptpRuntimeRunningSeen_ ||
+            !ptpRunning_ || ptpRole_ != pendingPtpRole_) return;
         resetPtpStartup();
+        ptpFailureReason_.clear();
         ptpStatus_ = QStringLiteral("PTP runtime active; external timing still unqualified");
         emit ptpStateChanged();
     }
@@ -1941,13 +1948,13 @@ void DeviceController::processLine(const QString& rawLine) {
         ptpStatus_ = QStringLiteral("PTP start acknowledged; requesting live status");
         static_cast<void>(sendPtpShow());
     }
-    if (line.contains(QStringLiteral("PTP start rejected"), Qt::CaseInsensitive) || line.contains(QStringLiteral("PTP source readiness timeout"), Qt::CaseInsensitive)) {
+    if (line.contains(QStringLiteral("PTP start rejected"), Qt::CaseInsensitive) ||
+        line.contains(QStringLiteral("PTP source readiness timeout"), Qt::CaseInsensitive)) {
         ptpRunning_ = false;
+        ptpFailureReason_ = line.mid(line.indexOf(QStringLiteral("PTP"))).left(300);
         ptpStatus_ = QStringLiteral("PTP start failed");
         emit ptpStateChanged();
-        setError(ptpRole_ == QStringLiteral("SOURCE")
-            ? QStringLiteral("PTP source did not emit Announce/Sync/Follow_Up. Check the Ethernet link and retry Start PTP Source.")
-            : QStringLiteral("PTP %1 could not start. Check the Ethernet link and retry.").arg(ptpRole_.toLower()));
+        setError(ptpFailureReason_);
     }
 
     advancePtpStartup(line);
@@ -1969,6 +1976,7 @@ void DeviceController::resetTelemetry() {
 
 void DeviceController::resetPtpState() {
     resetPtpStartup();
+    ptpFailureReason_.clear();
     syncDiagnostics_ = QStringLiteral(
         "No current-board SV lock evidence. Select Inspect SV lock after verification.");
     syncFlightLatest_.clear();
