@@ -12,6 +12,7 @@ SurfacePanel {
     property string uiFont: "Inter"
     property string monoFont: "Inter"
     property bool technicalDetailsVisible: false
+    property string copyFeedback: ""
     readonly property string firmwareDisplayStatus:
         panel.session && panel.session.firmwareUpdateResult.length > 0 &&
         !panel.session.updatingFirmware
@@ -306,6 +307,13 @@ SurfacePanel {
                         panel.copyFeedback = "Clipboard unavailable. Open technical details to review diagnostics."
                     }
                 }
+            }
+            Label {
+                visible: panel.copyFeedback.length > 0
+                text: panel.copyFeedback
+                color: panel.theme.textSoft
+                font.family: panel.uiFont
+                font.pixelSize: 9
             }
             Item { Layout.fillWidth: true }
         }
