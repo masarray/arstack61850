@@ -1324,17 +1324,25 @@ void DeviceController::resetPtpStartup() noexcept {
     pendingPtpConfig_.clear();
     ptpRuntimeRoleSeen_ = false;
     ptpRuntimeRunningSeen_ = false;
+    ptpRestartAfterStop_ = false;
+    ptpRoleRecoveryAttempted_ = false;
 }
 
-bool DeviceController::beginPtpStopVerification() {
+bool DeviceController::beginPtpStopVerification(const bool resumeStart) {
     ptpStartTimer_.stop();
     ptpStopPollTimer_.stop();
     ptpStartStage_ = PtpStartStage::awaiting_stop_ack;
-    pendingPtpRole_.clear();
-    pendingPtpConfig_.clear();
+    ptpRestartAfterStop_ = resumeStart && !pendingPtpRole_.isEmpty() &&
+                           !pendingPtpConfig_.isEmpty();
+    if (!ptpRestartAfterStop_) {
+        pendingPtpRole_.clear();
+        pendingPtpConfig_.clear();
+    }
     ptpRuntimeRoleSeen_ = false;
     ptpRuntimeRunningSeen_ = false;
-    ptpStatus_ = QStringLiteral("Stopping PTP; waiting for board confirmation...");
+    ptpStatus_ = ptpRestartAfterStop_
+        ? QStringLiteral("PTP was already active on board; verifying STOP before retry...")
+        : QStringLiteral("Stopping PTP; waiting for board confirmation...");
     emit ptpStateChanged();
     // Emergency STOP has one reserved slot in the existing serial owner and
     // eliminates unsent START commands, even when the normal queue is full.
@@ -1402,6 +1410,8 @@ bool DeviceController::startPtpConfigured(const QString& requestedRole,
         return false;
     }
     ptpLastStartFailure_.clear();
+    ptpRestartAfterStop_ = false;
+    ptpRoleRecoveryAttempted_ = false;
     pendingPtpRole_ = role;
     pendingPtpConfig_ = command;
     ptpStartStage_ = PtpStartStage::awaiting_role_ack;
@@ -1436,8 +1446,24 @@ void DeviceController::advancePtpStartup(const QString& line) {
         const auto readback = kPtpStatusExpression.match(line);
         if (!readback.hasMatch()) return;
         if (readback.captured(1).compare(QStringLiteral("STOPPED"), Qt::CaseInsensitive) == 0) {
-            resetPtpStartup();
             ptpRunning_ = false;
+            if (ptpRestartAfterStop_) {
+                // A single, evidence-triggered recovery of the same requested
+                // configuration. The board's verified STOPPED readback is a
+                // mandatory barrier before sending any role mutation.
+                ptpRestartAfterStop_ = false;
+                ptpStopPollTimer_.stop();
+                ptpStartStage_ = PtpStartStage::awaiting_role_ack;
+                ptpStatus_ = QStringLiteral("PTP stopped; applying selected role...");
+                emit ptpStateChanged();
+                if (!sendCommand(QStringLiteral("PROFILE PTPROLE %1").arg(pendingPtpRole_))) {
+                    failPtpStartup(QStringLiteral("Could not queue PTP role after verified STOP."), false);
+                    return;
+                }
+                ptpStartTimer_.start(5000);
+                return;
+            }
+            resetPtpStartup();
             ptpStatus_ = QStringLiteral("PTP stopped — confirmed by board");
             emit ptpStateChanged();
         } else if (!ptpStopPollTimer_.isActive()) {
@@ -1454,6 +1480,21 @@ void DeviceController::advancePtpStartup(const QString& line) {
         line.contains(QStringLiteral("PTP start rejected"), Qt::CaseInsensitive) ||
         line.contains(QStringLiteral("PTP unavailable"), Qt::CaseInsensitive);
     if (rejected) {
+        // If firmware explicitly says an earlier PTP runtime still owns the
+        // board, reconcile the physical state ONCE via verified STOP. Never
+        // retry on generic config faults, never retry without STOPPED, and
+        // never allow a second automatic recovery loop.
+        const bool boardStillRunning =
+            line.contains(QStringLiteral(
+                "PTPROLE rejected: stop PTP before changing operating role"),
+                Qt::CaseInsensitive);
+        if (ptpStartStage_ == PtpStartStage::awaiting_role_ack &&
+            boardStillRunning && !ptpRoleRecoveryAttempted_) {
+            ptpRoleRecoveryAttempted_ = true;
+            if (!beginPtpStopVerification(true))
+                failPtpStartup(QStringLiteral("Could not safely stop prior PTP runtime."), false);
+            return;
+        }
         const bool rollback = ptpStartStage_ == PtpStartStage::awaiting_start ||
                               ptpStartStage_ == PtpStartStage::awaiting_runtime;
         failPtpStartup(QStringLiteral("Board rejected command: %1").arg(line), rollback);
