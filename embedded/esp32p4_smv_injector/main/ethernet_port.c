@@ -125,13 +125,10 @@ bool ar_esp32p4_ptp_start(void)
     // Diagnose physical link only AFTER an unsuccessful PTP START, never in
     // the 4kHz SV publisher, ISR or routine PTP transmit path. Do not
     // infer that PHY UP implies a valid PTP grandmaster or verified SV phase.
-    eth_link_t link = ETH_LINK_DOWN;
-    const esp_err_t link_result =
-        esp_eth_ioctl(s_eth_handle, ETH_CMD_G_LINK_STATUS, &link);
-    if (link_result != ESP_OK) {
-        ESP_LOGE(TAG, "PTP start rejected: Ethernet PHY link status unavailable (%s)",
-                 esp_err_to_name(link_result));
-    } else if (link == ETH_LINK_DOWN) {
+    // Use the canonical ETH_EVENT-based link state shared with the SV
+    // publisher. ESP-IDF 5.5.x has no ETH_CMD_G_LINK_STATUS ioctl.
+    // This is a read-only, bounded failure-path query.
+    if (!ar_esp32p4_eth_link_up()) {
         ESP_LOGE(TAG, "PTP start rejected: Ethernet PHY link DOWN; check cable and link partner");
     } else {
         ESP_LOGE(TAG, "PTP start rejected: Ethernet PHY UP, but PTP role/runtime did not qualify");
