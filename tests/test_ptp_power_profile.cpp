@@ -32,6 +32,12 @@ PtpPublisherOptions make_source() {
 }
 
 void check_defaults_and_reject_nonstandard_cadence() {
+    const auto studioProfile = inspect_ptp_power_profile_cadence(1000U, 1000U, true);
+    REQUIRE(studioProfile.compatible());
+    REQUIRE(!inspect_ptp_power_profile_cadence(1000U, 1000U, false).compatible());
+    REQUIRE(!inspect_ptp_power_profile_cadence(2000U, 1000U, true).compatible());
+    REQUIRE(!inspect_ptp_power_profile_cadence(1000U, 250U, true).compatible());
+    REQUIRE(!inspect_ptp_power_profile_cadence(0U, 1000U, true).compatible());
     auto profile = make_source();
     REQUIRE(inspect_ptp_power_profile_cadence(profile).compatible());
     profile.sync_interval = std::chrono::milliseconds{250};
