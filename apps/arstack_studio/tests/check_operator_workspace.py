@@ -275,7 +275,7 @@ def main() -> None:
             "every Start must send the visible 4I+4V table, never reuse stale device angles")
     require("Qt.callLater(installDialog.open)" not in workflow
             and "Qt.callLater(updateDialog.open)" not in workflow
-            and "if (!success) Qt.callLater(resultDialog.open)" in workflow
+            and "if (!success && !smartSession.firmwareVerificationPending)" in workflow
             and "installDialog.open()" in workflow
             and "updateDialog.open()" in workflow,
             "connection must not pop setup/update dialogs; Start may offer firmware repair")
