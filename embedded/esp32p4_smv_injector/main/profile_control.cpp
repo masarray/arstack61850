@@ -388,7 +388,8 @@ void handle_profile_command(char* arguments) noexcept {
         }
         config.role = role;
         if (!ar_ptp_lab_configure(&config)) {
-            ESP_LOGE(kTag, "PTPROLE rejected by timing profile validation");
+            ESP_LOGE(kTag, "PTPROLE rejected: reason=%s",
+                     ar_ptp_lab_last_config_error());
             return;
         }
         ESP_LOGI(kTag, "PTPROLE accepted");
