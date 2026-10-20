@@ -184,7 +184,8 @@ def main() -> None:
     require('bar.workflow.injectionRunning || bar.workflow.startQueued || bar.controller.offlinePreviewRunning'
             in ribbon_qml
             and '!ribbon.injectionRunning && !ribbon.startQueued' in source("WorkflowBar.qml")
-            and 'startWatchdog.stop()' in source("WorkflowBar.qml"),
+            and 'readonly property bool startQueued: Boolean(ribbon.device && ribbon.device.scenarioApplying)' in source("WorkflowBar.qml")
+            and 'startWatchdog' not in source("WorkflowBar.qml"),
             "SV STOP must remain actionable while the acknowledged scenario transaction is pending")
     require("function flushPendingEdits()" in matrix
             and "magnitudeApplyTimer.stop()" in matrix
@@ -312,7 +313,9 @@ def main() -> None:
             and "const scenario = controller.startScenarioSnapshot()" in workflow
             and "if (!scenario) return" in workflow
             and "controller.applyAllSignals()" not in workflow
-            and "startWatchdog" in workflow and "onRunningChanged()" in workflow,
+            and "readonly property bool startQueued:" in workflow
+            and "scenarioStateChanged" in device_cpp
+            and "onRunningChanged()" in workflow,
             "reconnect must not auto-transmit, but one-click Start must stage a bounded scenario")
     require("offline-ptp-lab" in tray and "if (!tray.boardOnline)" in tray
             and "PTP preview only. Connect ESP32-P4 to transmit." in tray
