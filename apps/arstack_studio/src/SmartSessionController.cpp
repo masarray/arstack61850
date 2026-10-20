@@ -983,6 +983,7 @@ QString SmartSessionController::diagnosticsText() const {
         add(QStringLiteral("SMV missed reported"), device_->missed());
         add(QStringLiteral("SMV TX failures reported"), device_->txFailures());
         add(QStringLiteral("PTP status reported"), device_->ptpStatus());
+        add(QStringLiteral("PTP transactional phase"), device_->ptpStartPhase());
         add(QStringLiteral("Last PTP START failure (same boot)"),
             device_->ptpLastStartFailure());
         add(QStringLiteral("SV sync internal flight recorder (not physical proof)"),
