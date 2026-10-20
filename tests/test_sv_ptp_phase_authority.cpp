@@ -76,6 +76,27 @@ void check_auto_preflight_does_not_invent_sync_or_start() {
     }
 }
 
+void check_phase_observer_stall_revokes_source_wire_claim() {
+    using Fresh = SvPhaseObservationFreshness;
+    static_assert(Fresh::kMaxUnobservedEpochs == 1U);
+    // After a qualified observation at epoch 25, the producer may continue
+    // into the next second while the observer runs at t+250ms. An observer
+    // stall cannot advertise LOCAL through the following epoch.
+    CHECK(!Fresh::fresh(0U, 25U));
+    CHECK(!Fresh::fresh(25U, 0U));
+    CHECK(Fresh::fresh(25U, 25U));
+    CHECK(Fresh::fresh(25U, 26U));
+    CHECK(!Fresh::fresh(25U, 27U));
+    CHECK(!Fresh::fresh(25U, 100U));
+    CHECK(!Fresh::fresh(26U, 25U)); // future/stale generation
+    // No retained qualification across a 32-bit generation wrap; only a
+    // genuinely adjacent observation may pass.
+    CHECK(Fresh::fresh(0xfffffffeU, 0xffffffffU));
+    CHECK(!Fresh::fresh(0xfffffffeU, 1U));
+    CHECK(!Fresh::fresh(0xffffffffU, 0U)); // zero remains invalid
+    CHECK(Fresh::fresh(0xffffffffU, 1U) == false); // two skipped epochs
+}
+
 void check_phase_sign_and_bounded_corrections() {
     SvPtpPhaseAuthority controller;
     const auto warm = controller.observe(snapshot(1U, 220));
@@ -397,6 +418,7 @@ void check_continuous_ptp_second_binding() {
 int main() {
     try {
         check_auto_preflight_does_not_invent_sync_or_start();
+        check_phase_observer_stall_revokes_source_wire_claim();
         check_phase_sign_and_bounded_corrections();
         check_uncertain_brackets_never_claim_software_tracking();
         check_per_second_slew_distribution();
