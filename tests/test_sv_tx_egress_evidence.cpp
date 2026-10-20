@@ -121,32 +121,46 @@ void check_fast_source_auto_qualification_with_fresh_evidence() {
 
 void check_no_intermitttent_local_at_start() {
     SvLocalRefAcquisition gate;
-    static_assert(SvLocalRefAcquisition::kRequiredCleanEpochs == 3U);
+    static_assert(SvLocalRefAcquisition::kRequiredCleanEpochs == 10U);
     REQUIRE(!gate.observe(false, 7U, 0U, 3U, 5U));
     REQUIRE(!gate.observe(true, 7U, 0U, 3U, 6U));
     REQUIRE(!gate.observe(false, 7U, 0U, 3U, 7U));
     REQUIRE(gate.clean_epochs() == 0U);
-    REQUIRE(!gate.observe(true, 7U, 0U, 3U, 8U));
-    REQUIRE(!gate.observe(true, 7U, 0U, 3U, 9U));
-    REQUIRE(gate.observe(true, 7U, 0U, 3U, 10U));
+
+    // Field evidence: first LOCAL was present for just one second.
+    // Three clean sample epochs must no longer be enough to advertise
+    // a synchronization claim; a new invalid epoch revokes immediately.
+    for (std::uint32_t epoch = 8U; epoch <= 10U; ++epoch)
+        REQUIRE(!gate.observe(true, 7U, 0U, 3U, epoch));
+    REQUIRE(gate.clean_epochs() == 3U);
     REQUIRE(!gate.observe(false, 7U, 0U, 3U, 11U));
-    REQUIRE(!gate.observe(true, 7U, 0U, 3U, 12U));
-    REQUIRE(!gate.observe(true, 7U, 0U, 3U, 14U)); // gap
-    REQUIRE(!gate.observe(true, 7U, 0U, 3U, 15U));
-    REQUIRE(gate.observe(true, 7U, 0U, 3U, 16U));
-    REQUIRE(!gate.observe(true, 7U, 1U, 3U, 17U)); // TX fault
-    REQUIRE(!gate.observe(true, 7U, 1U, 4U, 18U)); // source restart
-    REQUIRE(!gate.observe(true, 8U, 1U, 4U, 19U)); // publisher restart
-    REQUIRE(!gate.observe(true, 8U, 1U, 4U, 20U));
-    REQUIRE(gate.observe(true, 8U, 1U, 4U, 21U));
-    REQUIRE(!gate.observe(true, 8U, 1U, 4U, 21U)); // duplicate
-    REQUIRE(!gate.observe(true, 0U, 1U, 4U, 22U));
-    REQUIRE(!gate.observe(true, 8U, 1U, 0U, 23U));
+    REQUIRE(gate.clean_epochs() == 0U);
+
+    // 10 genuinely continuous SOURCE/phase/MAC epochs can finally
+    // advertise LOCAL. Any loss must still de-assert immediately.
+    for (std::uint32_t epoch = 12U; epoch <= 21U; ++epoch)
+        REQUIRE(gate.observe(true, 7U, 0U, 3U, epoch) == (epoch == 21U));
+    REQUIRE(gate.clean_epochs() == 10U);
+    REQUIRE(!gate.observe(false, 7U, 0U, 3U, 22U));
+    REQUIRE(gate.clean_epochs() == 0U);
+
+    for (std::uint32_t epoch = 23U; epoch <= 27U; ++epoch)
+        REQUIRE(!gate.observe(true, 7U, 0U, 3U, epoch));
+    REQUIRE(!gate.observe(true, 7U, 0U, 3U, 29U)); // gap
+    for (std::uint32_t epoch = 30U; epoch <= 38U; ++epoch)
+        REQUIRE(!gate.observe(true, 7U, 0U, 3U, epoch));
+    REQUIRE(gate.observe(true, 7U, 0U, 3U, 39U));
+    REQUIRE(!gate.observe(true, 7U, 1U, 3U, 40U)); // TX fault
+    REQUIRE(!gate.observe(true, 7U, 1U, 4U, 41U)); // source restart
+    REQUIRE(!gate.observe(true, 8U, 1U, 4U, 42U)); // publisher restart
+    REQUIRE(!gate.observe(true, 8U, 1U, 4U, 42U)); // duplicate
+    REQUIRE(!gate.observe(true, 0U, 1U, 4U, 43U));
+    REQUIRE(!gate.observe(true, 8U, 1U, 0U, 44U));
 }
-void check_clean_local_by_eight_seconds() {
+void check_local_only_after_ten_clean_seconds() {
     SvLocalRefAcquisition gate;
-    for (std::uint32_t t = 1U; t <= 8U; ++t)
-        REQUIRE(gate.observe(t >= 6U, 7U, 0U, 3U, t) == (t == 8U));
+    for (std::uint32_t t = 1U; t <= 15U; ++t)
+        REQUIRE(gate.observe(t >= 6U, 7U, 0U, 3U, t) == (t == 15U));
 }
 
 void check_baseline_and_contiguous_ptp() {
@@ -267,7 +281,7 @@ int main() {
         check_auto_local_sync_gate_requires_both_clocks_and_fresh_mac();
         check_fast_source_auto_qualification_with_fresh_evidence();
         check_no_intermitttent_local_at_start();
-        check_clean_local_by_eight_seconds();
+        check_local_only_after_ten_clean_seconds();
         check_baseline_and_contiguous_ptp();
         check_clock_steps_recovery_and_session();
         check_invalid_evidence_requires_rebaseline();
