@@ -458,6 +458,16 @@ bool SmartSessionController::requestPtpRefresh() {
     return ptp && sync;
 }
 
+bool SmartSessionController::requestSyncDiagnostics() {
+    // Read-only operator request; serialize behind the existing device
+    // session. Never interleave with START/CFG or firmware port handoff.
+    if (!deviceControlAvailable() || device_ == nullptr ||
+        device_->ptpStarting() || device_->profileDeploying() ||
+        profileSyncStage_ == ProfileSyncStage::deploying ||
+        device_->scenarioApplying() || updateRequested_) return false;
+    return device_->sendPtpDiagnostics();
+}
+
 bool SmartSessionController::requestPtpRole(const QString& role) {
     return deviceControlAvailable() && device_ != nullptr && device_->setPtpRole(role);
 }
@@ -973,6 +983,8 @@ QString SmartSessionController::diagnosticsText() const {
         add(QStringLiteral("SMV missed reported"), device_->missed());
         add(QStringLiteral("SMV TX failures reported"), device_->txFailures());
         add(QStringLiteral("PTP status reported"), device_->ptpStatus());
+        add(QStringLiteral("SV sync internal flight recorder (not physical proof)"),
+            device_->syncDiagnostics());
         add(QStringLiteral("PTP role reported"), device_->ptpRole());
         add(QStringLiteral("PTP discipline reported"), device_->ptpDiscipline());
         add(QStringLiteral("SMPSYNCH value reported"), device_->smpSynchValue());
