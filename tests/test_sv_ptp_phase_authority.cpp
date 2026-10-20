@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ariec61850/time_sync/sv_ptp_phase_authority.hpp"
+#include "ariec61850/time_sync/sv_ptp_clock_lease.hpp"
 #include "ariec61850/sampled_values/rational_schedule.hpp"
 
 #include <array>
@@ -74,6 +75,31 @@ void check_auto_preflight_does_not_invent_sync_or_start() {
         CHECK(d.accepted);
         CHECK(d.software_tracking == (epoch >= 4U));
     }
+}
+
+void check_receiver_preflight_requires_measured_gm_lease() {
+    SvPtpClockLease gm{};
+    gm.role = PtpAuthorityRole::receiver;
+    gm.generation = 9U;
+    gm.clock_usable = true;
+    gm.source_selected = true;
+    gm.source_port = 1U;
+    gm.source_clock_identity[0] = 0x12U;
+    CHECK(valid_sv_ptp_clock_lease(gm));
+    CHECK(SvAutoPreflightPolicy::can_prepare(
+        true, valid_sv_ptp_clock_lease(gm), true, 4000U, 4000U));
+    CHECK(!SvAutoPreflightPolicy::can_prepare(
+        true, valid_sv_ptp_clock_lease(gm), true, 4000U, 4800U));
+    CHECK(!SvAutoPreflightPolicy::can_advertise_local(false, true));
+    auto changed = gm;
+    changed.source_clock_identity[0] ^= 0x01U; // swapped grandmaster
+    CHECK(!same_sv_ptp_clock_lease(gm, changed));
+    changed = gm;
+    changed.generation += 1U; // GM relock/clock discontinuity
+    CHECK(!same_sv_ptp_clock_lease(gm, changed));
+    changed = gm;
+    changed.clock_usable = false; // lost discipline
+    CHECK(!valid_sv_ptp_clock_lease(changed));
 }
 
 void check_phase_observer_stall_revokes_source_wire_claim() {
@@ -419,6 +445,7 @@ int main() {
     try {
         check_auto_preflight_does_not_invent_sync_or_start();
         check_phase_observer_stall_revokes_source_wire_claim();
+        check_receiver_preflight_requires_measured_gm_lease();
         check_phase_sign_and_bounded_corrections();
         check_uncertain_brackets_never_claim_software_tracking();
         check_per_second_slew_distribution();
