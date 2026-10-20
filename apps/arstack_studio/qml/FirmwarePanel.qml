@@ -21,6 +21,13 @@ SurfacePanel {
         !panel.session.firmwareUpdateResult.startsWith("Exact bundled firmware build verified")
 
     readonly property bool hasPort: firmwarePort.currentText.length > 0
+    readonly property string bundledBuild: panel.session
+        ? String(panel.session.expectedFirmwareBuildId || "") : ""
+    readonly property string installedBuild: panel.device.deviceVerified
+        ? String(panel.device.firmwareBuildId || "") : ""
+    readonly property bool exactBuildMatch: panel.device.deviceVerified
+        && panel.bundledBuild.length === 16 && panel.installedBuild.length === 16
+        && panel.bundledBuild.toLowerCase() === panel.installedBuild.toLowerCase()
 
     component StepBadge: Rectangle {
         property string stepText: "1"
@@ -77,7 +84,7 @@ SurfacePanel {
 
         Rectangle {
             Layout.fillWidth: true
-            implicitHeight: 46
+            implicitHeight: 60
             radius: 8
             color: panel.theme.surface2
             border.width: 1
@@ -99,7 +106,7 @@ SurfacePanel {
                     Label {
                         Layout.fillWidth: true
                         text: panel.firmware.bundleReady
-                            ? "Bundled firmware v" + panel.firmware.firmwareVersion + " · ready"
+                            ? "Bundled firmware v" + panel.firmware.firmwareVersion
                             : "Firmware package unavailable"
                         elide: Text.ElideRight
                         color: panel.theme.text
@@ -107,13 +114,23 @@ SurfacePanel {
                         font.pixelSize: 11
                         font.weight: Font.DemiBold
                     }
+                    Label {
+                        Layout.fillWidth: true
+                        text: panel.bundledBuild.length
+                            ? "Build " + panel.bundledBuild + " · included in Studio"
+                            : "Build identity unavailable — installation not verifiable"
+                        color: panel.bundledBuild.length ? panel.theme.textSoft : panel.theme.amber
+                        font.family: panel.monoFont
+                        font.pixelSize: 9
+                        elide: Text.ElideRight
+                    }
                 }
             }
         }
 
         Rectangle {
             Layout.fillWidth: true
-            implicitHeight: 112
+            implicitHeight: 132
             radius: 9
             color: panel.theme.surface2
             border.width: 1
@@ -150,6 +167,16 @@ SurfacePanel {
                         font.family: panel.uiFont
                         font.pixelSize: 10
                         wrapMode: Text.WordWrap
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: !panel.device.deviceVerified ? "Installed build not verified"
+                            : "Installed build " + (panel.installedBuild || "UNKNOWN")
+                              + (panel.exactBuildMatch ? "  ·  MATCH" : "  ·  MISMATCH / UNKNOWN")
+                        color: panel.exactBuildMatch ? panel.theme.green : panel.theme.amber
+                        font.family: panel.monoFont
+                        font.pixelSize: 9
+                        elide: Text.ElideRight
                     }
 
                     RowLayout {
@@ -192,8 +219,7 @@ SurfacePanel {
 
                 StepBadge {
                     stepText: "2"
-                    complete: panel.device.deviceVerified &&
-                              panel.device.protocolVersion === panel.firmware.expectedProtocol
+                    complete: panel.exactBuildMatch
                     Layout.alignment: Qt.AlignTop
                 }
 
