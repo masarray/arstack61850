@@ -281,7 +281,9 @@ SurfacePanel {
             return
         }
         if (!smartSession.startReady) {
-            controller.showMessage(ribbon.startReason(), false)
+            // One click must explain why a physical START is not queued.
+            // Never make the operator click twice to discover readiness.
+            controller.showMessage("START waiting: " + ribbon.startReason(), true)
             return
         }
         // A START always transmits the current 4I+4V table snapshot.
