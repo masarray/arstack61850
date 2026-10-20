@@ -55,6 +55,7 @@ class DeviceController : public QObject {
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(QString logText READ logText NOTIFY logTextChanged)
     Q_PROPERTY(QString syncDiagnostics READ syncDiagnostics NOTIFY syncDiagnosticsChanged)
+    Q_PROPERTY(QString syncFlightLatest READ syncFlightLatest NOTIFY syncDiagnosticsChanged)
     Q_PROPERTY(QString fps READ fps NOTIFY telemetryChanged)
     Q_PROPERTY(QString missed READ missed NOTIFY telemetryChanged)
     Q_PROPERTY(QString txFailures READ txFailures NOTIFY telemetryChanged)
@@ -141,6 +142,7 @@ public:
     [[nodiscard]] QString lastError() const;
     [[nodiscard]] QString logText() const;
     [[nodiscard]] QString syncDiagnostics() const { return syncDiagnostics_; }
+    [[nodiscard]] QString syncFlightLatest() const { return syncFlightLatest_; }
     [[nodiscard]] QString fps() const;
     [[nodiscard]] QString missed() const;
     [[nodiscard]] QString txFailures() const;
@@ -394,6 +396,7 @@ private:
     QString lastError_;
     QString logText_;
     QString syncDiagnostics_{QStringLiteral("Select Inspect SV lock to read on-board causes.")};
+    QString syncFlightLatest_;
     QString fps_{QStringLiteral("—")};
     QString missed_{QStringLiteral("—")};
     QString txFailures_{QStringLiteral("—")};
