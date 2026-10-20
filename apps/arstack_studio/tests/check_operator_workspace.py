@@ -450,7 +450,9 @@ def main() -> None:
     device_control_cpp = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
     require("sendCommand(QStringLiteral(\"PROFILE SHOW\"))" in device_control_cpp and
             "Could not request verified PTP role readback" in device_control_cpp and
-            "Board rejected command: %1" in device_control_cpp,
+            "Board rejected PTP %1 command: %2" in device_control_cpp and
+            "awaiting_preflight" in device_control_cpp and
+            "PTP status=(RUNNING|STOPPED)" in device_control_cpp,
             "PTP role ACK must trigger explicit firmware readback with meaningful failure")
     require("exactBuildMatch" in firmware_panel and
             "firmwareBuildId" in firmware_panel and
@@ -477,6 +479,20 @@ def main() -> None:
             'ptpRuntimeRunningSeen_' in device_control_cpp and
             'if (!ptpRuntimeRoleSeen_ || !ptpRuntimeRunningSeen_' in device_control_cpp,
             "PTP errors must originate on board and two-order runtime proofs must be joined")
+    clipboard_header = (STUDIO / "src/StudioClipboard.hpp").read_text(encoding="utf-8")
+    clipboard_cpp = (STUDIO / "src/StudioClipboard.cpp").read_text(encoding="utf-8")
+    main_cpp = (STUDIO / "src/main.cpp").read_text(encoding="utf-8")
+    studio_main = source("Main.qml")
+    require("import ARStack.Studio 1.0" in ptp_panel and
+            "if (StudioClipboard.copyText(snapshot))" in ptp_panel and
+            "panel.controller.openDiagnostics()" in ptp_panel and
+            "Q_INVOKABLE bool copyText" in clipboard_header and
+            "clipboard->text(QClipboard::Clipboard) == text" in clipboard_cpp and
+            "--check-clipboard" in main_cpp and
+            "selectByMouse: true" in studio_main,
+            "Timing Copy diagnostics must use imported GUI singleton, verify native clipboard, "
+            "and offer full selectable manual fallback")
+
     print("Studio operator workspace contract: PASS")
 
 
