@@ -110,7 +110,7 @@ Item {
                         color: hub.device.deviceVerified ? hub.theme.green : hub.theme.amber
                     }
                     Label {
-                        text: hub.device.deviceVerified ? "Device ready" : "Setup mode"
+                        text: hub.device.deviceVerified ? "Board verified" : "Setup mode"
                         color: hub.device.deviceVerified ? hub.theme.green : hub.theme.amber
                         font.family: hub.uiFont
                         font.pixelSize: 10
