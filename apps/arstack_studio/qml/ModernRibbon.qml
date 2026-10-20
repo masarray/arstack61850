@@ -29,7 +29,7 @@ Rectangle {
     function conciseState() {
         if (!device.deviceVerified && controller.offlinePreviewRunning) return "Offline preview"
         if (session.state === "RUNNING") return "Running"
-        if (session.state === "READY") return "Ready"
+        if (session.state === "READY") return "Board ready"
         if (session.state === "WAITING FOR DEVICE") return "Offline"
         if (session.state === "DEVICE FOUND" || session.state === "CONNECTING" || session.state === "CHECKING DEVICE") return "Connecting"
         if (session.state === "FIRMWARE RECOVERY") return "Firmware status unknown"
