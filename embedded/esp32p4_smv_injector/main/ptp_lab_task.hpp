@@ -136,6 +136,10 @@ bool ar_ptp_lab_is_running(void);
  * becomes ready after START or after a clock/TX failure; not traceability. */
 uint32_t ar_ptp_lab_source_generation(void);
 
+/** Read-only SOURCE startup result. Persists after failed task teardown and
+ * never changes clock authority, SV lock gating or transmission scheduling. */
+const char* ar_ptp_source_last_start_reason(void);
+
 // Role-tagged clock lease. Not an SV phase or egress certificate.
 typedef struct ar_ptp_timing_authority_t {
     ar_ptp_role_t role;
