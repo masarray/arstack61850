@@ -872,8 +872,11 @@ private:
         if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_role_ack)
             return false;
         d.processLine(stale);
-        return !d.ptpStarting() && !d.ptpRestartAfterStop_ &&
-            d.ptpLastStartFailure_.contains(stale);
+        return d.ptpStarting() && !d.ptpRestartAfterStop_ &&
+            d.ptpStartStage_ == DeviceController::PtpStartStage::stop_unconfirmed &&
+            d.ptpLastStartFailure_.contains(QStringLiteral("manual STOP")) &&
+            !f.session.requestStartPtpConfigured(
+                QStringLiteral("SOURCE"), ptpValidProfile());
     }
 
     static bool ptpStaleRuntimeStopUnverified() {
