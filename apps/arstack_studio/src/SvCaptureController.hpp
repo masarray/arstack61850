@@ -17,6 +17,8 @@ class SvCaptureController : public QObject {
     Q_PROPERTY(bool processing READ processing NOTIFY stateChanged)
     Q_PROPERTY(QString outputFolder READ outputFolder NOTIFY statusChanged)
     Q_PROPERTY(QString lastReport READ lastReport NOTIFY statusChanged)
+    Q_PROPERTY(QVariantMap summary READ summary NOTIFY statusChanged)
+    Q_PROPERTY(bool captureSupportAvailable READ captureSupportAvailable NOTIFY statusChanged)
 public:
     explicit SvCaptureController(QObject* parent = nullptr);
     ~SvCaptureController() override;
@@ -28,12 +30,15 @@ public:
     [[nodiscard]] bool processing() const { return decoder_.isRunning(); }
     [[nodiscard]] QString outputFolder() const { return outputFolder_; }
     [[nodiscard]] QString lastReport() const { return lastReport_; }
+    [[nodiscard]] QVariantMap summary() const { return summary_; }
+    [[nodiscard]] bool captureSupportAvailable() const { return !dumpcap_.isEmpty(); }
 
     Q_INVOKABLE void refreshInterfaces();
     Q_INVOKABLE bool startCapture(int index, int seconds, const QVariantMap& studioTelemetry);
     Q_INVOKABLE void abortCapture();
     Q_INVOKABLE void sampleTelemetry(const QVariantMap& passiveSnapshot);
     Q_INVOKABLE void openOutputFolder();
+    Q_INVOKABLE void openCaptureSupportHelp();
 
 signals:
     void interfacesChanged();
@@ -59,6 +64,7 @@ private:
     QString status_{QStringLiteral("Discover an Ethernet capture adapter to begin.")};
     QString outputFolder_;
     QString lastReport_;
+    QVariantMap summary_;
     QString activePcap_;
     QString activeCsv_;
     QString activeSeconds_;
