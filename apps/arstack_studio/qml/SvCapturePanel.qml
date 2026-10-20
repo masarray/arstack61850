@@ -15,7 +15,7 @@ Rectangle {
     radius: 8
     border.width: 1
     border.color: theme.lineSoft
-    implicitHeight: 258
+    implicitHeight: 390
 
     SvCaptureController { id: capture }
 
@@ -62,7 +62,7 @@ Rectangle {
         RowLayout {
             Layout.fillWidth: true
             Label {
-                text: "SV + PTP WIRE CAPTURE"
+                text: "CAPTURE · SV + PTP"
                 color: panel.theme.text
                 font.family: panel.uiFont
                 font.pixelSize: 12
@@ -79,7 +79,7 @@ Rectangle {
         }
         Label {
             Layout.fillWidth: true
-            text: "Capture independent IEC 61850 SV and PTP Ethernet traffic in one timeline. No injector commands are sent. Requires Wireshark dumpcap + Npcap and a TAP/SPAN receiving the traffic."
+            text: "Record independent SV + PTP Ethernet while injection continues. Choose an Ethernet adapter and duration, then press Capture. One-time Windows capture support (Wireshark/Npcap) and a traffic-visible TAP/SPAN may be required."
             wrapMode: Text.WordWrap
             color: panel.theme.textSoft
             font.family: panel.uiFont
@@ -117,6 +117,14 @@ Rectangle {
                 text: "Refresh"
                 enabled: !capture.capturing && !capture.processing
                 onClicked: capture.refreshInterfaces()
+            }
+            CalmButton {
+                theme: panel.theme
+                uiFont: panel.uiFont
+                text: "Install capture support"
+                visible: !capture.captureSupportAvailable
+                enabled: !capture.capturing && !capture.processing
+                onClicked: capture.openCaptureSupportHelp()
             }
         }
         RowLayout {
@@ -168,6 +176,55 @@ Rectangle {
                 onClicked: capture.openOutputFolder()
             }
         }
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 92
+            visible: capture.summary.sv_frames !== undefined
+            radius: 8
+            color: panel.theme.surface
+            border.width: 1
+            border.color: panel.theme.lineSoft
+            GridLayout {
+                anchors.fill: parent
+                anchors.margins: 10
+                columns: 4
+                rowSpacing: 5
+                columnSpacing: 10
+                Repeater {
+                    model: [
+                        { label: "SV packets", value: capture.summary.sv_frames },
+                        { label: "PTP packets", value: capture.summary.ptp_frames },
+                        { label: "Missing samples", value: capture.summary.missing_samples },
+                        { label: "smpSynch changes", value: capture.summary.sync_transitions }
+                    ]
+                    delegate: ColumnLayout {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Label {
+                            text: modelData.value === undefined ? "—" : String(modelData.value)
+                            color: panel.theme.text
+                            font.family: panel.monoFont
+                            font.pixelSize: 16
+                            font.weight: Font.DemiBold
+                        }
+                        Label {
+                            text: modelData.label
+                            color: panel.theme.muted
+                            font.family: panel.uiFont
+                            font.pixelSize: 9
+                        }
+                    }
+                }
+                Label {
+                    Layout.columnSpan: 4
+                    text: "Wire capture saved · Physical synchronization is not yet verified"
+                    color: panel.theme.textSoft
+                    font.family: panel.uiFont
+                    font.pixelSize: 9
+                }
+            }
+        }
         Label {
             Layout.fillWidth: true
             text: capture.status
@@ -180,7 +237,7 @@ Rectangle {
         }
         Label {
             Layout.fillWidth: true
-            text: "Exports: SV+PTP .pcap, 4I+4V samples.csv, seconds.csv, concise events.csv and report.json. For 3600 s the sample CSV is 1:20; raw PCAP preserves every packet. PTP traffic alone never proves clock lock or physical PASS."
+            text: "Studio saves the raw SV+PTP PCAP, 4I+4V CSV, event transitions and report JSON automatically. Open files to share the evidence. The 3600 s CSV is sampled 1:20; PCAP retains all captured packets. Host capture is not hardware phase proof."
             wrapMode: Text.WordWrap
             color: panel.theme.muted
             font.family: panel.uiFont
