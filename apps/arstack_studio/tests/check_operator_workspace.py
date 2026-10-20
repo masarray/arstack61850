@@ -397,6 +397,34 @@ def main() -> None:
     require("--check-operator-ui" in (STUDIO / "src/main.cpp").read_text(encoding="utf-8")
             and "studio-ui-evidence" in (STUDIO.parent.parent / ".github/workflows/arstack-studio-windows-lifecycle.yml").read_text(encoding="utf-8"),
             "Windows geometry/evidence gate must run from existing lifecycle build")
+    # Capture is a first-class operator workflow, not a hidden Device-only
+    # widget, a second lifetime-owner, or an external script requirement.
+    hub = source("ConfigurationHub.qml")
+    capture_ui = source("SvCapturePanel.qml")
+    capture_cpp = (STUDIO / "src/SvCaptureController.cpp").read_text(encoding="utf-8")
+    require('text: "Capture"' in ribbon and
+            'onClicked: bar.controller.openCapture()' in ribbon and
+            "function openCapture()" in main_qml and
+            "profilePanel.showCapture()" in main_qml and
+            "function showCapture()" in hub and
+            'ExpertTab { text: "Capture" }' in hub and
+            "active: hub.captureTabVisited" in hub and
+            "sourceComponent: SvCapturePanel {" in hub and
+            "SvCapturePanel {" not in source("DeviceExpertPanel.qml"),
+            "Studio must expose ONE persistent Capture workspace from its main ribbon")
+    require('text: "Capture SV + PTP"' in capture_ui and
+            "capture.startCapture(" in capture_ui and
+            "capture.summary.sv_frames" in capture_ui and
+            "capture.summary.ptp_frames" in capture_ui and
+            "capture.summary.missing_samples" in capture_ui and
+            "capture.summary.sync_transitions" in capture_ui and
+            "capture.openCaptureSupportHelp()" in capture_ui,
+            "Studio capture must start in-app and display decoded SV/PTP evidence without terminal scripts")
+    require("result.insert(QStringLiteral(\"summary\"), QVariantMap{" in capture_cpp and
+            "result.insert(QStringLiteral(\"summary\"), QVariantMap{" in capture_cpp and
+            "QDesktopServices::openUrl(" in capture_cpp and
+            "QString findDumpcap()" in capture_cpp,
+            "Studio capture results must derive from production wire decoder with click-only setup")
     print("Studio operator workspace contract: PASS")
 
 
