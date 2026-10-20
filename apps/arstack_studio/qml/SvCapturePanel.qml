@@ -19,6 +19,41 @@ Rectangle {
 
     SvCaptureController { id: capture }
 
+    // Read already-published Studio state passively. This never queues serial
+    // commands; sample it at 1Hz so PTP/SV transitions can be time-correlated.
+    function telemetrySnapshot() {
+        return {
+            "captured_utc": new Date().toISOString(),
+            "operator_frequency_hz_UNVERIFIED": panel.signalFrequency,
+            "firmware_version": panel.device ? panel.device.firmwareVersion : "",
+            "firmware_build_id": panel.device ? panel.device.firmwareBuildId : "",
+            "boot_id": panel.device ? panel.device.bootId : "",
+            "device_id": panel.device ? panel.device.deviceId : "",
+            "serial_port": panel.device ? panel.device.portName : "",
+            "running": panel.device ? panel.device.running : false,
+            "profile_generation": panel.device ? panel.device.profileGeneration : "",
+            "signal_generation": panel.device ? panel.device.signalGeneration : "",
+            "smpSynch_value": panel.device ? panel.device.smpSynchValue : "",
+            "smpSynch_source": panel.device ? panel.device.smpSynchSource : "",
+            "ptp_role": panel.device ? panel.device.ptpRole : "",
+            "ptp_running": panel.device ? panel.device.ptpRunning : false,
+            "ptp_discipline": panel.device ? panel.device.ptpDiscipline : "",
+            "ptp_source": panel.device ? panel.device.ptpSource : "",
+            "ptp_offset_ns": panel.device ? panel.device.ptpOffsetNs : "",
+            "device_fps": panel.device ? panel.device.fps : "",
+            "device_missed": panel.device ? panel.device.missed : "",
+            "device_tx_failures": panel.device ? panel.device.txFailures : ""
+
+        }
+    }
+    Timer {
+        interval: 1000
+        repeat: true
+        running: capture.capturing
+        onTriggered: capture.sampleTelemetry(panel.telemetrySnapshot())
+    }
+
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 12
@@ -113,28 +148,7 @@ Rectangle {
                 onClicked: {
                     var seconds = captureDuration.currentIndex === 2 ? 3600
                                 : captureDuration.currentIndex === 0 ? 30 : 120
-                    capture.startCapture(adapter.currentIndex, seconds, {
-                        "captured_utc": new Date().toISOString(),
-                        "operator_frequency_hz_UNVERIFIED": panel.signalFrequency,
-                        "firmware_version": panel.device ? panel.device.firmwareVersion : "",
-                        "firmware_build_id": panel.device ? panel.device.firmwareBuildId : "",
-                        "boot_id": panel.device ? panel.device.bootId : "",
-                        "device_id": panel.device ? panel.device.deviceId : "",
-                        "serial_port": panel.device ? panel.device.portName : "",
-                        "running": panel.device ? panel.device.running : false,
-                        "profile_generation": panel.device ? panel.device.profileGeneration : "",
-                        "signal_generation": panel.device ? panel.device.signalGeneration : "",
-                        "smpSynch_value": panel.device ? panel.device.smpSynchValue : "",
-                        "smpSynch_source": panel.device ? panel.device.smpSynchSource : "",
-                        "ptp_role": panel.device ? panel.device.ptpRole : "",
-                        "ptp_running": panel.device ? panel.device.ptpRunning : false,
-                        "ptp_discipline": panel.device ? panel.device.ptpDiscipline : "",
-                        "ptp_source": panel.device ? panel.device.ptpSource : "",
-                        "ptp_offset_ns": panel.device ? panel.device.ptpOffsetNs : "",
-                        "device_fps": panel.device ? panel.device.fps : "",
-                        "device_missed": panel.device ? panel.device.missed : "",
-                        "device_tx_failures": panel.device ? panel.device.txFailures : ""
-                    })
+                    capture.startCapture(adapter.currentIndex, seconds, panel.telemetrySnapshot())
                 }
             }
             CalmButton {
