@@ -69,6 +69,7 @@ class DeviceController : public QObject {
     Q_PROPERTY(bool ptpStarting READ ptpStarting NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpStatus READ ptpStatus NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpLastStartFailure READ ptpLastStartFailure NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpStartPhase READ ptpStartPhase NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpDomain READ ptpDomain NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpTransportSpecific READ ptpTransportSpecific NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpVlan READ ptpVlan NOTIFY ptpStateChanged)
@@ -158,6 +159,7 @@ public:
     [[nodiscard]] bool ptpStarting() const noexcept { return ptpStartStage_ != PtpStartStage::idle; }
     [[nodiscard]] QString ptpStatus() const;
     [[nodiscard]] QString ptpLastStartFailure() const { return ptpLastStartFailure_; }
+    [[nodiscard]] QString ptpStartPhase() const;
     [[nodiscard]] QString ptpDomain() const;
     [[nodiscard]] QString ptpTransportSpecific() const;
     [[nodiscard]] QString ptpVlan() const;
@@ -318,7 +320,7 @@ private:
     friend class DeterministicSessionHarness;
 
     enum class PtpStartStage {
-        idle, awaiting_role_ack, awaiting_role_readback, awaiting_config,
+        idle, awaiting_preflight, awaiting_role_ack, awaiting_role_readback, awaiting_config,
         awaiting_start, awaiting_runtime, awaiting_stop_ack, awaiting_stop_readback,
         stop_unconfirmed
     };
