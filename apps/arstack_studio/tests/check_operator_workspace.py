@@ -459,6 +459,8 @@ def main() -> None:
             'panel.device.ptpStatus.indexOf("PTP start failed")' in ptp_panel and
             'ptpLastStartFailure' in ptp_panel and
             'respondToPeerDelay: role === "SOURCE" ? true : pdelayCheck.checked' in ptp_panel and
+            'announceIntervalMs: role === "SOURCE" ? 1000' in ptp_panel and
+            'syncIntervalMs: role === "SOURCE" ? 1000' in ptp_panel and
             "SOURCE profile: 1 s Announce" in ptp_panel and
             "sourcePtpProfileError" in device_control_cpp and
             "ptpRuntimeRunningSeen_" in device_control_cpp and
