@@ -54,15 +54,14 @@ std::atomic_bool g_source_local_qualified{false};
 } // namespace
 
 void smp_synch_lab_set_mode(const SvSyncPolicyMode mode) noexcept {
-    const auto old = g_mode.exchange(
-        static_cast<std::uint8_t>(mode), std::memory_order_acq_rel);
+    const auto old = g_mode.load(std::memory_order_acquire);
     if (old != static_cast<std::uint8_t>(mode)) {
-        // A manual override must not preserve a historical AUTO proof when
-        // the operator switches back. Fresh source/phase/MAC evidence is
-        // required for the next automatic assertion.
+        // Single serial control-plane writer. Revoke BEFORE exposing AUTO,
+        // never allow even one 4kHz wire frame to inherit stale override proof.
         g_source_local_qualified.store(false, std::memory_order_release);
         g_sv_timeline_phase_qualified.store(false, std::memory_order_release);
     }
+    g_mode.store(static_cast<std::uint8_t>(mode), std::memory_order_release);
 }
 
 SvSyncPolicyMode smp_synch_lab_mode() noexcept {
@@ -82,8 +81,14 @@ SmpSynchLabStatus smp_synch_lab_status() noexcept {
 }
 
 void smp_synch_lab_set_measured(const std::optional<SmpSynchValue> value) noexcept {
-    if (!value.has_value()) {
-        g_measured_value.store(-1, std::memory_order_release);
+    if (!value.has_value() ||
+        *value == SmpSynchValue::not_synchronized) {
+        // A LOST/UNLOCKED PTP receiver invalidates the SV timeline proof,
+        // not merely the visible measured-PTP value. Relock must establish
+        // fresh phase and MAC evidence before AUTO may promote again.
+        g_sv_timeline_phase_qualified.store(false, std::memory_order_release);
+        g_measured_value.store(
+            value.has_value() ? 0 : -1, std::memory_order_release);
         return;
     }
     g_measured_value.store(
