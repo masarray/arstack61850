@@ -99,10 +99,16 @@ Rectangle {
             tone: bar.session.startReady ? "success"
                 : bar.device.deviceVerified ? "neutral" : "accent"
             iconSource: Qt.resolvedUrl("../assets/material/play_arrow.svg")
+            // A physical Start is clickable only when READY, or when the
+            // operator explicitly needs a firmware/profile recovery prompt.
+            // PREPARING is not an accepted click: no silent "try again".
             enabled: !bar.workflow.injectionRunning && !bar.workflow.startQueued && !bar.controller.offlinePreviewRunning
                 && !bar.session.updatingFirmware && !bar.session.updateNeedsBootloaderHelp
-                && (bar.device.deviceVerified ||
-                    (bar.session.state === "WAITING FOR DEVICE" && !bar.device.discovering))
+                && (bar.device.deviceVerified
+                    ? (bar.session.startReady || bar.session.firmwareInstallRequired ||
+                       bar.session.firmwareUpdateRequired || bar.session.profileSyncRetryAvailable)
+                    : (bar.session.state === "WAITING FOR DEVICE" && !bar.device.discovering &&
+                       bar.device.ports.length === 0))
             toolTipText: !enabled ? bar.workflow.startReason() :
                 !bar.device.deviceVerified ? "Offline preview only; no Ethernet SV output" : ""
             onClicked: {
