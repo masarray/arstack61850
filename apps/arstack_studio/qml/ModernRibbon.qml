@@ -99,8 +99,12 @@ Rectangle {
             toolTipText: !enabled && bar.device.deviceVerified ? bar.workflow.startReason() : ""
             onClicked: {
                 if (!bar.device.deviceVerified) {
-                    // The footer already identifies preview-only operation.
-                    bar.controller.offlinePreviewRunning = true
+                    // Do not silently reinterpret a physical START click as
+                    // simulated injection during USB reconnect or firmware
+                    // verification. Make explicit offline preview opt-in via
+                    // the dedicated preview workflow instead.
+                    bar.controller.showMessage(
+                        "ESP32-P4 not verified. Wait for connection or open Advanced > Firmware.", true)
                 } else bar.workflow.requestStart()
             }
         }
