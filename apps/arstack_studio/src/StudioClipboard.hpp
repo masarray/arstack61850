@@ -9,5 +9,7 @@ class StudioClipboard final : public QObject {
     Q_OBJECT
 public:
     using QObject::QObject;
-    Q_INVOKABLE void copyText(const QString& text) const;
+    // Returns true only when the host clipboard contains the requested snapshot.
+    // Empty snapshots and unavailable/busy clipboard never report success.
+    Q_INVOKABLE bool copyText(const QString& text) const;
 };
