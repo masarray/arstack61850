@@ -1489,10 +1489,20 @@ void DeviceController::advancePtpStartup(const QString& line) {
                 "PTPROLE rejected: stop PTP before changing operating role"),
                 Qt::CaseInsensitive);
         if (ptpStartStage_ == PtpStartStage::awaiting_role_ack &&
-            boardStillRunning && !ptpRoleRecoveryAttempted_) {
-            ptpRoleRecoveryAttempted_ = true;
-            if (!beginPtpStopVerification(true))
-                failPtpStartup(QStringLiteral("Could not safely stop prior PTP runtime."), false);
+            boardStillRunning) {
+            const QString cause = QStringLiteral("Board PTP remained ACTIVE after one verified "
+                                                 "STOP; manual STOP is required before START.");
+            ptpLastStartFailure_ = cause;
+            if (!ptpRoleRecoveryAttempted_) {
+                ptpRoleRecoveryAttempted_ = true;
+                if (!beginPtpStopVerification(true))
+                    markPtpStopUnconfirmed(
+                        QStringLiteral("Could not queue STOP for stale PTP runtime."));
+            } else {
+                // A second ACTIVE response means authority is inconsistent.
+                // Do not fabricate OFF or launch another retry loop.
+                markPtpStopUnconfirmed(cause);
+            }
             return;
         }
         const bool rollback = ptpStartStage_ == PtpStartStage::awaiting_start ||
