@@ -656,6 +656,10 @@ private:
     }
 
     static bool ptpRuntimeRoleEvidenceRequired() {
+        // The PTP2 role and PTP STATUS RUNNING are asynchronous observations.
+        // A positive STATUS arriving before matching PTP2 must wait, not fail
+        // immediately. Conversely missing/wrong role MUST fail at the original
+        // finite deadline and follow STOP verification.
         Fixture f;
         if (!setupGuidedPtp(f, QStringLiteral("SOURCE"))) return false;
         auto& d = f.device;
@@ -664,14 +668,26 @@ private:
         d.processLine(QStringLiteral("PTP configuration accepted"));
         d.processLine(QStringLiteral("PTP start accepted"));
         if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_runtime) return false;
+
         d.processLine(QStringLiteral(
             "PTP status=RUNNING Announce=1 Sync=1 FollowUp=1 PdelayFrames=0 TXfail=0"));
-        // Missing PTP2 evidence after START must trigger a verified rollback,
-        // not silently clear state while the board might still transmit.
-        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_ack ||
-            !d.ptpStarting() ||
+        // No success and no false rollback from early STATUS; competing
+        // requests cannot enter the active START transaction.
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_runtime ||
+            !d.ptpStarting() || !d.ptpRuntimeRunningSeen_ ||
+            d.ptpRuntimeRoleSeen_ ||
             f.session.requestStartPtpConfigured(QStringLiteral("SOURCE"), ptpValidProfile()) ||
             d.startPtp() || d.setPtpRole(QStringLiteral("MONITOR"))) return false;
+
+        d.processLine(ptpRoleEvidence(QStringLiteral("SOURCE")));
+        if (d.ptpStarting() || !d.ptpRunning_ ||
+            !d.ptpStatus_.contains(QStringLiteral("external timing still unqualified")) ||
+            !d.ptpFailureReason_.isEmpty()) return false;
+
+        // A new START with an old/incorrect role must remain pending, and a
+        // STOPPED response cannot certify RUNNING. On timeout we must roll
+        // back and independently verify STOP, never mark a false PTP PASS.
+        if (!f.session.requestStopPtp()) return false;
         d.processLine(QStringLiteral("PTP stop requested"));
         d.processLine(ptpStoppedStatus());
         if (d.ptpStarting() || d.ptpRunning_) return false;
@@ -682,8 +698,15 @@ private:
         d.processLine(QStringLiteral("PTP configuration accepted"));
         d.processLine(QStringLiteral("PTP start accepted"));
         d.processLine(ptpRoleEvidence(QStringLiteral("RECEIVER")));
-        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_ack ||
+        d.processLine(ptpStoppedStatus());
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_runtime ||
             !d.ptpStarting()) return false;
+
+        if (!QMetaObject::invokeMethod(&d.ptpStartTimer_, "timeout",
+                                       Qt::DirectConnection)) return false;
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_ack ||
+            !d.ptpStarting() ||
+            !d.ptpFailureReason_.contains(QStringLiteral("PTP runtime readback"))) return false;
         d.processLine(QStringLiteral("PTP stop requested"));
         d.processLine(ptpStoppedStatus());
         return !d.ptpStarting() && !d.ptpRunning_ &&
