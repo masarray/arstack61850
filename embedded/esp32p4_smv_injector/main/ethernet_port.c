@@ -126,7 +126,7 @@ bool ar_esp32p4_ptp_start(void)
     // the 4kHz SV publisher, ISR or routine PTP transmit path. Do not
     // infer that PHY UP implies a valid PTP grandmaster or verified SV phase.
     // Use the canonical ETH_EVENT-based link state shared with the SV
-    // publisher. ESP-IDF 5.5.x has no ETH_CMD_G_LINK_STATUS ioctl.
+    // publisher. No version-specific Ethernet ioctl or PHY polling is used.
     // This is a read-only, bounded failure-path query.
     if (!ar_esp32p4_eth_link_up()) {
         ESP_LOGE(TAG, "PTP start rejected: Ethernet PHY link DOWN; check cable and link partner");
