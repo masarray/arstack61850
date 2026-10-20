@@ -456,8 +456,20 @@ def main() -> None:
             "firmwareBuildId" in firmware_panel and
             "expectedFirmwareBuildId" in firmware_panel and
             "Installed build differs from this Studio package" in firmware_panel and
-            'panel.device.ptpStatus.indexOf("PTP start failed")' in ptp_panel,
-            "Firmware tab must show installed-versus-bundled exact build and PTP failure")
+            'panel.device.ptpStatus.indexOf("PTP start failed")' in ptp_panel and
+            'ptpLastStartFailure' in ptp_panel and
+            'checked: false' in ptp_panel and
+            'Require hardware peer-delay responses' in ptp_panel,
+            "Firmware tab must show exact build and SOURCE Pdelay must be explicit")
+    ptp_firmware = (STUDIO.parent.parent / "embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp").read_text(encoding="utf-8")
+    ptp_console = (STUDIO.parent.parent / "embedded/esp32p4_smv_injector/main/live_control.cpp").read_text(encoding="utf-8")
+    require('PDELAY_RX_TIMESTAMP_UNAVAILABLE' in ptp_firmware and
+            'SOURCE_TX_EVIDENCE_TIMEOUT' in ptp_firmware and
+            'IEEE1588_CLOCK_UNAVAILABLE' in ptp_firmware and
+            'PTP start rejected: source_reason=%s' in ptp_console and
+            'ptpRuntimeRunningSeen_' in device_control_cpp and
+            'if (!ptpRuntimeRoleSeen_ || !ptpRuntimeRunningSeen_' in device_control_cpp,
+            "PTP errors must originate on board and two-order runtime proofs must be joined")
     print("Studio operator workspace contract: PASS")
 
 
