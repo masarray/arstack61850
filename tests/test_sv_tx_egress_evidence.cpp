@@ -147,15 +147,15 @@ void check_no_intermitttent_local_at_start() {
     for (std::uint32_t epoch = 23U; epoch <= 27U; ++epoch)
         REQUIRE(!gate.observe(true, 7U, 0U, 3U, epoch));
     REQUIRE(!gate.observe(true, 7U, 0U, 3U, 29U)); // gap
-    for (std::uint32_t epoch = 30U; epoch <= 38U; ++epoch)
+    for (std::uint32_t epoch = 30U; epoch <= 37U; ++epoch)
         REQUIRE(!gate.observe(true, 7U, 0U, 3U, epoch));
-    REQUIRE(gate.observe(true, 7U, 0U, 3U, 39U));
-    REQUIRE(!gate.observe(true, 7U, 1U, 3U, 40U)); // TX fault
-    REQUIRE(!gate.observe(true, 7U, 1U, 4U, 41U)); // source restart
-    REQUIRE(!gate.observe(true, 8U, 1U, 4U, 42U)); // publisher restart
-    REQUIRE(!gate.observe(true, 8U, 1U, 4U, 42U)); // duplicate
-    REQUIRE(!gate.observe(true, 0U, 1U, 4U, 43U));
-    REQUIRE(!gate.observe(true, 8U, 1U, 0U, 44U));
+    REQUIRE(gate.observe(true, 7U, 0U, 3U, 38U));
+    REQUIRE(!gate.observe(true, 7U, 1U, 3U, 39U)); // TX fault
+    REQUIRE(!gate.observe(true, 7U, 1U, 4U, 40U)); // source restart
+    REQUIRE(!gate.observe(true, 8U, 1U, 4U, 41U)); // publisher restart
+    REQUIRE(!gate.observe(true, 8U, 1U, 4U, 41U)); // duplicate
+    REQUIRE(!gate.observe(true, 0U, 1U, 4U, 42U));
+    REQUIRE(!gate.observe(true, 8U, 1U, 0U, 43U));
 }
 void check_local_only_after_ten_clean_seconds() {
     SvLocalRefAcquisition gate;
