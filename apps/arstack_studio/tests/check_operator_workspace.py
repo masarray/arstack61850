@@ -138,10 +138,10 @@ def main() -> None:
             "checkbox must keep one stable custom indicator on hover")
     require("anchors.centerIn: parent" in calm,
             "button caption needs horizontal centering")
-    require("root.sendSignal(group, row)" in main_qml
+    require("function sendSignal(group, row)" in main_qml
             and "Layout.fillHeight: false" in main_qml
             and "Layout.preferredHeight: 196" in main_qml,
-            "tables and live sent phases must use explicit bounded layout")
+            "tables and live sent phases must use explicit bounded layout without link-toggle replay")
     require('property bool ptpDefaultStartAttempted: false' in main_qml
             and 'root.startPtpRole("SOURCE")' in main_qml
             and "device.deviceVerified" in main_qml,
@@ -156,6 +156,27 @@ def main() -> None:
             and 'scenarioStage_ = ScenarioStage::awaiting_start_ack;' in device_cpp,
             "START requires signed millidegree setpoints, firmware commit ACK and readback")
     matrix = source("SignalMatrix.qml")
+    link_toggle = source("StudioLinkSwitch.qml")
+    require("StudioDarkCheckBox {" not in matrix
+            and "requestSetEnabled(" not in matrix
+            and "property bool channelEnabled:" not in matrix
+            and "Item { Layout.preferredWidth: 25 }" not in matrix,
+            "all eight injection table channel checkboxes and their header spacer must be gone")
+    require("StudioLinkSwitch {" in main_qml
+            and "Switch {" in link_toggle
+            and "Behavior on x" in link_toggle
+            and "Accessible.name" in link_toggle
+            and "root.saveScenarioTimer.restart()" in main_qml
+            and "Not all live phases were sent." not in main_qml,
+            "3-phase link must be an accessible animated switch that sends no setpoints")
+    require("wasDisabled ? 0 : rows[i][0]" in main_qml
+            and 'model.setProperty(i, "enabled", true)' in main_qml
+            and "migratedDisabled > 0" in main_qml
+            and "Review before START." in main_qml
+            and "Hidden disabled channel detected." in main_qml,
+            "legacy disabled-channel presets must migrate visibly and START cannot hide OFF channels")
+    require("qml/StudioLinkSwitch.qml" in (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8"),
+            "link control must be registered with the native QML module")
     require("Layout.fillHeight: true" in matrix
             and "Layout.minimumHeight: 34" in matrix
             and "Item { Layout.fillHeight: true }" not in matrix,
