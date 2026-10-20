@@ -31,7 +31,7 @@ QByteArray tlv(quint8 tag, QByteArray value) {
     result.append(value);
     return result;
 }
-QByteArray packet(quint16 sampleCount) {
+QByteArray packet(quint16 sampleCount, quint8 synch = 0) {
     QByteArray payload;
     for (int i = 0; i < 8; ++i) {
         be32(payload, quint32(i == 0 ? -1200 : 2000 + i));
@@ -44,7 +44,7 @@ QByteArray packet(quint16 sampleCount) {
         tlv(0x80, "ARSTACK_SV01") +
         tlv(0x82, count) +
         tlv(0x83, QByteArray(1, char(1))) +
-        tlv(0x85, QByteArray(1, char(0))) +
+        tlv(0x85, QByteArray(1, char(synch))) +
         tlv(0x87, payload));
     const QByteArray pdu = tlv(0x60,
         tlv(0x80, QByteArray(1, char(1))) + tlv(0xa2, asdu));
@@ -58,6 +58,18 @@ QByteArray packet(quint16 sampleCount) {
     wire.append(pdu);
     return wire;
 }
+QByteArray ptpSyncPacket() {
+    QByteArray wire = QByteArray::fromHex("011b1900000002000000000188f7");
+    QByteArray ptp(44, char(0));
+    ptp[0] = char(0x00); // Sync
+    ptp[1] = char(0x02); // version 2
+    ptp[2] = char(0x00);
+    ptp[3] = char(44);
+    ptp[30] = char(0x12);
+    ptp[31] = char(0x34); // sequence ID
+    wire.append(ptp);
+    return wire;
+}
 } // namespace
 
 class SvCaptureHarness {
@@ -68,6 +80,7 @@ public:
         const QString pcap = dir.filePath("fixture.pcap");
         const QString csv = dir.filePath("samples.csv");
         const QString seconds = dir.filePath("seconds.csv");
+        const QString events = dir.filePath("events.csv");
         const QString json = dir.filePath("report.json");
         QFile file(pcap);
         if (!file.open(QIODevice::WriteOnly)) return false;
@@ -80,7 +93,7 @@ public:
         file.write(global);
         const std::array<quint16, 3> counts{3999, 0, 2};
         for (int i = 0; i < 3; ++i) {
-            const QByteArray wire = packet(counts[i]);
+            const QByteArray wire = packet(counts[i], i == 2 ? 1 : 0);
             QByteArray header;
             le32(header, 1000);
             le32(header, quint32(i) * 250);
@@ -89,23 +102,41 @@ public:
             file.write(header);
             file.write(wire);
         }
+        // Same filtered capture includes PTP L2 traffic in the SV timestamp
+        // axis; the decoder must not count PTP as a malformed SV frame.
+        const QByteArray ptp = ptpSyncPacket();
+        QByteArray ptpHeader;
+        le32(ptpHeader, 1001);
+        le32(ptpHeader, 0);
+        le32(ptpHeader, quint32(ptp.size()));
+        le32(ptpHeader, quint32(ptp.size()));
+        file.write(ptpHeader);
+        file.write(ptp);
         file.close();
         const auto result = SvCaptureController::decodePcap(
-            pcap, csv, seconds, json, 120, QStringLiteral("TEST_ETHERNET"),
+            pcap, csv, seconds, events, json, 120, QStringLiteral("TEST_ETHERNET"),
             {{QStringLiteral("firmware_build_id"), QStringLiteral("synthetic-fixture")}});
-        QFile reportFile(json), csvFile(csv), secondsFile(seconds);
+        QFile reportFile(json), csvFile(csv), secondsFile(seconds), eventsFile(events);
         if (!reportFile.open(QIODevice::ReadOnly) ||
             !csvFile.open(QIODevice::ReadOnly) ||
-            !secondsFile.open(QIODevice::ReadOnly)) return false;
+            !secondsFile.open(QIODevice::ReadOnly) ||
+            !eventsFile.open(QIODevice::ReadOnly)) return false;
         const QJsonObject parsed = QJsonDocument::fromJson(reportFile.readAll()).object();
         const QByteArray csvRows = csvFile.readAll();
         const QByteArray secondsRows = secondsFile.readAll();
+        const QByteArray eventRows = eventsFile.readAll();
         const bool ok =
             parsed.value("sv_frames").toDouble() == 3 &&
             parsed.value("missing_sample_counts").toDouble() == 1 &&
             parsed.value("duplicate_sample_counts").toDouble() == 0 &&
             parsed.value("csv_rows").toDouble() == 3 &&
             parsed.value("physical_acceptance").toBool() == false &&
+            parsed.value("schema").toString() == "arstack.sv.capture.v2" &&
+            parsed.value("status").toString() == "CAPTURED_WITH_ANOMALIES" &&
+            parsed.value("ptp_l2_frames").toDouble() == 1 &&
+            parsed.value("ptp_l2_message_counts").toObject().value("SYNC").toDouble() == 1 &&
+            parsed.value("sync_transition_count").toDouble() == 1 &&
+            parsed.value("malformed_frames").toDouble() == 0 &&
             parsed.value("studio_telemetry_snapshot_UNVERIFIED").toObject()
                   .value("firmware_build_id").toString() == "synthetic-fixture" &&
             csvRows.contains("IA,IA_quality") &&
@@ -114,7 +145,11 @@ public:
             csvRows.contains("-1200,0x12345678") &&
             csvRows.contains("ARSTACK_SV01") &&
             secondsRows.contains("utc_second,sv_frames,missing_smpcnt") &&
-            result.value("status").toString().contains("3 packets");
+            eventRows.contains("SAMPLE_GAP") &&
+            eventRows.contains("SMPSYNCH_CHANGE") &&
+            eventRows.contains("PTP_SYNC") &&
+            eventRows.contains("sequence=4660") &&
+            result.value("status").toString().contains("3 SV / 1 PTP");
         if (!ok) qCritical() << "Failed production PCAP fixture:" << result << parsed;
         return ok;
     }
