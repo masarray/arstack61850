@@ -44,6 +44,8 @@ public:
             {"stale generation release -> ignored", staleReleaseGenerationIsIgnored()},
             {"firmware probe before serial release -> blocked", firmwareProbeRequiresReleasedPort()},
             {"PTP preflight readback guards active board and deferred role commands", ptpBoardRuntimePreflight()},
+            {"PTP preflight adopts same physical role with no disruptive STOP", ptpAlreadyActiveMatchingRole()},
+            {"PTP stale-role rejection never fabricates OFF", ptpRoleRejectPreservesBoardRunning()},
             {"PTP staged START requires role/config/runtime ACKs", ptpGuidedStartNeedsAcks()},
             {"PTP SOURCE invalid 9-3 profile rejects before serial", ptpSourceProfilePreflight()},
 
@@ -780,6 +782,44 @@ private:
         d.processLine(ptpRoleEvidence(QStringLiteral("SOURCE")));
         return !d.ptpStarting() && d.ptpRunning_ &&
             d.ptpStatus_.contains(QStringLiteral("external timing still unqualified"));
+    }
+
+    static bool ptpAlreadyActiveMatchingRole() {
+        Fixture f;
+        if (!f.profileReady) return false;
+        seedVerified(f, identity(), QStringLiteral("COM7"), false);
+        auto& d = f.device;
+        d.ptpAvailable_ = true;
+        d.ioWorkerReady_ = true;
+        if (!f.session.requestStartPtpConfigured(QStringLiteral("SOURCE"), ptpValidProfile()) ||
+            d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_preflight)
+            return false;
+        d.processLine(ptpRoleEvidence(QStringLiteral("SOURCE")));
+        if (!d.ptpStarting()) return false;
+        d.processLine(QStringLiteral(
+            "PTP status=RUNNING Announce=10 Sync=10 FollowUp=10 PdelayFrames=0 TXfail=0"));
+        return !d.ptpStarting() && d.ptpRunning_ &&
+            d.ptpLastStartFailure_.isEmpty() &&
+            d.ptpStatus_.contains(QStringLiteral("already active")) &&
+            d.ptpStartPhase() == QStringLiteral("IDLE");
+    }
+
+    static bool ptpRoleRejectPreservesBoardRunning() {
+        Fixture f;
+        if (!setupGuidedPtp(f, QStringLiteral("SOURCE"))) return false;
+        auto& d = f.device;
+        d.processLine(QStringLiteral(
+            "E ar_smv_profile: PTPROLE rejected: stop PTP before changing operating role"));
+        if (d.ptpStarting() || !d.ptpRunning_ ||
+            !d.ptpLastStartFailure_.contains(QStringLiteral("PTPROLE rejected")) ||
+            !d.ptpStatus_.contains(QStringLiteral("active on board")))
+            return false;
+        if (!f.session.requestStopPtp()) return false;
+        d.processLine(QStringLiteral("PTP stop requested"));
+        d.processLine(ptpStoppedStatus());
+        return !d.ptpStarting() && !d.ptpRunning_ &&
+            d.ptpLastStartFailure_.contains(QStringLiteral("PTPROLE rejected")) &&
+            f.session.requestStartPtpConfigured(QStringLiteral("SOURCE"), ptpValidProfile());
     }
 
     static bool ptpBoardRuntimePreflight() {
