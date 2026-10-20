@@ -459,6 +459,11 @@ def main() -> None:
             "protocol compatibility for verified bundled firmware")
     eth_fw = (STUDIO.parent.parent / "embedded/esp32p4_smv_injector/main/ethernet_port.c").read_text(encoding="utf-8")
     eth_owner = (STUDIO.parent.parent / "embedded/esp32p4_smv_injector/main/app_main.cpp").read_text(encoding="utf-8")
+    source_fw = (STUDIO.parent.parent / "embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp").read_text(encoding="utf-8")
+    require('"Announce=%llu Sync=%llu FollowUp=%llu TXfail=%llu ready=%u"' in source_fw and
+            "ptpFailureReason_ = boardReason" in dev_cpp,
+            "On a failed SOURCE START, firmware must report actual PTP transmit "
+            "counters and Studio must keep those measured details")
     require("ar_esp32p4_eth_link_up()" in eth_fw and
             "ar_esp32p4_eth_link_up(void)" in eth_owner and
             "xEventGroupGetBits(g_link_events)" in eth_owner and
