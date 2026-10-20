@@ -2,6 +2,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import ARStack.Studio 1.0
 
 SurfacePanel {
     id: panel
