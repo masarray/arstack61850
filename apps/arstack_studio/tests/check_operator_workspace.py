@@ -445,6 +445,19 @@ def main() -> None:
             "syncFlightLatest_ = flightLine" in dev_cpp,
             "Studio must expose the physical firmware's internal, reason-coded "
             "lock flight recorder in Time Sync and correlate it passively with Capture")
+    firmware_panel = source("FirmwarePanel.qml")
+    ptp_panel = source("PtpExpertPanel.qml")
+    device_control_cpp = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
+    require("sendCommand(QStringLiteral(\"PROFILE SHOW\"))" in device_control_cpp and
+            "Could not request verified PTP role readback" in device_control_cpp and
+            "Board rejected command: %1" in device_control_cpp,
+            "PTP role ACK must trigger explicit firmware readback with meaningful failure")
+    require("exactBuildMatch" in firmware_panel and
+            "firmwareBuildId" in firmware_panel and
+            "expectedFirmwareBuildId" in firmware_panel and
+            "Installed build differs from this Studio package" in firmware_panel and
+            'panel.device.ptpStatus.indexOf("PTP start failed")' in ptp_panel,
+            "Firmware tab must show installed-versus-bundled exact build and PTP failure")
     print("Studio operator workspace contract: PASS")
 
 
