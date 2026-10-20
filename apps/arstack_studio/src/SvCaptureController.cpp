@@ -23,11 +23,15 @@
 #include <utility>
 
 namespace {
+// Capture SV + native L2 PTP in ONE time axis: earlier SV-only captures
+// cannot establish whether a smpSynch transition is supported by PTP traffic.
 constexpr auto kSvBpf =
-    "ether[12:2]=0x88ba or "
-    "((ether[12:2]=0x8100 or ether[12:2]=0x88a8) and ether[16:2]=0x88ba) or "
+    "(ether[12:2]=0x88ba or ether[12:2]=0x88f7) or "
     "((ether[12:2]=0x8100 or ether[12:2]=0x88a8) and "
-    "(ether[16:2]=0x8100 or ether[16:2]=0x88a8) and ether[20:2]=0x88ba)";
+    "(ether[16:2]=0x88ba or ether[16:2]=0x88f7)) or "
+    "((ether[12:2]=0x8100 or ether[12:2]=0x88a8) and "
+    "(ether[16:2]=0x8100 or ether[16:2]=0x88a8) and "
+    "(ether[20:2]=0x88ba or ether[20:2]=0x88f7))";
 constexpr std::array<const char*, 8> kChannels{"IA", "IB", "IC", "IN", "UA", "UB", "UC", "UN"};
 
 quint16 be16(const uchar* b) {
@@ -270,6 +274,7 @@ bool SvCaptureController::startCapture(int index, int seconds, const QVariantMap
     activePcap_ = QDir(outputFolder_).filePath(filename + QStringLiteral(".pcap"));
     activeCsv_ = QDir(outputFolder_).filePath(filename + QStringLiteral("_samples.csv"));
     activeSeconds_ = QDir(outputFolder_).filePath(filename + QStringLiteral("_seconds.csv"));
+    activeEvents_ = QDir(outputFolder_).filePath(filename + QStringLiteral("_events.csv"));
     activeJson_ = QDir(outputFolder_).filePath(filename + QStringLiteral("_report.json"));
     activeAdapter_ = interfaceIds_.at(index);
     activeStudioTelemetry_ = studioTelemetry;
@@ -318,7 +323,7 @@ void SvCaptureController::onCaptureFinished(int exitCode, QProcess::ExitStatus e
 void SvCaptureController::decodeCapturedFile() {
     setStatus(QStringLiteral("Writing filtered SV CSV and JSON report (off the UI thread)..."));
     decoder_.setFuture(QtConcurrent::run(&SvCaptureController::decodePcap,
-        activePcap_, activeCsv_, activeSeconds_, activeJson_, activeSecondsRequested_, activeAdapter_,
+        activePcap_, activeCsv_, activeSeconds_, activeEvents_, activeJson_, activeSecondsRequested_, activeAdapter_,
         activeStudioTelemetry_));
     emit stateChanged();
 }
@@ -329,7 +334,7 @@ void SvCaptureController::openOutputFolder() {
 
 QVariantMap SvCaptureController::decodePcap(
     const QString& pcapFile, const QString& csvFile, const QString& secondsFile,
-    const QString& jsonFile, int requestedSeconds, const QString& adapter,
+    const QString& eventsFile, const QString& jsonFile, int requestedSeconds, const QString& adapter,
     const QVariantMap& studioTelemetry) {
     QVariantMap result;
     result.insert(QStringLiteral("json"), jsonFile);
@@ -364,13 +369,18 @@ QVariantMap SvCaptureController::decodePcap(
 
     QFile csv(csvFile);
     QFile secondsCsv(secondsFile);
+    QFile eventsCsv(eventsFile);
     if (!csv.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
-        !secondsCsv.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        !secondsCsv.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
+        !eventsCsv.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         result.insert(QStringLiteral("status"), QStringLiteral("Cannot create CSV files in Documents."));
         return result;
     }
     QTextStream stream(&csv);
     QTextStream secondsStream(&secondsCsv);
+    QTextStream eventStream(&eventsCsv);
+    eventStream << "timestamp_us,event,source_mac,sv_id,previous_smp_cnt,"
+                   "current_smp_cnt,missing_estimate,host_delta_us,detail\n";
     stream << "timestamp_us,source_mac,destination_mac,appid,sv_id,smp_cnt,smp_synch";
     for (const auto* name : kChannels)
         stream << ',' << name << ',' << name << "_quality";
@@ -382,6 +392,12 @@ QVariantMap SvCaptureController::decodePcap(
     quint64 matched = 0, malformed = 0, missing = 0, duplicates = 0;
     quint64 firstTimestamp = 0, lastTimestamp = 0, csvRows = 0;
     QHash<QString, quint32> previousCounters;
+    QHash<QString, quint32> previousSync;
+    QHash<QString, quint64> previousTimestamps;
+    quint64 ptpFrames = 0, malformedPtp = 0, syncTransitions = 0;
+    quint64 sampleJumpEvents = 0, backwardOrResetEvents = 0;
+    QVariantMap ptpMessageCounts;
+    QVariantList transitionTimeline;
     quint64 lastBucket = std::numeric_limits<quint64>::max();
     quint64 bucketFrames = 0, bucketMissing = 0, bucketDuplicates = 0, bucketMalformed = 0;
      QVariantMap syncCounts;
@@ -422,6 +438,48 @@ QVariantMap SvCaptureController::decodePcap(
             finishBucket();
             lastBucket = bucket;
         }
+        // PTP EtherType 0x88F7 is explicitly observed, not mislabeled as
+        // malformed SV. Its message header is parsed defensively.
+        const auto* ethernet = reinterpret_cast<const uchar*>(data.constData());
+        qsizetype ethernetTypeAt = 12;
+        quint16 ethernetType = be16(ethernet + ethernetTypeAt);
+        for (int tag = 0; tag < 2 &&
+             (ethernetType == 0x8100 || ethernetType == 0x88a8); ++tag) {
+            ethernetTypeAt += 4;
+            if (data.size() < ethernetTypeAt + 2) break;
+            ethernetType = be16(ethernet + ethernetTypeAt);
+        }
+        if (ethernetType == 0x88f7) {
+            const qsizetype ptpStart = ethernetTypeAt + 2;
+            const uchar* ptp = ethernet + ptpStart;
+            if (data.size() < ptpStart + 34 ||
+                (ptp[1] & 0x0fU) != 2U ||
+                be16(ptp + 2) < 34U ||
+                ptpStart + be16(ptp + 2) > data.size()) {
+                ++malformedPtp;
+                continue;
+            }
+            ++ptpFrames;
+            const int type = ptp[0] & 0x0fU;
+            const QString message = type == 0 ? QStringLiteral("SYNC")
+                : type == 8 ? QStringLiteral("FOLLOW_UP")
+                : type == 11 ? QStringLiteral("ANNOUNCE")
+                : QStringLiteral("TYPE_%1").arg(type);
+            ptpMessageCounts.insert(message, ptpMessageCounts.value(message).toULongLong() + 1);
+            if (type == 0 || type == 8 || type == 11) {
+                eventStream << timestamp << ",PTP_" << message << ','
+                            << mac(ethernet + 6) << ",,,,0,0,"
+                            << "domain=" << int(ptp[4])
+                            << ";sequence=" << be16(ptp + 30) << '\n';
+            }
+            continue;
+        }
+        if (ethernetType != 0x88ba) {
+            // A BPF-matching unrecognized EtherType is not SV evidence.
+            ++malformed;
+            ++bucketMalformed;
+            continue;
+        }
         Sample record;
         if (!parseSvFrame(QByteArrayView(data), record)) {
             ++malformed;
@@ -440,15 +498,55 @@ QVariantMap SvCaptureController::decodePcap(
         const auto previous = previousCounters.constFind(streamKey);
         if (previous != previousCounters.cend()) {
             const quint32 diff = (record.count + kSampleWrap - previous.value()) % kSampleWrap;
+            const auto oldTimestamp = previousTimestamps.value(streamKey);
+            const quint64 hostDelta = timestamp >= oldTimestamp ? timestamp - oldTimestamp : 0;
             if (diff == 0) {
                 ++duplicates;
                 ++bucketDuplicates;
+                eventStream << timestamp << ",DUPLICATE," << record.src << ','
+                            << record.svId << ',' << previous.value() << ','
+                            << record.count << ",0," << hostDelta
+                            << ",repeat_counter\n";
             } else if (diff != 1) {
-                missing += diff - 1;
-                bucketMissing += diff - 1;
+                ++sampleJumpEvents;
+                // Large modulo jumps may indicate a reset/reordered stream,
+                // not thousands of missing publisher packets.
+                if (diff > kSampleWrap / 2) {
+                    ++backwardOrResetEvents;
+                    eventStream << timestamp << ",COUNTER_RESET_OR_REORDER,"
+                                << record.src << ',' << record.svId << ','
+                                << previous.value() << ',' << record.count
+                                << ",0," << hostDelta << ",ambiguous_backward_jump\n";
+                } else {
+                    missing += diff - 1;
+                    bucketMissing += diff - 1;
+                    eventStream << timestamp << ",SAMPLE_GAP,"
+                                << record.src << ',' << record.svId << ','
+                                << previous.value() << ',' << record.count
+                                << ',' << diff - 1 << ',' << hostDelta
+                                << ",capture_cannot_prove_where_frames_were_lost\n";
+                }
+            }
+        }
+        const auto oldSync = previousSync.constFind(streamKey);
+        if (oldSync != previousSync.cend() && oldSync.value() != record.synch) {
+            ++syncTransitions;
+            eventStream << timestamp << ",SMPSYNCH_CHANGE,"
+                        << record.src << ',' << record.svId
+                        << ',' << record.count << ',' << record.count << ",0,0,"
+                        << oldSync.value() << "_to_" << record.synch << '\n';
+            if (transitionTimeline.size() < 256) {
+                transitionTimeline.append(QVariantMap{
+                    {QStringLiteral("timestamp_us"), qulonglong(timestamp)},
+                    {QStringLiteral("from"), oldSync.value()},
+                    {QStringLiteral("to"), record.synch},
+                    {QStringLiteral("smp_cnt"), record.count}
+                });
             }
         }
         previousCounters.insert(streamKey, record.count);
+        previousSync.insert(streamKey, record.synch);
+        previousTimestamps.insert(streamKey, timestamp);
         if ((matched - 1) % csvStride != 0) continue;
         ++csvRows;
         stream << timestamp << ',' << record.src << ',' << record.dst << ','
@@ -467,14 +565,17 @@ QVariantMap SvCaptureController::decodePcap(
     finishBucket();
     stream.flush();
     secondsStream.flush();
-    if (csv.error() != QFile::NoError || secondsCsv.error() != QFile::NoError)
+    eventStream.flush();
+    if (csv.error() != QFile::NoError || secondsCsv.error() != QFile::NoError ||
+        eventsCsv.error() != QFile::NoError)
         parseFailure = QStringLiteral("CSV output failed (disk full?).");
     csv.close();
     secondsCsv.close();
+    eventsCsv.close();
     const double span = matched > 1 ? (lastTimestamp - firstTimestamp) / 1000000.0 : 0.;
     const double observedFps = span > 0 ? (matched - 1) / span : 0.;
     QVariantMap report{
-        {QStringLiteral("schema"), QStringLiteral("arstack.sv.capture.v1")},
+        {QStringLiteral("schema"), QStringLiteral("arstack.sv.capture.v2")},
         {QStringLiteral("source"), QStringLiteral("independent ethernet PCAP via dumpcap/Npcap")},
         {QStringLiteral("capture_filter"), QString::fromLatin1(kSvBpf)},
         {QStringLiteral("interface"), adapter},
@@ -482,6 +583,18 @@ QVariantMap SvCaptureController::decodePcap(
         {QStringLiteral("pcap"), pcapFile},
         {QStringLiteral("samples_csv"), csvFile},
         {QStringLiteral("seconds_csv"), secondsFile},
+        {QStringLiteral("events_csv"), eventsFile},
+        {QStringLiteral("ptp_l2_frames"), qulonglong(ptpFrames)},
+        {QStringLiteral("ptp_malformed_frames"), qulonglong(malformedPtp)},
+        {QStringLiteral("ptp_l2_message_counts"), ptpMessageCounts},
+        {QStringLiteral("sync_transition_count"), qulonglong(syncTransitions)},
+        {QStringLiteral("sync_transitions"), transitionTimeline},
+        {QStringLiteral("counter_discontinuity_events"), qulonglong(sampleJumpEvents)},
+        {QStringLiteral("counter_reset_or_reorder_events"), qulonglong(backwardOrResetEvents)},
+        {QStringLiteral("ptp_proof_limitations"),
+         QStringLiteral("PTP frames correlate local traffic only; clock lock, "
+                        "smpSynch quality and exact SV egress phase remain unverified. "
+                        "No PTP frames does not prove PTP was stopped.")},
         {QStringLiteral("csv_row_stride"), qulonglong(csvStride)},
         {QStringLiteral("csv_rows"), qulonglong(csvRows)},
         {QStringLiteral("requested_seconds"), requestedSeconds},
@@ -500,8 +613,11 @@ QVariantMap SvCaptureController::decodePcap(
                         "source identity, CPU and ISR measurements require independent acceptance.")},
     };
     const bool usable = parseFailure.isEmpty() && matched > 0;
-    report.insert(QStringLiteral("status"), usable ? QStringLiteral("CAPTURED_NOT_ACCEPTED")
-                                                 : QStringLiteral("INVALID_CAPTURE"));
+    const bool anomalies = missing > 0 || duplicates > 0 ||
+        malformed > 0 || malformedPtp > 0 || backwardOrResetEvents > 0;
+    report.insert(QStringLiteral("status"), !usable ? QStringLiteral("INVALID_CAPTURE")
+        : anomalies ? QStringLiteral("CAPTURED_WITH_ANOMALIES")
+                    : QStringLiteral("CAPTURED_NOT_ACCEPTED"));
     if (!parseFailure.isEmpty()) report.insert(QStringLiteral("error"), parseFailure);
     QFile json(jsonFile);
     if (!json.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
@@ -511,8 +627,10 @@ QVariantMap SvCaptureController::decodePcap(
     }
     json.close();
     result.insert(QStringLiteral("status"), usable
-        ? QStringLiteral("SV evidence ready: %1 packets, %2 CSV rows, %3 missing; open folder to share PCAP + CSV + JSON.")
-              .arg(matched).arg(csvRows).arg(missing)
+        ? QStringLiteral("Capture saved: %1 SV / %2 PTP frames, %3 missing, %4 sync transitions. "
+                         "Status: %5. Share report.json + events.csv first; keep PCAP for deep analysis.")
+              .arg(matched).arg(ptpFrames).arg(missing).arg(syncTransitions)
+              .arg(anomalies ? QStringLiteral("ANOMALIES") : QStringLiteral("NOT PHYSICAL PASS"))
         : formatError(QStringLiteral("Capture validation failed"),
                       parseFailure.isEmpty() ? QStringLiteral("No valid SV packets.") : parseFailure));
     return result;
