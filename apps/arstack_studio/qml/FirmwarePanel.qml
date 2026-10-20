@@ -298,7 +298,14 @@ SurfacePanel {
                 text: "Copy diagnostics"
                 toolTipText: "Logs may include device identifiers; review before sharing."
                 enabled: panel.session !== null
-                onClicked: StudioClipboard.copyText(panel.session.diagnosticsText())
+                onClicked: {
+                    const evidence = panel.session.diagnosticsText()
+                    if (StudioClipboard.copyText(evidence)) {
+                        panel.copyFeedback = "Firmware diagnostics copied."
+                    } else {
+                        panel.copyFeedback = "Clipboard unavailable. Open technical details to review diagnostics."
+                    }
+                }
             }
             Item { Layout.fillWidth: true }
         }
