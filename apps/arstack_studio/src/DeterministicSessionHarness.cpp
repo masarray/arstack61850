@@ -35,6 +35,8 @@ public:
             {"firmware stage projection -> supervisor-owned", firmwareStageProjectionIsExplicit()},
             {"firmware verification failure remains copyable after READY", firmwareFailureRemainsDiagnosable()},
             {"firmware build mismatch explains expected and observed IDs", reconnectBuildMismatchPreservesEvidence()},
+            {"post-flash USB timeout stays pending, delayed exact ID recovers", postFlashDelayedIdentityRecovers()},
+            {"post-flash delayed wrong build never verifies", postFlashWrongBuildFailsClosed()},
             {"fragmented espflash progress -> monotonic", fragmentedEspflashProgressIsMonotonic()},
             {"verified COM hint falls back without bypassing identity", verifiedComOrderingPreservesFallback()},
             {"automatic IDENTIFY timeout never implies missing firmware", automaticIdentityTimeoutOffersFirmwareRecovery()},
@@ -357,6 +359,70 @@ private:
             evidence.contains(QStringLiteral("0123456789abcdef")) &&
             evidence.contains(QStringLiteral("Copy diagnostics")) &&
             session.diagnosticsText().contains(evidence);
+    }
+
+    static bool postFlashDelayedIdentityRecovers() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        auto& session = fixture.session;
+        auto& device = fixture.device;
+        quiesce(session, device);
+        session.started_ = false;
+        session.updateRequested_ = true;
+        session.updateWasOptional_ = false;
+        session.updateStage_ = SmartSessionController::UpdateStage::reconnecting;
+        session.updateReconnectAttempts_ = 6;
+        session.portOwner_ = SmartSessionController::PortOwner::none;
+        int successCount = 0, pendingCount = 0;
+        QObject::connect(&session, &SmartSessionController::firmwareUpdateFinished,
+                         &session, [&](const bool success) {
+            if (success) ++successCount;
+            else ++pendingCount;
+        });
+        // Fire the real supervisor's reconnect timeout; no serial, sleeps,
+        // fake flash success or event-loop race in this native regression.
+        if (!QMetaObject::invokeMethod(
+                &session.reconnectTimer_, "timeout", Qt::DirectConnection)) return false;
+        const bool pending = session.firmwareVerificationPending() &&
+            !session.updateRequested_ && !session.setupError_ &&
+            session.state() == QStringLiteral("CONNECTING") &&
+            !session.startReady() && pendingCount == 1 && successCount == 0 &&
+            session.firmwareUpdateResult().contains(QStringLiteral("Do not flash again"));
+        seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
+        return pending && !session.firmwareVerificationPending() &&
+            successCount == 1 && pendingCount == 1 &&
+            session.state() == QStringLiteral("READY") &&
+            session.firmwareUpdateResult().contains(
+                QStringLiteral("Exact bundled firmware build verified"));
+    }
+
+    static bool postFlashWrongBuildFailsClosed() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        auto& session = fixture.session;
+        auto& device = fixture.device;
+        quiesce(session, device);
+        session.started_ = false;
+        session.updateRequested_ = true;
+        session.updateStage_ = SmartSessionController::UpdateStage::reconnecting;
+        session.updateReconnectAttempts_ = 6;
+        session.portOwner_ = SmartSessionController::PortOwner::none;
+        int successfulVerifications = 0;
+        QObject::connect(&session, &SmartSessionController::firmwareUpdateFinished,
+                         &session, [&](const bool success) {
+            if (success) ++successfulVerifications;
+        });
+        if (!QMetaObject::invokeMethod(
+                &session.reconnectTimer_, "timeout", Qt::DirectConnection)) return false;
+        auto wrong = identity();
+        wrong.buildId = QStringLiteral("fedcba9876543210");
+        seedVerified(fixture, wrong, QStringLiteral("COM7"), false);
+        return !session.firmwareVerificationPending() &&
+            successfulVerifications == 0 &&
+            session.state() == QStringLiteral("READY") &&
+            session.firmwareUpdateAvailable() &&
+            session.firmwareUpdateResult().contains(
+                QStringLiteral("does not match the bundled build"));
     }
 
     static bool optionalBootloaderWaitCanCancel() {
