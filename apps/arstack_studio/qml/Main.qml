@@ -83,12 +83,20 @@ ApplicationWindow {
             validate(data.current, 0)
             validate(data.voltage, 1)
             restoringScenario = true
+            // Legacy presets can contain disabled output rows. This simple
+            // matrix has no channel enable controls by design. At application
+            // startup ONLY (never during live RUNNING), migrate disabled
+            // outputs to enabled channels with zero magnitude, preserving
+            // the previous zero-output effect without hidden OFF flags.
+            var migratedDisabled = 0
             function assign(model, rows) {
                 for (var i = 0; i < 4; ++i) {
-                    model.setProperty(i, "magnitude", rows[i][0])
+                    const wasDisabled = rows[i][2] === false
+                    model.setProperty(i, "magnitude", wasDisabled ? 0 : rows[i][0])
                     model.setProperty(i, "phase", rows[i][1])
-                    model.setProperty(i, "enabled", rows[i][2])
+                    model.setProperty(i, "enabled", true)
                     model.setProperty(i, "quality", rows[i][3])
+                    if (wasDisabled) migratedDisabled += 1
                 }
             }
             assign(currentModel, data.current)
@@ -101,6 +109,13 @@ ApplicationWindow {
             refreshPreview()
             restoringScenario = false
             pendingApply = true
+            if (migratedDisabled > 0) {
+                // Persist the migration to avoid redoing it on next launch.
+                // Explicitly notify the operator; no serial output is sent.
+                scenarioSettings.lastScenario = JSON.stringify(scenarioSnapshot())
+                showMessage("Legacy preset: " + migratedDisabled +
+                    " disabled channel(s) restored as enabled at 0 magnitude. Review before START.", true)
+            }
         } catch (e) {
             restoringScenario = false
             scenarioSettings.lastScenario = ""
@@ -516,6 +531,18 @@ ApplicationWindow {
         }
         // START always serializes the same ListModels that draw the table,
         // including all eight current phase angles and enabled flags.
+        // Never silently START with an invisible disabled channel. The
+        // legacy restore path migrates at boot; an unexpected future state
+        // must be corrected explicitly instead of serialized unnoticed.
+        for (var group = 0; group < 2; ++group) {
+            var rows = groupModel(group)
+            for (var row = 0; row < 4; ++row) {
+                if (rows.get(row).enabled !== true) {
+                    showMessage("Hidden disabled channel detected. Restore the scenario before START.", true)
+                    return null
+                }
+            }
+        }
         var draft = scenarioSnapshot()
         draft.currentScale = currentScale
         draft.voltageScale = voltageScale
@@ -1062,32 +1089,18 @@ ApplicationWindow {
                                 CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "50"; implicitWidth: 44; onClicked: root.setFrequencyValue(50) }
                                 CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "60"; implicitWidth: 44; onClicked: root.setFrequencyValue(60) }
                                 Rectangle { width: 1; height: 24; color: studioTheme.lineSoft }
-                                StudioDarkCheckBox {
+                                StudioLinkSwitch {
                                     theme: studioTheme
                                     uiFont: root.uiFont
-                                    enabled: root.signalFrequency > 0
+                                    enabled: root.signalFrequency > 0 && !workflowBar.startQueued
                                     checked: root.phaseLink
-                                    text: "3-phase link"
                                     onToggled: {
+                                        // Link is an editing preference, not a wire
+                                        // setpoint. No 8-channel live replay or
+                                        // pendingApply on a presentation-only switch.
                                         root.phaseLink = checked
-                                        // Linking phases changes future edit behavior only;
-                                        // never silently rewrite existing setpoints.
-                                        root.markScenarioDirty()
-                                        if (workflowBar.injectionRunning && workflowBar.session
-                                                && workflowBar.session.liveControlReady) {
-                                            // Persist *all eight current table values* on
-                                            // live link changes; the displayed draft
-                                            // must never silently diverge from TX.
-                                            var ok = true
-                                            for (var group = 0; group < 2; ++group)
-                                                for (var row = 0; row < 4; ++row)
-                                                    ok = root.sendSignal(group, row) && ok
-                                            if (ok) root.pendingApply = false
-                                            else root.showMessage("Not all live phases were sent. Stop/Start to apply the table.", true)
-                                        }
+                                        root.saveScenarioTimer.restart()
                                     }
-                                    font.family: root.uiFont
-                                    font.pixelSize: 9
                                 }
                                 Item { Layout.fillWidth: true }
                             }
