@@ -79,6 +79,8 @@ using ar::esp32p4::smv::SvSyncPolicyMode;
 using ar::esp32p4::smv::smp_synch_set_source_local_qualified;
 using ar::esp32p4::smv::smp_synch_source_local_qualified;
 using ar::esp32p4::smv::smp_synch_set_receiver_timeline_qualified;
+using ar::esp32p4::smv::smp_synch_diag_observe;
+using ar::esp32p4::smv::SvSyncLossReason;
 using ar::esp32p4::smv::smp_synch_receiver_timeline_qualified;
 using ar::esp32p4::smv::take_start_request;
 using ar::iec61850::ethernet::MacAddress;
@@ -127,9 +129,16 @@ constexpr std::uint32_t kTimerResolutionHz = 1000000U;
 // receiver invalidation INSIDE the same conditional as SOURCE invalidation:
 // clearing it unconditionally after a valid sparse MAC TX stamp would make
 // RECEIVER qualification impossible at every evidence epoch.
-inline void revoke_sv_auto_claims() noexcept {
-    smp_synch_set_source_local_qualified(false);
-    smp_synch_set_receiver_timeline_qualified(false);
+inline void revoke_sv_auto_claims(
+    const SvSyncLossReason reason = SvSyncLossReason::other) noexcept {
+    // Only timestamp an actual lock transition; ordinary 4kHz frame
+    // processing keeps its existing work budget.
+    const bool was_qualified = smp_synch_source_local_qualified() ||
+        smp_synch_receiver_timeline_qualified();
+    const auto ms = was_qualified
+        ? static_cast<std::uint32_t>(esp_timer_get_time() / 1000LL) : 0U;
+    smp_synch_set_source_local_qualified(false, reason, ms);
+    smp_synch_set_receiver_timeline_qualified(false, reason, ms);
 }
 
 EventGroupHandle_t g_link_events = nullptr;
@@ -711,7 +720,7 @@ void stop_sample_clock(gptimer_handle_t& timer) noexcept {
 #endif
     // Release the wire claim before teardown; old MAC evidence never
     // survives STOP/START, even when the same SOURCE later restarts.
-    revoke_sv_auto_claims();
+    revoke_sv_auto_claims(SvSyncLossReason::publisher_stop);
     if (timer == nullptr) return;
 #if AR_SV_PTP_PHASE_SUPPORTED
     // Serialize teardown with the non-ISR phase observer, so a GPTimer
@@ -982,7 +991,7 @@ void publisher_task(void* argument) {
                 1U, std::memory_order_release);
             g_sample_clock_context.phase_authority_valid.store(
                 false, std::memory_order_release);
-            revoke_sv_auto_claims();
+            revoke_sv_auto_claims(SvSyncLossReason::missed_slot);
 #endif
             missed_slots = static_cast<std::uint64_t>(pending_ticks - 1U);
             canonical_sample_count = static_cast<std::uint16_t>(
@@ -1009,7 +1018,7 @@ void publisher_task(void* argument) {
                 1U, std::memory_order_release);
             g_sample_clock_context.phase_authority_valid.store(
                 false, std::memory_order_release);
-            revoke_sv_auto_claims();
+            revoke_sv_auto_claims(SvSyncLossReason::ethernet_link);
 #endif
 #if CONFIG_AR_SMV_BROADCAST_MIRROR
             ++local.mirror_fail;
@@ -1019,20 +1028,27 @@ void publisher_task(void* argument) {
             // After qualification, consult the lightweight SOURCE freshness
             // authority on each frame; a stopped/faulted PTP source must not
             // continue advertising previously measured local synchronization.
-            if ((smp_synch_source_local_qualified() ||
-                 smp_synch_receiver_timeline_qualified()) &&
-                (!g_sample_clock_context.phase_authority_valid.load(
-                     std::memory_order_acquire) ||
-                 !ar::iec61850::time_sync::SvPhaseObservationFreshness::fresh(
-                     g_sample_clock_context.last_phase_observed_epoch.load(
-                         std::memory_order_acquire),
-                     g_sample_clock_context.epoch_generation.load(
-                         std::memory_order_acquire)) ||
-                 (g_sample_clock_context.armed_ptp_clock.role ==
-                      PtpAuthorityRole::source &&
-                  ar_ptp_lab_source_generation() !=
-                      g_sample_clock_context.armed_ptp_clock.generation))) {
-                revoke_sv_auto_claims();
+            if (smp_synch_source_local_qualified() ||
+                smp_synch_receiver_timeline_qualified()) {
+                const bool phase_ok = g_sample_clock_context.phase_authority_valid.load(
+                    std::memory_order_acquire);
+                const bool observer_fresh =
+                    ar::iec61850::time_sync::SvPhaseObservationFreshness::fresh(
+                        g_sample_clock_context.last_phase_observed_epoch.load(
+                            std::memory_order_acquire),
+                        g_sample_clock_context.epoch_generation.load(
+                            std::memory_order_acquire));
+                const bool source_generation_ok =
+                    g_sample_clock_context.armed_ptp_clock.role !=
+                        PtpAuthorityRole::source ||
+                    ar_ptp_lab_source_generation() ==
+                        g_sample_clock_context.armed_ptp_clock.generation;
+                if (!source_generation_ok)
+                    revoke_sv_auto_claims(SvSyncLossReason::ptp_lease);
+                else if (!observer_fresh)
+                    revoke_sv_auto_claims(SvSyncLossReason::observer_stale);
+                else if (!phase_ok)
+                    revoke_sv_auto_claims(SvSyncLossReason::phase_or_mac);
             }
 #endif
             const auto sync_decision = smp_synch_lab_decision();
@@ -1128,7 +1144,7 @@ void publisher_task(void* argument) {
                 g_local_sync_evidence.observe(egress, result, phase_ns);
                 portEXIT_CRITICAL(&g_tx_egress_mux);
                 if (result != ar::iec61850::time_sync::SvTxEvidenceResult::measured)
-                    revoke_sv_auto_claims();
+                    revoke_sv_auto_claims(SvSyncLossReason::mac_egress);
             }
 #else
             const esp_err_t canonical_result =
@@ -1147,7 +1163,7 @@ void publisher_task(void* argument) {
                     1U, std::memory_order_release);
                 g_sample_clock_context.phase_authority_valid.store(
                     false, std::memory_order_release);
-                revoke_sv_auto_claims();
+                revoke_sv_auto_claims(SvSyncLossReason::canonical_tx);
 #endif
             }
 
@@ -1209,7 +1225,7 @@ void revoke_sv_phase_session(const std::uint32_t expected_session) noexcept {
             false, std::memory_order_release);
         g_sample_clock_context.requested_slew_ticks.store(
             0, std::memory_order_relaxed);
-        revoke_sv_auto_claims();
+        revoke_sv_auto_claims(SvSyncLossReason::ptp_lease);
     }
     xSemaphoreGive(g_phase_timer_mutex);
 }
@@ -1429,13 +1445,23 @@ void sv_ptp_phase_observer_task(void* argument) {
                 // An external GM may yield LOCAL or GLOBAL only after both
                 // PTP discipline and this actual SV phase/MAC gate pass.
                 // SOURCE never promotes to GLOBAL through this path.
+                const auto stamp_ms = static_cast<std::uint32_t>(
+                    esp_timer_get_time() / 1000LL);
                 smp_synch_set_source_local_qualified(
-                    stable_local && lease.role == PtpAuthorityRole::source);
+                    stable_local && lease.role == PtpAuthorityRole::source,
+                    SvSyncLossReason::phase_or_mac, stamp_ms);
                 smp_synch_set_receiver_timeline_qualified(
-                    stable_local && lease.role == PtpAuthorityRole::receiver);
+                    stable_local && lease.role == PtpAuthorityRole::receiver,
+                    SvSyncLossReason::phase_or_mac, stamp_ms);
+                smp_synch_diag_observe(
+                    decision.phase_error_us, decision.observation_uncertainty_us,
+                    mac_pairs, local_acquisition.clean_epochs(),
+                    observation.last_sv_epoch_generation,
+                    decision.accepted && decision.epoch_second_continuous,
+                    decision.software_tracking);
             } else {
                 local_acquisition.reset();
-                revoke_sv_auto_claims();
+                revoke_sv_auto_claims(SvSyncLossReason::publisher_stop);
             }
             committed = true;
         } else if (session_matches) {
@@ -1454,7 +1480,7 @@ void sv_ptp_phase_observer_task(void* argument) {
             g_sample_clock_context.requested_slew_ticks.store(
                 0, std::memory_order_relaxed);
             local_acquisition.reset();
-            revoke_sv_auto_claims();
+            revoke_sv_auto_claims(SvSyncLossReason::phase_handoff);
         }
         xSemaphoreGive(g_phase_timer_mutex);
         if (!committed) {
