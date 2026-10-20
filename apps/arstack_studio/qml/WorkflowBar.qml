@@ -15,38 +15,16 @@ SurfacePanel {
     property string uiFont: "Inter"
     property string monoFont: "Inter"
     property bool compact: false
-    property bool startQueued: false
-    Timer {
-        id: startWatchdog
-        interval: 8000
-        repeat: false
-        onTriggered: {
-            if (!ribbon.startQueued) return
-            ribbon.startQueued = false
-            controller.pendingApply = true
-            controller.showMessage("START not confirmed by ESP32-P4. Check board status.", true)
-        }
-    }
+    // Firmware transaction is the single source of truth. UI timers and
+    // unrelated PTP/serial errors must not bounce the injection START button.
+    readonly property bool startQueued: Boolean(ribbon.device && ribbon.device.scenarioApplying)
     Connections {
         target: ribbon.device
         function onRunningChanged() {
-            if (ribbon.device.running) {
-                ribbon.startQueued = false
-                startWatchdog.stop()
-                controller.pendingApply = false
-            }
-        }
-        function onLastErrorChanged() {
-            if (!ribbon.startQueued) return
-            ribbon.startQueued = false
-            startWatchdog.stop()
-            controller.pendingApply = true
+            if (ribbon.device.running) controller.pendingApply = false
         }
         function onDeviceVerifiedChanged() {
-            if (ribbon.device.deviceVerified) return
-            ribbon.startQueued = false
-            startWatchdog.stop()
-            controller.pendingApply = true
+            if (!ribbon.device.deviceVerified) controller.pendingApply = true
         }
     }
     property bool updatePromptDeferred: false
@@ -297,11 +275,6 @@ SurfacePanel {
         if (!accepted) {
             controller.pendingApply = true
             controller.showMessage("Start rejected. Check device status.", true)
-        } else {
-            // A successful queue call is NOT the board START ACK.
-            // Keep the draft dirty until RUNNING evidence arrives.
-            ribbon.startQueued = true
-            startWatchdog.restart()
         }
     }
 
@@ -313,8 +286,6 @@ SurfacePanel {
             controller.showMessage("Studio could not cancel the current device session.", true)
             return
         }
-        ribbon.startQueued = false
-        startWatchdog.stop()
     }
 
     function openEngineeringDialog() {
