@@ -1344,6 +1344,8 @@ void DeviceController::markPtpStopUnconfirmed(const QString& reason) {
 }
 
 void DeviceController::failPtpStartup(const QString& reason, const bool rollback) {
+    ptpLastStartFailure_ = reason;
+    emit ptpStateChanged();
     setError(reason);
     if (rollback && connected_ && sessionGeneration_ != 0) {
         static_cast<void>(beginPtpStopVerification());
@@ -1371,6 +1373,7 @@ bool DeviceController::startPtpConfigured(const QString& requestedRole,
         setError(QStringLiteral("Invalid PTP settings. Check domain, VLAN and timing intervals."));
         return false;
     }
+    ptpLastStartFailure_.clear();
     pendingPtpRole_ = role;
     pendingPtpConfig_ = command;
     ptpStartStage_ = PtpStartStage::awaiting_role_ack;
@@ -1959,6 +1962,7 @@ void DeviceController::processLine(const QString& rawLine) {
         static_cast<void>(sendPtpShow());
     }
     if (line.contains(QStringLiteral("PTP start rejected"), Qt::CaseInsensitive) || line.contains(QStringLiteral("PTP source readiness timeout"), Qt::CaseInsensitive)) {
+        ptpLastStartFailure_ = line;
         ptpRunning_ = false;
         ptpStatus_ = QStringLiteral("PTP start failed: %1").arg(line);
         emit ptpStateChanged();
@@ -1986,6 +1990,7 @@ void DeviceController::resetTelemetry() {
 
 void DeviceController::resetPtpState() {
     resetPtpStartup();
+    ptpLastStartFailure_.clear();
     syncDiagnostics_ = QStringLiteral(
         "No current-board SV lock evidence. Select Inspect SV lock after verification.");
     syncFlightLatest_.clear();
