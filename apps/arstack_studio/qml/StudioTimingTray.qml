@@ -29,6 +29,10 @@ Rectangle {
 
     readonly property var roleValues: ["SOURCE", "RECEIVER", "MONITOR"]
     readonly property bool busy: Boolean(device && device.ptpStarting)
+    readonly property bool stopping: tray.busy && (
+        device.ptpStatus.indexOf("Stopping PTP") === 0 ||
+        device.ptpStatus.indexOf("Checking that board") === 0 ||
+        device.ptpStatus.indexOf("PTP STOP unverified") === 0)
     readonly property bool ptpReady: Boolean(session && device && device.deviceVerified
                                                && device.ptpAvailable && !session.updatingFirmware)
     readonly property string stateText: !boardOnline
@@ -74,16 +78,16 @@ Rectangle {
                 objectName: "studioPtpSwitch"
                 theme: tray.theme
                 uiFont: tray.uiFont
-                checked: tray.boardOnline ? Boolean(tray.device.ptpRunning) : offlineSettings.previewPtp
+                checked: tray.boardOnline
+                    ? Boolean(tray.device.ptpRunning || (tray.busy && !tray.stopping))
+                    : offlineSettings.previewPtp
+                busy: tray.boardOnline && tray.busy
                 enabled: !tray.busy && (!tray.boardOnline || tray.ptpReady)
 
                 onClicked: {
                     // Switch flips locally before asynchronous firmware evidence.
                     // Restore binding immediately, including on rejected requests.
                     const wantsRunning = checked
-                    checked = Qt.binding(function() {
-                        return tray.boardOnline ? Boolean(tray.device.ptpRunning) : offlineSettings.previewPtp
-                    })
                     if (!tray.boardOnline) {
                         offlineSettings.previewPtp = wantsRunning
                         if (tray.controller)
@@ -93,6 +97,13 @@ Rectangle {
                     } else if (tray.controller && !tray.controller.requestStopPtp()) {
                         tray.controller.showMessage("PTP stop was not accepted; inspect diagnostics.", true)
                     }
+                    // Keep intent visible during the in-flight transaction.
+                    // A failed START returns OFF with its specific cause.
+                    checked = Qt.binding(function() {
+                        return tray.boardOnline
+                            ? Boolean(tray.device.ptpRunning || (tray.busy && !tray.stopping))
+                            : offlineSettings.previewPtp
+                    })
                 }
             }
             StudioDarkComboBox {
