@@ -1687,6 +1687,12 @@ void DeviceController::processLine(const QString& rawLine) {
     const auto flightPos = line.indexOf(QStringLiteral("SVSYNC "));
     if (flightPos >= 0) {
         const QString flightLine = line.mid(flightPos).trimmed();
+        if (flightLine.startsWith(QStringLiteral("SVSYNC FLIGHT "))) {
+            // Firmware emits one bounded fault summary from its telemetry
+            // task when a lock edge occurs. Surface it even if Inspect has
+            // not been clicked, never as a declaration of physical PASS.
+            syncDiagnostics_ = flightLine + QLatin1Char('\n') + syncDiagnostics_;
+        }
         if (flightLine.startsWith(QStringLiteral("SVSYNC DIAG ")))
             syncDiagnostics_ = flightLine;
         else if (flightLine.startsWith(QStringLiteral("SVSYNC CAUSE ")) ||
@@ -1962,6 +1968,9 @@ void DeviceController::resetTelemetry() {
 
 void DeviceController::resetPtpState() {
     resetPtpStartup();
+    syncDiagnostics_ = QStringLiteral(
+        "No current-board SV lock evidence. Select Inspect SV lock after verification.");
+    emit syncDiagnosticsChanged();
     ptpAvailable_ = false;
     ptpRunning_ = false;
     ptpStatus_ = QStringLiteral("Waiting for device");
