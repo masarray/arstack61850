@@ -1682,6 +1682,22 @@ void DeviceController::processLine(const QString& rawLine) {
     if (line.isEmpty()) return;
     appendLog(QStringLiteral("←"), line);
 
+    // Explicit on-board flight recorder response. Do not poll from the
+    // UI render path or treat historical reports as new lock evidence.
+    const auto flightPos = line.indexOf(QStringLiteral("SVSYNC "));
+    if (flightPos >= 0) {
+        const QString flightLine = line.mid(flightPos).trimmed();
+        if (flightLine.startsWith(QStringLiteral("SVSYNC DIAG ")))
+            syncDiagnostics_ = flightLine;
+        else if (flightLine.startsWith(QStringLiteral("SVSYNC CAUSE ")) ||
+                 flightLine.startsWith(QStringLiteral("SVSYNC EVENT ")))
+            syncDiagnostics_ += QLatin1Char('\n') + flightLine;
+        // END marks a complete snapshot, never a certification.
+        if (syncDiagnostics_.size() > 6000)
+            syncDiagnostics_ = syncDiagnostics_.right(6000);
+        emit syncDiagnosticsChanged();
+    }
+
     // Only the owner of the current session+boot may advance commit -> readback -> START.
     // Regexes search through ESP-IDF log prefixes; all token fields are matched strictly.
     const auto scenarioCommitted = kScenarioCommitExpression.match(line);
