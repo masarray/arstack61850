@@ -457,6 +457,14 @@ def main() -> None:
             '"Reinstall bundled"' in firmware_ui,
             "Studio must show the real exact ESP32-P4 build and never mistake "
             "protocol compatibility for verified bundled firmware")
+    eth_fw = (STUDIO.parent.parent / "embedded/esp32p4_smv_injector/main/ethernet_port.c").read_text(encoding="utf-8")
+    require("ETH_CMD_G_LINK_STATUS" in eth_fw and
+            "Ethernet PHY link DOWN" in eth_fw and
+            "Ethernet PHY UP" in eth_fw and
+            "ptpFailureReason_" in dev_cpp and
+            "PTP failed stage and reason" in (STUDIO / "src/SmartSessionController.cpp").read_text(encoding="utf-8"),
+            "PTP START failure must distinguish PHY link from role/runtime failures "
+            "in the normal Studio diagnostics path")
     require("Q_PROPERTY(QString ptpFailureReason" in dev_h and
             "ptpRuntimeRunningSeen_" in dev_h and
             "ptpRuntimeRoleSeen_ = true" in dev_cpp and
