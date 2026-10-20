@@ -9,6 +9,10 @@
 #include <cstdint>
 #include <optional>
 
+#if defined(ESP_PLATFORM)
+#include "esp_timer.h"
+#endif
+
 namespace ar::esp32p4::smv {
 namespace {
 
@@ -31,6 +35,8 @@ constexpr std::size_t kReasonCount =
 std::array<std::atomic<std::uint32_t>, kReasonCount> g_cause_counts{};
 std::array<std::atomic<std::uint32_t>, kSvSyncFlightEventCapacity> g_event_codes{};
 std::array<std::atomic<std::uint32_t>, kSvSyncFlightEventCapacity> g_event_times{};
+std::array<std::atomic<std::int32_t>, kSvSyncFlightEventCapacity> g_event_phases{};
+std::array<std::atomic<std::uint32_t>, kSvSyncFlightEventCapacity> g_event_mac_pairs{};
 std::atomic<std::uint32_t> g_event_sequence{0U};
 std::atomic<std::uint32_t> g_acquisition_count{0U};
 std::atomic<std::uint32_t> g_loss_count{0U};
@@ -60,7 +66,22 @@ void record_transition(const SvSyncLossReason reason,
     const auto code = ((seq & 0xFFFFU) << 16U) |
         (static_cast<std::uint32_t>(reason) << 1U) |
         (qualified ? 1U : 0U);
-    g_event_times[slot].store(uptime_ms, std::memory_order_relaxed);
+    // Invalidate BEFORE replacing timestamp/context. Otherwise a reader
+    // could observe the previous published code with the next event's time.
+    g_event_codes[slot].store(0U, std::memory_order_release);
+    std::uint32_t event_ms = uptime_ms;
+#if defined(ESP_PLATFORM)
+    // Control-plane STOP/mode/GM events need valid uptime even when their
+    // portable caller did not provide a monotonic timestamp.
+    if (event_ms == 0U)
+        event_ms = static_cast<std::uint32_t>(esp_timer_get_time() / 1000LL);
+#endif
+    g_event_times[slot].store(event_ms, std::memory_order_relaxed);
+    g_event_phases[slot].store(
+        g_diag_phase_us.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    g_event_mac_pairs[slot].store(
+        g_diag_mac_pairs.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    // A code is a publication marker and carries a 16-bit sequence tag.
     g_event_codes[slot].store(code, std::memory_order_release);
 }
 
@@ -195,17 +216,23 @@ SvSyncFlightSnapshot smp_synch_diag_snapshot() noexcept {
         const auto slot = static_cast<std::size_t>(
             (seq - 1U) % kSvSyncFlightEventCapacity);
         const auto before = g_event_codes[slot].load(std::memory_order_acquire);
-        if (((before >> 16U) & 0xFFFFU) != (seq & 0xFFFFU)) continue;
+        if (before == 0U ||
+            ((before >> 16U) & 0xFFFFU) != (seq & 0xFFFFU)) continue;
         const auto time = g_event_times[slot].load(std::memory_order_relaxed);
+        const auto phase = g_event_phases[slot].load(std::memory_order_relaxed);
+        const auto pairs = g_event_mac_pairs[slot].load(std::memory_order_relaxed);
         const auto after = g_event_codes[slot].load(std::memory_order_acquire);
-        if (before != after) continue; // overwritten during read
+        if (before != after) continue; // concurrent overwrite: skip, never invent
         s.recent[s.recent_count++] = SvSyncFlightEvent{
-            seq, time,
+            seq, time, phase, pairs,
             static_cast<SvSyncLossReason>((before >> 1U) & 0xFFU),
             (before & 1U) != 0U
         };
     }
     return s;
+}
+std::uint32_t smp_synch_diag_event_count() noexcept {
+    return g_event_sequence.load(std::memory_order_acquire);
 }
 const char* smp_synch_diag_reason_name(const SvSyncLossReason reason) noexcept {
     switch (reason) {
@@ -223,6 +250,11 @@ const char* smp_synch_diag_reason_name(const SvSyncLossReason reason) noexcept {
     case SvSyncLossReason::ptp_stop: return "PTP_STOP";
     case SvSyncLossReason::operator_mode: return "OPERATOR_MODE_CHANGE";
     case SvSyncLossReason::other: return "UNCLASSIFIED_REVOCATION";
+    case SvSyncLossReason::mac_missing_timestamp: return "MAC_HW_TIMESTAMP_MISSING";
+    case SvSyncLossReason::mac_bad_epoch: return "MAC_EPOCH_NOT_QUALIFIED";
+    case SvSyncLossReason::mac_publisher_discontinuity: return "MAC_PUBLISHER_DISCONTINUITY";
+    case SvSyncLossReason::mac_ptp_clock_step: return "MAC_PTP_CLOCK_STEP";
+    case SvSyncLossReason::mac_baseline_reset: return "MAC_EVIDENCE_REBASELINE";
     case SvSyncLossReason::count: break;
     }
     return "UNKNOWN";
