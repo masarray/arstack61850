@@ -54,10 +54,12 @@ jobs:
         run: |
           cmake -S apps/arstack_studio -B build-studio-preview -G "Visual Studio 17 2022" -A x64 -DARIEC61850_WARNINGS_AS_ERRORS=ON -DARSTACK_STUDIO_ENGINEERING_PREVIEW=ON
           if ($LASTEXITCODE -ne 0) { throw 'Preview configuration failed' }
-          cmake --build build-studio-preview --config Release --target arstack_studio arstack_session_harness --parallel 2
+          cmake --build build-studio-preview --config Release --target arstack_studio arstack_session_harness arstack_clipboard_harness --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'Native Studio preview build failed' }
           & "$PWD\build-studio-preview\Release\arstack_session_harness.exe"
           if ($LASTEXITCODE -ne 0) { throw 'Native session regression failed' }
+          & "$PWD\build-studio-preview\Release\arstack_clipboard_harness.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Native clipboard readback regression failed' }
           # Differentiate product code regressions from missing deployed DLLs.
           $nativeGui = Join-Path $PWD 'build-studio-preview\Release\arstack_studio.exe'
           $probe = Start-Process -FilePath $nativeGui -ArgumentList '--check-reference-template' -Wait -PassThru
