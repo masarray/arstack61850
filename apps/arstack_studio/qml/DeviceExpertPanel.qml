@@ -7,6 +7,7 @@ SurfacePanel {
     id: panel
     property var device
     property var session
+    property real signalFrequency: 50.0
     property string uiFont: "Inter"
     property string monoFont: "Inter"
 
@@ -105,6 +106,7 @@ SurfacePanel {
             Layout.preferredHeight: 268
             theme: panel.theme
             device: panel.device
+            signalFrequency: panel.signalFrequency
             uiFont: panel.uiFont
             monoFont: panel.monoFont
         }
