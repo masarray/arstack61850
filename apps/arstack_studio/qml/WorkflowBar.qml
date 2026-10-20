@@ -178,6 +178,12 @@ SurfacePanel {
                 ribbon.firmwareResultTitle = "Firmware installed successfully"
                 ribbon.firmwareResultMessage = "ESP32-P4 reconnected and verified."
                 controller.showMessage("Firmware installed and verified successfully.", false)
+            } else if (smartSession.firmwareVerificationPending) {
+                // The write completed; Windows USB/CDC identity is pending.
+                // Nonmodal state keeps automatic IDENTIFY-only recovery active.
+                ribbon.firmwareResultTitle = "Firmware written · waiting for board"
+                ribbon.firmwareResultMessage = smartSession.firmwareUpdateResult
+                controller.showMessage("Firmware written. Press RESET or reconnect USB; Studio will verify automatically.", false)
             } else {
                 ribbon.firmwareResultTitle = "Firmware not verified"
                 ribbon.firmwareResultMessage = smartSession.firmwareUpdateResult.length > 0
@@ -188,7 +194,8 @@ SurfacePanel {
             // Installation completion is a normal successful transition,
             // not another mandatory acknowledgment dialog. Retain full
             // diagnostics and a modal only when verification failed.
-            if (!success) Qt.callLater(resultDialog.open)
+            if (!success && !smartSession.firmwareVerificationPending)
+                Qt.callLater(resultDialog.open)
         }
     }
 
