@@ -92,6 +92,36 @@ void test_receiver_auto_requires_fresh_ptp_and_real_timeline() {
             "AUTO after manual override is fail closed");
 }
 
+void test_internal_sync_recorder_captures_cause_and_bounded_history() {
+    using namespace ar::esp32p4::smv;
+    smp_synch_set_source_local_qualified(false);
+    const auto before = smp_synch_diag_snapshot();
+    smp_synch_diag_observe(-3, 2U, 4U, 10U, 101U, true, true);
+    for (unsigned i = 0; i < 21U; ++i) {
+        smp_synch_set_source_local_qualified(true, SvSyncLossReason::none,
+                                             1000U + 2U*i);
+        smp_synch_set_source_local_qualified(false, SvSyncLossReason::mac_egress,
+                                             1001U + 2U*i);
+    }
+    const auto after = smp_synch_diag_snapshot();
+    require(after.acquisitions >= before.acquisitions + 21U,
+            "on-board recorder missed acquired edges");
+    require(after.losses >= before.losses + 21U,
+            "on-board recorder missed revocations");
+    require(after.cause_counts[static_cast<std::size_t>(SvSyncLossReason::mac_egress)] >= 21U,
+            "MAC timing reason must not be collapsed into generic phase loss");
+    require(after.recent_count == kSvSyncFlightEventCapacity,
+            "flight recorder ring must retain exactly sixteen latest edges");
+    require(after.recent[after.recent_count-1].reason == SvSyncLossReason::mac_egress &&
+            !after.recent[after.recent_count-1].acquired,
+            "newest loss must retain exact cause");
+    require(after.phase_error_us == -3 && after.uncertainty_us == 2U &&
+            after.mac_pairs == 4U && after.clean_epochs == 10U &&
+            after.sample_epoch == 101U && after.phase_accepted &&
+            after.software_tracking,
+            "flight recorder snapshot must retain measured observer inputs");
+}
+
 void test_all_lab_compatibility_modes() {
     const auto unsync = resolve_sv_sync_policy(SvSyncPolicyMode::honest_unsynchronized);
     const auto local = resolve_sv_sync_policy(SvSyncPolicyMode::local_compatibility);
@@ -135,6 +165,7 @@ int main() {
     test_auto_is_safe_without_measured_lock();
     test_auto_accepts_future_measured_state();
     test_receiver_auto_requires_fresh_ptp_and_real_timeline();
+    test_internal_sync_recorder_captures_cause_and_bounded_history();
     test_all_lab_compatibility_modes();
     test_labels_are_stable_for_ui_and_evidence();
     std::cout << "smpSynch lab policy tests passed\n";
