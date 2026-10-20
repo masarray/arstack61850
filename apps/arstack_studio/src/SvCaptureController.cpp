@@ -155,19 +155,26 @@ bool parseSvFrame(const QByteArrayView frame, Sample& sample) {
 QString formatError(const QString& prefix, const QString& detail) {
     return prefix + QStringLiteral(": ") + detail;
 }
-} // namespace
 
-SvCaptureController::SvCaptureController(QObject* parent) : QObject(parent) {
-    dumpcap_ = QStandardPaths::findExecutable(QStringLiteral("dumpcap"));
+// Capture remains a single Studio action. The external driver/recorder is
+// discovered automatically; the operator never enters a shell command.
+QString findDumpcap() {
+    QString found = QStandardPaths::findExecutable(QStringLiteral("dumpcap"));
 #ifdef Q_OS_WIN
-    if (dumpcap_.isEmpty()) {
+    if (found.isEmpty()) {
         for (const QString& path : {
                  QStringLiteral("C:/Program Files/Wireshark/dumpcap.exe"),
                  QStringLiteral("C:/Program Files (x86)/Wireshark/dumpcap.exe")}) {
-            if (QFileInfo::exists(path)) { dumpcap_ = path; break; }
+            if (QFileInfo::exists(path)) { found = path; break; }
         }
     }
 #endif
+    return found;
+}
+} // namespace
+
+SvCaptureController::SvCaptureController(QObject* parent) : QObject(parent) {
+    dumpcap_ = findDumpcap();
     auto documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     if (documents.isEmpty()) documents = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     outputFolder_ = QDir(documents).filePath(QStringLiteral("ARStack Studio/Captures"));
@@ -222,6 +229,7 @@ SvCaptureController::SvCaptureController(QObject* parent) : QObject(parent) {
     connect(&decoder_, &QFutureWatcher<QVariantMap>::finished, this, [this] {
         const QVariantMap report = decoder_.result();
         lastReport_ = report.value(QStringLiteral("json")).toString();
+        summary_ = report.value(QStringLiteral("summary")).toMap();
         setStatus(report.value(QStringLiteral("status")).toString());
         emit stateChanged();
     });
@@ -245,8 +253,11 @@ void SvCaptureController::setStatus(const QString& text) {
 }
 void SvCaptureController::refreshInterfaces() {
     if (discovery_.state() != QProcess::NotRunning || capturing() || processing()) return;
+    // Refresh installation state too; no Studio restart is required after
+    // first-time installing Npcap/Wireshark from the in-app help button.
+    dumpcap_ = findDumpcap();
     if (dumpcap_.isEmpty()) {
-        setStatus(QStringLiteral("Capture requires Wireshark dumpcap + Npcap. Install Wireshark including Npcap, then Refresh."));
+        setStatus(QStringLiteral("Capture driver not ready. Select 'Install capture support', complete Wireshark + Npcap setup, then Refresh."));
         return;
     }
     setStatus(QStringLiteral("Finding capture interfaces..."));
@@ -286,6 +297,7 @@ bool SvCaptureController::startCapture(int index, int seconds, const QVariantMap
     activeSecondsRequested_ = seconds;
     abortRequested_ = false;
     lastReport_.clear();
+    summary_.clear();
     const QStringList args{
         QStringLiteral("-i"), activeAdapter_,
         QStringLiteral("-f"), QString::fromLatin1(kSvBpf),
@@ -344,6 +356,12 @@ void SvCaptureController::decodeCapturedFile() {
 void SvCaptureController::openOutputFolder() {
     if (!QDir().mkpath(outputFolder_)) return;
     QDesktopServices::openUrl(QUrl::fromLocalFile(outputFolder_));
+}
+void SvCaptureController::openCaptureSupportHelp() {
+    // Operator-only setup action. Do not silently install kernel drivers or
+    // download executable binaries without explicit system authorization.
+    QDesktopServices::openUrl(
+        QUrl(QStringLiteral("https://www.wireshark.org/download.html")));
 }
 
 QVariantMap SvCaptureController::decodePcap(
@@ -724,6 +742,19 @@ QVariantMap SvCaptureController::decodePcap(
         return result;
     }
     json.close();
+    if (usable) {
+        // The Studio operator view needs compact truthful wire facts, not
+        // the full 3600-entry telemetry series kept in the evidence JSON.
+        result.insert(QStringLiteral("summary"), QVariantMap{
+            {QStringLiteral("sv_frames"), qulonglong(matched)},
+            {QStringLiteral("ptp_frames"), qulonglong(ptpFrames)},
+            {QStringLiteral("missing_samples"), qulonglong(missing)},
+            {QStringLiteral("sync_transitions"), qulonglong(syncTransitions)},
+            {QStringLiteral("observed_fps"), observedFps},
+            {QStringLiteral("status"), report.value(QStringLiteral("status"))},
+            {QStringLiteral("physical_acceptance"), false}
+        });
+    }
     result.insert(QStringLiteral("status"), usable
         ? QStringLiteral("Capture saved: %1 SV / %2 PTP frames, %3 missing, %4 sync transitions. "
                          "Status: %5. Share report.json + events.csv first; keep PCAP for deep analysis.")
