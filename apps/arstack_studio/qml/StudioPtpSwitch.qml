@@ -7,6 +7,7 @@ Switch {
     id: control
     property var theme
     property string uiFont: "Inter"
+    property bool busy: false
     text: "PTP"
     hoverEnabled: true
     font.family: uiFont
@@ -18,16 +19,19 @@ Switch {
         x: control.leftPadding
         y: (control.height - height) / 2
         radius: 12
-        color: control.checked ? control.theme.greenSoft : control.theme.surface2
+        color: control.busy ? control.theme.panelAlt
+            : control.checked ? control.theme.greenSoft : control.theme.surface2
         border.width: 1
-        border.color: control.checked ? control.theme.green : control.theme.line
+        border.color: control.busy ? control.theme.amber
+            : control.checked ? control.theme.green : control.theme.line
         Rectangle {
             width: 16
             height: 16
             radius: 8
             y: 4
             x: control.checked ? parent.width - width - 4 : 4
-            color: control.checked ? control.theme.green : control.theme.textSoft
+            color: control.busy ? control.theme.amber
+                : control.checked ? control.theme.green : control.theme.textSoft
             Behavior on x { NumberAnimation { duration: 120 } }
         }
     }
