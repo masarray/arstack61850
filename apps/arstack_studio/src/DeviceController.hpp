@@ -380,7 +380,7 @@ private:
     [[nodiscard]] bool needsPtpStopBeforeShutdown() const noexcept { return ptpRunning_ || ptpStarting(); }
     void advancePtpStartup(const QString& line);
     void failPtpStartup(const QString& reason, bool rollback);
-    bool beginPtpStopVerification();
+    bool beginPtpStopVerification(bool resumeStart = false);
     void markPtpStopUnconfirmed(const QString& reason);
     void resetPtpStartup() noexcept;
     [[nodiscard]] static QString ptpConfigCommand(const QVariantMap& profile);
@@ -438,6 +438,8 @@ private:
     QString pendingPtpConfig_;
     bool ptpRuntimeRoleSeen_{false};
     bool ptpRuntimeRunningSeen_{false};
+    bool ptpRestartAfterStop_{false};
+    bool ptpRoleRecoveryAttempted_{false};
     bool ioWorkerReady_{false};
     bool ioWorkerAffinityValid_{false};
     bool shuttingDown_{false};
