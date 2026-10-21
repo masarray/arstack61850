@@ -537,6 +537,29 @@ def main() -> None:
             "SV output must fail-closed on measured heartbeat loss, preserve board STOP cause, "
             "and never show misleading green READY after an unrequested stop")
 
+    # Default workbench should never stretch the 4I+4V setpoint matrix
+    # beyond a useful editing width while starving Phasor/Waveform charts.
+    responsive_main = source("Main.qml")
+    ribbon_layout = source("ModernRibbon.qml")
+    start_flow = source("WorkflowBar.qml")
+    require("width: 1150" in responsive_main
+            and "SplitView.maximumWidth: 750" in responsive_main
+            and "SplitView.preferredWidth: root.compactLayout ? 450 : 470" in responsive_main
+            and "electric_bolt_run.svg" in ribbon_layout
+            and "electric_bolt_stop.svg" in ribbon_layout
+            and "bar.device.running ? \"RUN\" : \"STOP\"" in ribbon_layout,
+            "Studio default workbench must balance channels and charts; physical RUN/STOP uses supplied bolt")
+    require("property bool startIntentPending: false" in start_flow
+            and "String(device.bootId)" in start_flow
+            and "startIntentDeadline = Date.now() + 6500" in start_flow
+            and "onStateChanged() { ribbon.tryConsumeFirstStart() }" in start_flow
+            and "function onDeviceVerifiedChanged()" in start_flow
+            and "ribbon.cancelStartIntent()" in start_flow
+            and "if (ribbon.startIntentPending)" in start_flow
+            and "String(device.bootId) === requestedBoot" in start_flow
+            and "smartSession.requestStartWithScenario(scenario)" in start_flow,
+            "First START click must be bounded, single-device, cancelable, and use verified scenario START")
+
     toast_layout = source("Main.qml")
     toast_view = source("StatusToast.qml")
     require("function explainFailure(message)" in toast_layout
