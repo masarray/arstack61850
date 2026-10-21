@@ -204,6 +204,8 @@ def main() -> None:
             and "if (signalRow.commitMagnitude())" in matrix
             and "if (signalRow.commitPhase())" in matrix
             and "onClicked: matrix.forceActiveFocus()" in matrix
+            and "workbenchColumn.forceActiveFocus()" in main_qml
+            and "root.forceActiveFocus()" not in main_qml
             and "magnitudeApplyTimer" not in matrix
             and "phaseApplyTimer" not in matrix
             and "currentMatrix.flushPendingEdits()" in main_qml
