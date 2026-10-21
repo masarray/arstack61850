@@ -17,14 +17,64 @@ SurfacePanel {
     property bool compact: false
     // Firmware transaction is the single source of truth. UI timers and
     // unrelated PTP/serial errors must not bounce the injection START button.
-    readonly property bool startQueued: Boolean(ribbon.device && ribbon.device.scenarioApplying)
+    readonly property bool startQueued: Boolean(
+        (ribbon.device && ribbon.device.scenarioApplying) || ribbon.startIntentWaiting)
+    // One deliberate click while 4I+4V is preparing remains armed only for
+    // this verified board boot. No automatic START after USB reconnect/flash.
+    property bool startIntentWaiting: false
+    property string startIntentBootId: ""
+    function cancelStartIntent() {
+        startIntentWaiting = false
+        startIntentBootId = ""
+        startIntentDeadline.stop()
+    }
+    Timer {
+        id: startIntentDeadline
+        interval: 8000
+        repeat: false
+        onTriggered: {
+            if (!ribbon.startIntentWaiting) return
+            ribbon.cancelStartIntent()
+            controller.showMessage(
+                "START belum dikirim: persiapan profil 4I+4V melebihi 8 detik. Periksa status board dan coba lagi.", true)
+        }
+    }
+    function deliverReadyStart() {
+        if (!startIntentWaiting || !ribbon.device || !ribbon.device.deviceVerified) return
+        if (ribbon.device.bootId !== startIntentBootId ||
+            smartSession.updatingFirmware || smartSession.updateNeedsBootloaderHelp) {
+            cancelStartIntent()
+            return
+        }
+        if (ribbon.device.running || ribbon.device.scenarioApplying) {
+            cancelStartIntent()
+            return
+        }
+        if (!smartSession.startReady) return
+        cancelStartIntent()
+        // Snapshot is taken at the actual verified start boundary, not from
+        // stale startup defaults. No hidden retries after a rejected command.
+        const snapshot = controller.startScenarioSnapshot()
+        if (!snapshot) return
+        if (!smartSession.requestStartWithScenario(snapshot)) {
+            controller.pendingApply = true
+            controller.showMessage("START ditolak board. Periksa status koneksi dan diagnostics.", true)
+        }
+    }
     Connections {
         target: ribbon.device
         function onRunningChanged() {
             if (ribbon.device.running) controller.pendingApply = false
         }
         function onDeviceVerifiedChanged() {
-            if (!ribbon.device.deviceVerified) controller.pendingApply = true
+            if (!ribbon.device.deviceVerified) {
+                controller.pendingApply = true
+                ribbon.cancelStartIntent()
+            }
+        }
+        function onDeviceIdentityChanged() {
+            if (ribbon.startIntentWaiting && ribbon.device.bootId !== ribbon.startIntentBootId)
+                ribbon.cancelStartIntent()
         }
     }
     property bool updatePromptDeferred: false
@@ -123,6 +173,7 @@ SurfacePanel {
     Connections {
         target: smartSession
         function onReadyForLiveApply() {
+            if (ribbon.startIntentWaiting) Qt.callLater(ribbon.deliverReadyStart)
             // The current board SHOW response does not contain per-channel
             // amplitude/phase/quality. Never silently claim readback or
             // overwrite a board with a restored/offline local draft.
@@ -132,6 +183,7 @@ SurfacePanel {
             // No auto-transmit on device discovery/reconnection.
         }
         function onStateChanged() {
+            if (ribbon.startIntentWaiting) Qt.callLater(ribbon.deliverReadyStart)
             if (ribbon.firmwareGateActive)
                 controller.profileDirty = true
 
@@ -271,9 +323,17 @@ SurfacePanel {
             return
         }
         if (!smartSession.startReady) {
-            // One click must explain why a physical START is not queued.
-            // Never make the operator click twice to discover readiness.
-            controller.showMessage("START waiting: " + ribbon.startReason(), true)
+            if (ribbon.device.deviceVerified &&
+                smartSession.state === "PREPARING 4I+4V" &&
+                ribbon.device.bootId.length > 0) {
+                ribbon.startIntentBootId = ribbon.device.bootId
+                ribbon.startIntentWaiting = true
+                startIntentDeadline.restart()
+                controller.showMessage(
+                    "START diterima. Menunggu profil 4I+4V siap; injeksi dimulai setelah board terverifikasi.", false)
+            } else {
+                controller.showMessage("START belum siap: " + ribbon.startReason(), true)
+            }
             return
         }
         // A START always transmits the current 4I+4V table snapshot.
@@ -291,6 +351,13 @@ SurfacePanel {
     }
 
     function requestStop() {
+        // An operator STOP cancels a queued one-click intent before any
+        // firmware command can be dispatched.
+        if (startIntentWaiting) {
+            cancelStartIntent()
+            controller.showMessage("START dibatalkan. Board tetap STOP.", false)
+            return
+        }
         // A pending CFG transaction can progress to START: Stop must remain
         // actionable before RUNNING telemetry, not only after it.
         if (!ribbon.injectionRunning && !ribbon.startQueued) return
