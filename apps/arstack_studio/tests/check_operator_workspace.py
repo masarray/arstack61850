@@ -119,7 +119,7 @@ def main() -> None:
             and "now - lastOperatorNoticeMs < 8000" in main_qml
             and "messageTimer.interval = notice.error ? 4600 : 2800" in main_qml
             and "statusHistoryModel.append({" in main_qml
-            and "anchors.centerIn: parent" not in toast_qml
+            and "anchors.bottom: parent.bottom" not in toast_qml
             and 'objectName: "centralOperatorToast"' in toast_qml
             and "wrapMode: Text.WordWrap" in toast_qml
             and "property string detail" in toast_qml,
