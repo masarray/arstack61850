@@ -71,6 +71,8 @@ class DeviceController : public QObject {
     Q_PROPERTY(bool ptpRunning READ ptpRunning NOTIFY ptpStateChanged)
     Q_PROPERTY(bool ptpStarting READ ptpStarting NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpStatus READ ptpStatus NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpEthernetDriver READ ptpEthernetDriver NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpEthernetLink READ ptpEthernetLink NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpLastStartFailure READ ptpLastStartFailure NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpStartPhase READ ptpStartPhase NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpDomain READ ptpDomain NOTIFY ptpStateChanged)
@@ -163,6 +165,8 @@ public:
     [[nodiscard]] bool ptpRunning() const noexcept;
     [[nodiscard]] bool ptpStarting() const noexcept { return ptpStartStage_ != PtpStartStage::idle; }
     [[nodiscard]] QString ptpStatus() const;
+    [[nodiscard]] QString ptpEthernetDriver() const { return ptpEthernetDriver_; }
+    [[nodiscard]] QString ptpEthernetLink() const { return ptpEthernetLink_; }
     [[nodiscard]] QString ptpLastStartFailure() const { return ptpLastStartFailure_; }
     [[nodiscard]] QString ptpStartPhase() const;
     [[nodiscard]] QString ptpDomain() const;
@@ -458,6 +462,9 @@ private:
     bool pendingAutoDetect_{false};
     double signalFrequencyHz_{50.0};
     QString ptpStatus_{QStringLiteral("Waiting for device")};
+    // Actual ESP-IDF ETH_EVENT proof. UNKNOWN never means link is UP.
+    QString ptpEthernetDriver_{QStringLiteral("UNKNOWN")};
+    QString ptpEthernetLink_{QStringLiteral("UNKNOWN")};
     QString ptpLastStartFailure_;
     QString ptpDomain_{QStringLiteral("-")};
     QString ptpTransportSpecific_{QStringLiteral("-")};
