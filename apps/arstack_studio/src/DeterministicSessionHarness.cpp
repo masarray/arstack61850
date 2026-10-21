@@ -750,6 +750,21 @@ private:
     static bool ptpPhysicalEthernetPreflightAndMacFailure() {
         {
             Fixture f;
+            auto& d = f.device;
+            d.processLine(QStringLiteral(
+                "I ar_smv_eth: PTP ETH driver=STARTED link=DOWN tx_ready=0 start_reason=NONE"));
+            if (d.ptpEthernetDriver_ != QStringLiteral("STARTED") ||
+                d.ptpEthernetLink_ != QStringLiteral("DOWN") || d.ptpRunning_) return false;
+            d.processLine(QStringLiteral(
+                "PTP ETH driver=STARTED link=UP tx_ready=1 start_reason=NONE"));
+            if (d.ptpEthernetLink_ != QStringLiteral("UP") || d.ptpRunning_) return false;
+            d.processLine(QStringLiteral(
+                "PTP ETH driver=STOPPED link=DOWN tx_ready=0 start_reason=ETHERNET_DRIVER_NOT_STARTED"));
+            if (d.ptpEthernetDriver_ != QStringLiteral("STOPPED") ||
+                d.ptpEthernetLink_ != QStringLiteral("DOWN")) return false;
+        }
+        {
+            Fixture f;
             if (!setupGuidedPtp(f, QStringLiteral("SOURCE"))) return false;
             auto& d = f.device;
             d.processLine(QStringLiteral("PTPROLE accepted"));
