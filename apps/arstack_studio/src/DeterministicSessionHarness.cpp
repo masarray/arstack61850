@@ -994,6 +994,7 @@ private:
             "stop_seq=1 stop_uptime_ms=33000 stop_hb_age_ms=2500 "
             "hb_age_ms=2600 hb_seen=1 lease_ms=2500 watchdog=1"));
         if (d.svStopReason_ != QStringLiteral("LEASE_EXPIRED") ||
+            d.svLastStopCause_ != QStringLiteral("LEASE_EXPIRED") ||
             !d.logText_.contains(QStringLiteral("BOARD_STOP_READBACK")))
             return false;
         // Repeated polling of the same event must be idempotent.
@@ -1004,7 +1005,8 @@ private:
         // An already restarted board can still return its last-stop history.
         d.processLine(QStringLiteral(
             "SVLIFE state=RUNNING stop_cause=LEASE_EXPIRED stop_seq=1"));
-        if (!d.svStopReason_.isEmpty()) return false;
+        if (!d.svStopReason_.isEmpty() ||
+            d.svLastStopCause_ != QStringLiteral("LEASE_EXPIRED")) return false;
         // Operator STOP must never be reported as spontaneous lease loss.
         d.setRunning(true);
         d.operatorStopPending_ = true;
