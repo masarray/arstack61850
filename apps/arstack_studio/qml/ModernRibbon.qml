@@ -220,11 +220,13 @@ Rectangle {
         }
 
         Rectangle {
-            Layout.preferredWidth: bar.compact ? 84 : 108
-            Layout.preferredHeight: 36
+            Layout.preferredWidth: bar.compact ? 92 : 120
+            Layout.preferredHeight: 39
             Layout.alignment: Qt.AlignVCenter
-            radius: 15
-            color: "#0a1016"
+            radius: 12
+            // A noninteractive status, not another START/STOP authority.
+            // Green only after verified board RUNNING; muted red otherwise.
+            color: bar.device.running ? "#112a23" : "#271a20"
             border.width: 1
             border.color: Qt.rgba(bar.workflow.smartStateColor.r,
                                   bar.workflow.smartStateColor.g,
@@ -236,21 +238,25 @@ Rectangle {
                 anchors.rightMargin: 9
                 spacing: 6
 
-                Rectangle {
-                    width: 6
-                    height: 6
-                    radius: 3
-                    color: bar.workflow.smartStateColor
+                Image {
+                    source: bar.device.running
+                        ? Qt.resolvedUrl("../assets/material/run-bolt.svg")
+                        : Qt.resolvedUrl("../assets/material/stop-bolt.svg")
+                    sourceSize.width: 21
+                    sourceSize.height: 21
+                    Layout.preferredWidth: 21
+                    Layout.preferredHeight: 21
+                    fillMode: Image.PreserveAspectFit
+                    opacity: bar.device.running ? 1.0 : 0.72
                 }
-
                 Label {
                     Layout.fillWidth: true
-                    text: bar.conciseState()
-                    color: bar.workflow.smartStateColor
+                    text: bar.device.running ? "RUN" : "STOP"
+                    color: bar.device.running ? bar.theme.green : "#b45d67"
                     font.family: bar.uiFont
-                    font.pixelSize: 9
-                    font.weight: Font.DemiBold
-                    elide: Text.ElideRight
+                    font.pixelSize: 12
+                    font.weight: Font.Bold
+                    font.letterSpacing: 0.7
                     verticalAlignment: Text.AlignVCenter
                 }
             }
