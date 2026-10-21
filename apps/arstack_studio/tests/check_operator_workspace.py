@@ -537,6 +537,19 @@ def main() -> None:
             "SV output must fail-closed on measured heartbeat loss, preserve board STOP cause, "
             "and never show misleading green READY after an unrequested stop")
 
+    toast_layout = source("Main.qml")
+    toast_view = source("StatusToast.qml")
+    require("function explainFailure(message)" in toast_layout
+            and "ETHERNET_LINK_DOWN" in toast_layout
+            and "ETHERNET_TX_INVALID_STATE" in toast_layout
+            and "function onLastErrorChanged()" in toast_layout
+            and toast_layout.count("anchors.centerIn: parent") >= 2
+            and "lastToastAt" in toast_layout
+            and "messageTimer.interval = critical ? 4200 : 2300" in toast_layout
+            and "wrapMode: Text.WordWrap" in toast_view,
+            "PTP physical-link and board failures must generate bounded actionable center-screen toasts "
+            "in both the main window and Advanced")
+
     clipboard_header = (STUDIO / "src/StudioClipboard.hpp").read_text(encoding="utf-8")
     clipboard_cpp = (STUDIO / "src/StudioClipboard.cpp").read_text(encoding="utf-8")
     main_cpp = (STUDIO / "src/main.cpp").read_text(encoding="utf-8")
