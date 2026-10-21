@@ -479,6 +479,27 @@ def main() -> None:
             "busy: Boolean(panel.startPending)" in ptp_panel,
             "Firmware tab must show build provenance and SOURCE 9-3 preflight")
     ptp_firmware = (STUDIO.parent.parent / "embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp").read_text(encoding="utf-8")
+    eth_port = (STUDIO.parent.parent / "embedded/esp32p4_smv_injector/main/ethernet_port.c").read_text(encoding="utf-8")
+    ptp_studio = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
+    require("ETHERNET_EVENT_START" in eth_port
+            and "ETHERNET_EVENT_CONNECTED" in eth_port
+            and "ETHERNET_EVENT_DISCONNECTED" in eth_port
+            and "xEventGroupWaitBits(" in eth_port
+            and "kTxReady" in eth_port
+            and "ETHERNET_LINK_DOWN" in eth_port
+            and "ETHERNET_DRIVER_NOT_STARTED" in eth_port
+            and "ar_esp32p4_ptp_print_link_status()" in eth_port
+            and "ethernet_tx_invalid_state" in ptp_firmware
+            and "ETHERNET_TX_INVALID_STATE" in ptp_firmware
+            and "kStartReadyPolls = 350U" in ptp_firmware
+            and "source_reason=ETHERNET_LINK_DOWN" in ptp_studio
+            and "source_reason=ETHERNET_TX_INVALID_STATE" in ptp_studio
+            and "ptpPhysicalEthernetPreflightAndMacFailure()" in
+                (STUDIO / "src/DeterministicSessionHarness.cpp").read_text(encoding="utf-8"),
+            "PTP SOURCE must prove ETH driver and PHY before TX, classify MAC INVALID_STATE, "
+            "and never mark a failed START as RUNNING")
+
+
     ptp_console = (STUDIO.parent.parent / "embedded/esp32p4_smv_injector/main/live_control.cpp").read_text(encoding="utf-8")
     require('SOURCE_REQUIRES_1S_ANNOUNCE_1S_SYNC_AND_PDELAY' in ptp_firmware and
             'ar_ptp_lab_last_config_error()' in ptp_console and
