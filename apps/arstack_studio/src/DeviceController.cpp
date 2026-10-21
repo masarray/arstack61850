@@ -74,6 +74,9 @@ const QRegularExpression kIdentityExpression{
 const QRegularExpression kPtpStatusExpression{
     QStringLiteral("PTP status=(RUNNING|STOPPED) Announce=(\\d+) Sync=(\\d+) FollowUp=(\\d+) PdelayFrames=(\\d+) TXfail=(\\d+)"),
     QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kPtpEthernetExpression{
+    QStringLiteral("PTP ETH driver=(STARTED|STOPPED) link=(UP|DOWN) tx_ready=([01]) start_reason=([A-Z_]+)"),
+    QRegularExpression::CaseInsensitiveOption};
 const QRegularExpression kPtpConfigExpression{
     QStringLiteral("PTP config domain=(\\d+) transportSpecific=0x([0-9A-Fa-f]+) VLAN=(\\S+) Announce=(\\d+) ms Sync=(\\d+) ms Pdelay=(ON|OFF)"),
     QRegularExpression::CaseInsensitiveOption};
@@ -2123,6 +2126,15 @@ void DeviceController::processLine(const QString& rawLine) {
         markDeviceVerified();
     }
 
+    match = kPtpEthernetExpression.match(line);
+    if (match.hasMatch()) {
+        // Only the board's ETH_EVENT stream may establish this state;
+        // NEVER infer it from COM, profile selection or PTP SOURCE intent.
+        ptpEthernetDriver_ = match.captured(1).toUpper();
+        ptpEthernetLink_ = match.captured(2).toUpper();
+        emit ptpStateChanged();
+    }
+
     match = kPtpStatusExpression.match(line);
     if (match.hasMatch()) {
         ptpAvailable_ = true;
@@ -2250,6 +2262,8 @@ void DeviceController::resetPtpState() {
     emit syncDiagnosticsChanged();
     ptpAvailable_ = false;
     ptpRunning_ = false;
+    ptpEthernetDriver_ = QStringLiteral("UNKNOWN");
+    ptpEthernetLink_ = QStringLiteral("UNKNOWN");
     ptpStatus_ = QStringLiteral("Waiting for device");
     ptpDomain_ = QStringLiteral("-");
     ptpTransportSpecific_ = QStringLiteral("-");
