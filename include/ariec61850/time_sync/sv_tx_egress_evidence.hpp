@@ -277,45 +277,135 @@ private:
     std::uint32_t last_epoch_{};
 };
 
-// Fail-closed entry filter: requires consecutive, independently qualified
-// real SV epochs before asserting LOCAL, but never delays loss of LOCAL.
-// Physical 120 s capture 2026-10-19 showed 0->1 at +22.096 s and 1->0
-// at +23.096 s before stable reacquisition at +32.096 s. Three epochs
-// permitted a one-second premature LOCAL advertisement. Demand a 10-second
-// stable window of independent MAC/phase evidence before the FIRST claim.
-// This is an *entry* stabilizer, not a loss-of-evidence hysteresis: any
-// invalid epoch/source/fault still revokes LOCAL immediately.
+// Fail-closed LOCAL entry filter. A COLD start demands ten consecutive
+// genuinely transmitted, phase+canonical-MAC-qualified SV epochs. A WARM
+// preflight may earn phase-only history while SV TX is disabled; it cannot
+// advertise synchronization. After START, WARM promotion still requires three
+// consecutive live phase+MAC-qualified epochs, from this very publisher
+// session, with no lost epoch, lease mutation, or publisher fault.
+//
+// Earlier field evidence showed a premature one-second LOCAL claim when
+// *only* three live epochs were used. Warm promotion is categorically
+// different: it requires ten *additional* measured, consecutive preflight
+// phase epochs before the three live epochs. No preflight packet is invented,
+// and any known invalid clock, discontinuity, or loss of established MAC
+// evidence revokes LOCAL immediately.
 class SvLocalRefAcquisition final {
 public:
     static constexpr std::uint32_t kRequiredCleanEpochs = 10U;
+    static constexpr std::uint32_t kWarmRequiredLiveEpochs = 3U;
+    // Enough time for the sparse (every-two-epoch) MAC descriptor pair
+    // baseline, but stale preflight is never useful indefinitely.
+    static constexpr std::uint32_t kMaxWarmMacAcquisitionEpochs = 8U;
+
     constexpr void reset() noexcept {
-        count_ = 0U; session_ = 0U; faults_ = 0U;
-        source_ = 0U; epoch_ = 0U;
+        count_ = 0U;
+        preflight_epochs_ = 0U;
+        live_age_ = 0U;
+        session_ = 0U;
+        faults_ = 0U;
+        source_ = 0U;
+        epoch_ = 0U;
+        had_mac_evidence_ = false;
     }
+
+    // Called ONLY with real 1Hz GPTimer/PTP phase observations while the
+    // publisher is OFF and its preflight timer remains armed. No MAC evidence
+    // or smpSynch claim is implied.
+    constexpr void observe_preflight(
+        const bool phase_qualified, const std::uint32_t session,
+        const std::uint32_t faults, const std::uint32_t source,
+        const std::uint32_t epoch) noexcept {
+        if (!phase_qualified || session == 0U || source == 0U || epoch == 0U) {
+            reset();
+            return;
+        }
+        if (count_ != 0U ||
+            (preflight_epochs_ != 0U && !same_epoch_identity(
+                session, faults, source, epoch))) {
+            reset();
+        }
+        save_epoch_identity(session, faults, source, epoch);
+        if (preflight_epochs_ < kRequiredCleanEpochs) ++preflight_epochs_;
+    }
+
+    // Phase continuity and canonical MAC evidence are independent. During
+    // the first few live epochs a healthy MAC observer must establish its
+    // descriptor baseline; missing *initial* evidence cannot be mistaken
+    // for established evidence being revoked. A previously valid MAC gate
+    // becoming invalid is immediately fail-closed.
+    [[nodiscard]] constexpr bool observe_live(
+        const bool phase_qualified, const bool canonical_mac_qualified,
+        const std::uint32_t session, const std::uint32_t faults,
+        const std::uint32_t source, const std::uint32_t epoch) noexcept {
+        if (!phase_qualified || session == 0U || source == 0U || epoch == 0U) {
+            reset();
+            return false;
+        }
+        if ((count_ != 0U || preflight_epochs_ != 0U || live_age_ != 0U) &&
+            !same_epoch_identity(session, faults, source, epoch)) {
+            reset();
+        }
+        save_epoch_identity(session, faults, source, epoch);
+        if (live_age_ < kMaxWarmMacAcquisitionEpochs + 1U) ++live_age_;
+        if (live_age_ > kMaxWarmMacAcquisitionEpochs)
+            preflight_epochs_ = 0U;
+
+        if (!canonical_mac_qualified) {
+            if (had_mac_evidence_) reset();
+            return false;
+        }
+        had_mac_evidence_ = true;
+        if (count_ < kRequiredCleanEpochs) ++count_;
+        return count_ == kRequiredCleanEpochs ||
+            (preflight_epochs_ == kRequiredCleanEpochs &&
+             live_age_ <= kMaxWarmMacAcquisitionEpochs &&
+             count_ >= kWarmRequiredLiveEpochs);
+    }
+
+    // Compatibility contract for callers with an already-combined canonical
+    // phase+MAC boolean: unchanged ten-live-epoch fail-closed behavior.
     [[nodiscard]] constexpr bool observe(
         const bool qualified, const std::uint32_t session,
         const std::uint32_t faults, const std::uint32_t source,
         const std::uint32_t epoch) noexcept {
-        if (!qualified || session == 0U || source == 0U || epoch == 0U) {
-            reset();
-            return false;
-        }
-        if (count_ != 0U &&
-            (session_ != session || faults_ != faults || source_ != source ||
-             epoch - epoch_ != 1U)) reset();
-        session_ = session; faults_ = faults; source_ = source; epoch_ = epoch;
-        if (count_ < kRequiredCleanEpochs) ++count_;
-        return count_ == kRequiredCleanEpochs;
+        return observe_live(qualified, qualified, session, faults, source, epoch);
     }
+
     [[nodiscard]] constexpr std::uint32_t clean_epochs() const noexcept {
         return count_;
     }
+    [[nodiscard]] constexpr std::uint32_t preflight_epochs() const noexcept {
+        return preflight_epochs_;
+    }
+    [[nodiscard]] constexpr std::uint32_t live_age_epochs() const noexcept {
+        return live_age_;
+    }
+
 private:
+    [[nodiscard]] constexpr bool same_epoch_identity(
+        const std::uint32_t session, const std::uint32_t faults,
+        const std::uint32_t source, const std::uint32_t epoch) const noexcept {
+        return session_ == session && faults_ == faults &&
+            source_ == source && epoch - epoch_ == 1U;
+    }
+    constexpr void save_epoch_identity(
+        const std::uint32_t session, const std::uint32_t faults,
+        const std::uint32_t source, const std::uint32_t epoch) noexcept {
+        session_ = session;
+        faults_ = faults;
+        source_ = source;
+        epoch_ = epoch;
+    }
+
     std::uint32_t count_{};
+    std::uint32_t preflight_epochs_{};
+    std::uint32_t live_age_{};
     std::uint32_t session_{};
     std::uint32_t faults_{};
     std::uint32_t source_{};
     std::uint32_t epoch_{};
+    bool had_mac_evidence_{};
 };
 
 } // namespace ar::iec61850::time_sync
