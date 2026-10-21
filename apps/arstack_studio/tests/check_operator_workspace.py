@@ -135,6 +135,31 @@ def main() -> None:
             and "root.ptpRestoreChecks > 120" in main_qml
             and "root.ptpDesiredForSession = false" in main_qml,
             "PTP user intent restoration must be bounded, explicit and cancellable")
+    # UI intent stays in native SmartSessionController: QML owns no delayed
+    # START or independent watchdog. SplitView bounds the editable table and
+    # dedicates remaining space to the two live visual inspectors.
+    session_h = (STUDIO / "src/SmartSessionController.hpp").read_text(encoding="utf-8")
+    session_cpp_now = (STUDIO / "src/SmartSessionController.cpp").read_text(encoding="utf-8")
+    ribbon_now = source("ModernRibbon.qml")
+    workflow_now = source("WorkflowBar.qml")
+    require('width: 1060' in main_qml
+            and 'SplitView.maximumWidth: root.compactLayout ? 605 : 655' in main_qml
+            and 'SplitView.fillWidth: false' in main_qml
+            and 'SplitView.fillWidth: true' in main_qml
+            and 'bolt_run.svg' in ribbon_now
+            and 'bolt_stop.svg' in ribbon_now
+            and 'text: svRunning ? "RUN" : svPending ? "WAIT" : "STOP"' in ribbon_now
+            and 'startIntentPending READ startIntentPending' in session_h
+            and 'pendingStartGeneration_ != sessionGeneration_' in session_cpp_now
+            and 'pendingStartBootId_ != device_->bootId()' in session_cpp_now
+            and 'void SmartSessionController::submitPendingStart()' in session_cpp_now
+            and 'cancelPendingStart();' in session_cpp_now
+            and 'startIntentTimer_.setSingleShot(true)' in session_cpp_now
+            and 'smartSession.requestStartWithScenario(scenario)' in workflow_now
+            and 'firstStartClickWaitsForSameBoardAndDispatchesOnce()' in
+                (STUDIO / "src/DeterministicSessionHarness.cpp").read_text(encoding="utf-8"),
+            "compact startup workspace, accurate bolt RUN/STOP CTA, and one bounded boot-pinned native START intent required")
+
     ribbon = source("ModernRibbon.qml")
     checkbox = source("StudioDarkCheckBox.qml")
     calm = source("CalmButton.qml")
@@ -191,7 +216,8 @@ def main() -> None:
     require('bar.workflow.injectionRunning || bar.workflow.startQueued || bar.controller.offlinePreviewRunning'
             in ribbon_qml
             and '!ribbon.injectionRunning && !ribbon.startQueued' in source("WorkflowBar.qml")
-            and 'readonly property bool startQueued: Boolean(ribbon.device && ribbon.device.scenarioApplying)' in source("WorkflowBar.qml")
+            and 'readonly property bool startQueued: Boolean(' in source("WorkflowBar.qml")
+            and 'smartSession.startIntentPending' in source("WorkflowBar.qml")
             and 'startWatchdog' not in source("WorkflowBar.qml"),
             "SV STOP must remain actionable while the acknowledged scenario transaction is pending")
     require("function flushPendingEdits()" in matrix
