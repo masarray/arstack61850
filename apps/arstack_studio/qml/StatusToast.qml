@@ -15,7 +15,7 @@ Rectangle {
     property bool error: false
 
     width: Math.min(490, parent ? Math.max(260, parent.width - 36) : 490)
-    implicitHeight: message.length > 0 ? (detail.length > 0 ? 104 : 72) : 0
+    implicitHeight: message.length > 0 ? (detail.length > 0 ? 124 : 72) : 0
     radius: 12
     z: 900
     color: "#1b2632"
