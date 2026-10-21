@@ -291,6 +291,7 @@ void print_ptp_state() noexcept {
         ESP_LOGE(kTag, "PTP status unavailable");
         return;
     }
+    ar_esp32p4_ptp_print_link_status(); // actual Ethernet driver + PHY event state
     ESP_LOGI(kTag,
              "PTP status=%s Announce=%llu Sync=%llu FollowUp=%llu PdelayFrames=%llu TXfail=%llu",
              status.is_running ? "RUNNING" : "STOPPED",
@@ -395,8 +396,13 @@ void handle_ptp_command(char* save) noexcept {
             const bool is_source = ar_ptp_lab_get_config(&active) &&
                 active.role == AR_PTP_ROLE_LAB_SOURCE;
             if (is_source) {
+                const char* preflight = ar_esp32p4_ptp_preflight_reason();
                 ESP_LOGE(kTag, "PTP start rejected: source_reason=%s",
-                         ar_ptp_source_last_start_reason());
+                         preflight != nullptr ? preflight :
+                             ar_ptp_source_last_start_reason());
+                // Distinguish an unplugged Ethernet cable from a MAC driver
+                // that rejected transmit while the physical link was UP.
+                ar_esp32p4_ptp_print_link_status();
             } else {
                 ESP_LOGE(kTag, "PTP start rejected: receiver/monitor runtime unavailable");
             }
