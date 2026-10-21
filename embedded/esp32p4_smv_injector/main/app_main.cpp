@@ -1369,6 +1369,7 @@ void sv_ptp_phase_observer_task(void* argument) {
         // the GPTimer mutex. Source identity and fault/session generations
         // must match the exact phase observation before any AUTO promotion.
         bool source_local_qualified = false;
+        bool measured_phase_qualified = false;
         std::uint32_t mac_pairs = 0U;
 #if AR_SV_TX_EGRESS_SUPPORTED
         if ((lease.role == PtpAuthorityRole::source ||
@@ -1380,6 +1381,9 @@ void sv_ptp_phase_observer_task(void* argument) {
             const std::uint64_t worst_case_phase_us =
                 static_cast<std::uint64_t>(abs_phase_us) +
                 decision.observation_uncertainty_us;
+            measured_phase_qualified = decision.software_tracking &&
+                worst_case_phase_us <=
+                    SvLocalSyncEvidenceGate::kMaxSoftwarePhaseBoundUs;
             portENTER_CRITICAL(&g_tx_egress_mux);
             source_local_qualified = g_local_sync_evidence.qualified(
                 notified_session, current_faults, lease.generation,
@@ -1430,15 +1434,16 @@ void sv_ptp_phase_observer_task(void* argument) {
                     ? decision.slew_ticks_next_epoch : 0,
                 std::memory_order_release);
             if (injecting) {
-                // A warm GPTimer is NEVER canonical MAC TX evidence.
-                // Require the actual descriptor pairs and three clean live
-                // epochs before advertising LOCAL REF to an IED.
-                const bool stable_local = local_acquisition.observe(
-                    (lease.role == PtpAuthorityRole::source ||
-                     lease.role == PtpAuthorityRole::receiver) &&
-                        SvAutoPreflightPolicy::can_advertise_local(
-                            injecting, source_local_qualified) &&
+                // WARM may reuse ten actual pre-START phase observations
+                // only if this is the same GPTimer/PTP session. The sparse
+                // canonical MAC descriptor evidence is measured AFTER START,
+                // and three consecutive live epochs are still mandatory.
+                // COLD retains the full ten live phase+MAC epochs.
+                const bool stable_local = local_acquisition.observe_live(
+                    measured_phase_qualified &&
                         decision.epoch_second_continuous,
+                    SvAutoPreflightPolicy::can_advertise_local(
+                        injecting, source_local_qualified),
                     notified_session, current_faults, lease.generation,
                     observation.last_sv_epoch_generation);
                 if (!stable_local &&
@@ -1480,7 +1485,17 @@ void sv_ptp_phase_observer_task(void* argument) {
                     stable_local && lease.role == PtpAuthorityRole::receiver,
                     SvSyncLossReason::phase_or_mac, stamp_ms);
             } else {
-                local_acquisition.reset();
+                if (preflight_active) {
+                    // No SV packet is transmitted in preflight: this records
+                    // PHASE evidence only and can never advertise smpSynch.
+                    local_acquisition.observe_preflight(
+                        measured_phase_qualified &&
+                            decision.epoch_second_continuous,
+                        notified_session, current_faults, lease.generation,
+                        observation.last_sv_epoch_generation);
+                } else {
+                    local_acquisition.reset();
+                }
                 revoke_sv_auto_claims(SvSyncLossReason::publisher_stop);
             }
             committed = true;
@@ -1527,7 +1542,8 @@ void sv_ptp_phase_observer_task(void* argument) {
              (accepted_epochs % 60U) == 0U)) {
             ESP_LOGI(kTag,
                 "SV/PTP AUTO phase=%ldus uncertainty=%luus "
-                "slew=%ldus/s tracking=%u MACpairs=%lu clean=%lu/%lu epoch=%llu LOCAL=%u",
+                "slew=%ldus/s tracking=%u MACpairs=%lu "
+                "live_clean=%lu/%lu warm_phase=%lu/%lu live_age=%lu epoch=%llu LOCAL=%u",
                 static_cast<long>(decision.phase_error_us),
                 static_cast<unsigned long>(decision.observation_uncertainty_us),
                 static_cast<long>(decision.slew_ticks_next_epoch),
@@ -1535,6 +1551,9 @@ void sv_ptp_phase_observer_task(void* argument) {
                 static_cast<unsigned long>(mac_pairs),
                 static_cast<unsigned long>(local_acquisition.clean_epochs()),
                 static_cast<unsigned long>(SvLocalRefAcquisition::kRequiredCleanEpochs),
+                static_cast<unsigned long>(local_acquisition.preflight_epochs()),
+                static_cast<unsigned long>(SvLocalRefAcquisition::kRequiredCleanEpochs),
+                static_cast<unsigned long>(local_acquisition.live_age_epochs()),
                 static_cast<unsigned long long>(decision.sv_epoch_ptp_second),
                 auto_local ? 1U : 0U);
         }
