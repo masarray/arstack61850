@@ -1076,11 +1076,17 @@ ApplicationWindow {
                     // Click on unoccupied injection panel space commits the
                     // currently focused table editor through editingFinished.
                     // Child input controls remain above this passive surface.
+                    Item {
+                        id: injectionFocusSink
+                        width: 0
+                        height: 0
+                        focus: false
+                    }
                     MouseArea {
                         anchors.fill: parent
                         z: 0
                         acceptedButtons: Qt.LeftButton
-                        onClicked: root.forceActiveFocus()
+                        onClicked: injectionFocusSink.forceActiveFocus()
                     }
 
                     ColumnLayout {
