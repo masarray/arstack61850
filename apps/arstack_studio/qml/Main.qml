@@ -1068,9 +1068,9 @@ ApplicationWindow {
                     // Hard width budget prevents input columns from stretching
                     // at desktop sizes. Visualization owns spare horizontal
                     // space; operator may still resize within useful bounds.
-                    SplitView.minimumWidth: 450
-                    SplitView.preferredWidth: root.width < 1100 ? 470 : 500
-                    SplitView.maximumWidth: 535
+                    SplitView.minimumWidth: 445
+                    SplitView.preferredWidth: root.width < 1100 ? 450 : 465
+                    SplitView.maximumWidth: 490
                     theme: studioTheme
 
                     // Click on unoccupied injection panel space commits the
