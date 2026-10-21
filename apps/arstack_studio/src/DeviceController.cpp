@@ -1811,7 +1811,9 @@ void DeviceController::setError(const QString& message) {
 }
 
 void DeviceController::appendLog(const QString& direction, const QString& line) {
-    const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss"));
+    // Correlate operator START/STOP and firmware ACKs to UTC PCAP/flight
+    // evidence at millisecond resolution; remains a bounded UI-side log.
+    const QString stamp = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
     logText_.append(QStringLiteral("[%1] %2 %3\n").arg(stamp, direction, line));
     constexpr qsizetype kMaxChars = 60000;
     constexpr qsizetype kKeepChars = 48000;
