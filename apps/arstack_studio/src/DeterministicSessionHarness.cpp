@@ -1140,8 +1140,10 @@ private:
         if (!setupGuidedPtp(f, QStringLiteral("RECEIVER"))) return false;
         auto& d = f.device;
         if (!d.stopPtp()) return false;
+        d.ptpRunning_ = true; // preserve RUN until the new STOP has proof
         d.processLine(ptpStoppedStatus()); // stale SHOW reply, before STOP ACK
-        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_ack) return false;
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_ack ||
+            !d.ptpRunning_) return false;
         d.processLine(QStringLiteral("PTP stop requested"));
         d.processLine(QStringLiteral(
             "PTP status=RUNNING Announce=1 Sync=1 FollowUp=0 PdelayFrames=0 TXfail=0"));
@@ -1578,6 +1580,10 @@ private:
         d.processLine(QStringLiteral("PTP stop requested"));
         if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_readback ||
             !d.deferredPtpShow_ || !d.ptpRunning_ || d.lastError_ != previousError)
+            return false;
+        d.processLine(ptpStoppedStatus()); // stale status before fresh readback
+        if (!d.ptpRunning_ ||
+            d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_readback)
             return false;
         // When the lock is released, exactly one readback is submitted to
         // the existing serial owner; no readback is accepted as STOP proof.
