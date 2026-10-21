@@ -220,36 +220,42 @@ Rectangle {
         }
 
         Rectangle {
-            Layout.preferredWidth: bar.compact ? 84 : 108
-            Layout.preferredHeight: 36
+            Layout.preferredWidth: bar.compact ? 84 : 102
+            Layout.preferredHeight: 40
             Layout.alignment: Qt.AlignVCenter
             radius: 15
             color: "#0a1016"
             border.width: 1
-            border.color: Qt.rgba(bar.workflow.smartStateColor.r,
-                                  bar.workflow.smartStateColor.g,
-                                  bar.workflow.smartStateColor.b, 0.48)
+            border.color: bar.device.deviceVerified && bar.device.running
+                ? bar.theme.green : "#663942"
 
+            readonly property bool physicalRunning: bar.device.deviceVerified &&
+                bar.device.running
+            readonly property color runColor: physicalRunning
+                ? bar.theme.green : "#b66069"
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 9
+                anchors.leftMargin: 10
                 anchors.rightMargin: 9
                 spacing: 6
-
-                Rectangle {
-                    width: 6
-                    height: 6
-                    radius: 3
-                    color: bar.workflow.smartStateColor
+                Image {
+                    Layout.preferredWidth: 19
+                    Layout.preferredHeight: 19
+                    source: Qt.resolvedUrl("../assets/material/electric_bolt.svg")
+                    sourceSize.width: 24
+                    sourceSize.height: 24
+                    opacity: parent.parent.physicalRunning ? 1.0 : 0.48
+                    layer.enabled: true
+                    layer.effect: null
                 }
-
                 Label {
                     Layout.fillWidth: true
-                    text: bar.conciseState()
-                    color: bar.workflow.smartStateColor
+                    text: bar.device.deviceVerified
+                        ? (bar.device.running ? "RUN" : "STOP") : "OFF"
+                    color: parent.parent.runColor
                     font.family: bar.uiFont
-                    font.pixelSize: 9
-                    font.weight: Font.DemiBold
+                    font.pixelSize: 11
+                    font.weight: Font.Bold
                     elide: Text.ElideRight
                     verticalAlignment: Text.AlignVCenter
                 }
