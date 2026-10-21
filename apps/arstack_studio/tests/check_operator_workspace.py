@@ -496,6 +496,11 @@ def main() -> None:
             and "kStartReadyPolls = 350U" in ptp_firmware
             and "source_reason=ETHERNET_LINK_DOWN" in ptp_studio
             and "source_reason=ETHERNET_TX_INVALID_STATE" in ptp_studio
+            and "kPtpEthernetExpression" in ptp_studio
+            and "ptpEthernetLink" in source("PtpExpertPanel.qml")
+            and "ptpEthernetDriver" in source("PtpExpertPanel.qml")
+            and "PTP PHY link (board ETH_EVENT)" in
+                (STUDIO / "src/SmartSessionController.cpp").read_text(encoding="utf-8")
             and "ptpPhysicalEthernetPreflightAndMacFailure()" in
                 (STUDIO / "src/DeterministicSessionHarness.cpp").read_text(encoding="utf-8"),
             "PTP SOURCE must prove ETH driver and PHY before TX, classify MAC INVALID_STATE, "
