@@ -823,6 +823,7 @@ bool DeviceController::startWithScenario(const QVariantMap& scenario) {
     return true;
 }
 bool DeviceController::stop() {
+    operatorStopPending_ = true;
     appendLog(QStringLiteral("SVTX"), QStringLiteral(
         "OPERATOR_STOP_REQUEST session=%1 boot=%2 running=%3 cfg_pending=%4")
         .arg(sessionGeneration_).arg(identity_.bootId)
@@ -1751,6 +1752,12 @@ void DeviceController::failScenarioStart(const QString& message) {
 
 void DeviceController::setRunning(const bool value) {
     if (running_ == value) return;
+    if (!value && running_ && !operatorStopPending_ && svStopReason_.isEmpty()) {
+        // Do not silently turn a physical STOP into a green READY state.
+        // SHOW/SVLIFE will replace this interim state with the board cause.
+        svStopReason_ = QStringLiteral("AWAITING_BOARD_CAUSE");
+        emit svStopReasonChanged();
+    }
     running_ = value;
     emit runningChanged();
 }
@@ -1918,6 +1925,11 @@ void DeviceController::processLine(const QString& rawLine) {
                 failScenarioStart(QStringLiteral("Unexpected SV START ACK identity/hash."));
             return;
         }
+        operatorStopPending_ = false;
+        if (!svStopReason_.isEmpty()) {
+            svStopReason_.clear();
+            emit svStopReasonChanged();
+        }
         // Publish verified RUNNING before clearing the pending START phase.
         // Otherwise QML can briefly see neither RUNNING nor STARTING and
         // bounce the button back to START during a successful ACK handoff.
@@ -1943,6 +1955,11 @@ void DeviceController::processLine(const QString& rawLine) {
             .arg(forced ? QStringLiteral("RUNTIME_FAIL_SAFE_STOP_OBSERVED")
                         : QStringLiteral("STOP_ACK_OBSERVED"))
             .arg(sessionGeneration_).arg(identity_.bootId).arg(running_ ? 1 : 0));
+        if (forced && svStopReason_ != QStringLiteral("RUNTIME_FAULT")) {
+            svStopReason_ = QStringLiteral("RUNTIME_FAULT");
+            emit svStopReasonChanged();
+        }
+        operatorStopPending_ = false;
         setRunning(false);
     }
     if (line.contains(QStringLiteral("Control session lease expired"), Qt::CaseInsensitive) ||
@@ -1953,6 +1970,36 @@ void DeviceController::processLine(const QString& rawLine) {
         appendLog(QStringLiteral("SVTX"), QStringLiteral(
             "FIRMWARE_STOP_CAUSE session=%1 boot=%2 detail=%3")
             .arg(sessionGeneration_).arg(identity_.bootId).arg(line));
+        const QString reason = line.contains(QStringLiteral("Control session lease expired"), Qt::CaseInsensitive)
+            ? QStringLiteral("LEASE_EXPIRED") : QStringLiteral("RUNTIME_FAULT");
+        if (svStopReason_ != reason) {
+            svStopReason_ = reason;
+            emit svStopReasonChanged();
+        }
+    }
+
+    // Board-owned latched event survives the small console log window and
+    // is returned with SHOW even after the operator has restarted SV.
+    static const QRegularExpression kSvLife(
+        QStringLiteral("SVLIFE state=(RUNNING|STOPPED) stop_cause=([A-Z_]+) stop_seq=(\\d+)"));
+    const auto svLife = kSvLife.match(line);
+    if (svLife.hasMatch()) {
+        bool seqOk = false;
+        const auto seq = svLife.captured(3).toULongLong(&seqOk);
+        if (seqOk && (seq >= lastSvStopSeq_ || !deviceVerified_)) {
+            lastSvStopSeq_ = seq;
+            const QString lastReason = svLife.captured(2);
+            const bool boardStopped = svLife.captured(1) == QStringLiteral("STOPPED");
+            const QString effective = boardStopped && lastReason != QStringLiteral("OPERATOR_STOP") &&
+                lastReason != QStringLiteral("NONE") ? lastReason : QString{};
+            if (svStopReason_ != effective) {
+                svStopReason_ = effective;
+                appendLog(QStringLiteral("SVTX"), QStringLiteral(
+                    "BOARD_STOP_READBACK session=%1 boot=%2 cause=%3 seq=%4")
+                    .arg(sessionGeneration_).arg(identity_.bootId).arg(lastReason).arg(seq));
+                emit svStopReasonChanged();
+            }
+        }
     }
 
     auto match = kStateExpression.match(line);
@@ -2146,6 +2193,12 @@ void DeviceController::processLine(const QString& rawLine) {
 }
 
 void DeviceController::resetTelemetry() {
+    operatorStopPending_ = false;
+    lastSvStopSeq_ = 0;
+    if (!svStopReason_.isEmpty()) {
+        svStopReason_.clear();
+        emit svStopReasonChanged();
+    }
     fps_ = QStringLiteral("—");
     missed_ = QStringLiteral("—");
     txFailures_ = QStringLiteral("—");
