@@ -87,12 +87,18 @@ struct UiBounds {
             return false;
         }
     }
+    // Real Windows evidence must contain both actual plots. Checking only
+    // the left table let a 100%-empty right workspace pass every DPI gate.
+    // Report visible state + bounds to distinguish hidden from zero-size docks.
     if (surface.area.width() > 470 ||
-        (phasor.visible && waveform.visible &&
-            (phasor.area.height() < 170 || waveform.area.height() < 170 ||
-             std::abs(phasor.area.height() - waveform.area.height()) > 24))) {
+        !phasor.visible || !waveform.visible ||
+        phasor.area.width() < 180 || waveform.area.width() < 180 ||
+        phasor.area.height() < 170 || waveform.area.height() < 170 ||
+        std::abs(phasor.area.height() - waveform.area.height()) > 24) {
         qCritical().noquote() << "Studio split width/chart balance violation" << size
-                              << surface.area << phasor.area << waveform.area;
+                              << "surface=" << surface.area
+                              << "phasor-visible=" << phasor.visible << "phasor=" << phasor.area
+                              << "wave-visible=" << waveform.visible << "wave=" << waveform.area;
         return false;
     }
     // Operator layout: voltage above current. Validate the new actual
