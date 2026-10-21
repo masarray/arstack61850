@@ -64,6 +64,7 @@ public:
             {"SV STOP remains responsive with full command queue", svPriorityStopBypassesFullQueue()},
             {"control lease heartbeat coalesces outside saturated exclusive queue", heartbeatKeepsBoundedSafetySlotUnderExclusiveLoad()},
             {"board fail-safe STOP is not mislabelled as operator STOP ACK", forcedFirmwareStopRetainsCauseAndIsNotOperatorAck()},
+            {"latched board STOP cause overrides READY and survives console truncation", boardStopCausePersistsUntilVerifiedRestart()},
             {"PTP STOP requires firmware ACK and stopped readback", ptpStopConfirmationCannotBeGuessed()},
             {"PTP STOP timeout blocks restart pending manual recovery", ptpUnverifiedStopBlocksRestart()},
             {"App teardown must stop PTP without SV output", ptpOnlyShutdownIntent()},
@@ -978,6 +979,38 @@ private:
                                worker.svStopPending_;
         worker.queuePrioritySvStop();
         return cancelled && worker.svStopPending_ && worker.commandQueue_.isEmpty();
+    }
+
+    static bool boardStopCausePersistsUntilVerifiedRestart() {
+        Fixture f;
+        auto& d = f.device;
+        d.setRunning(true);
+        d.processLine(QStringLiteral(
+            "I ar_smv_ctrl: state=STOPPED generation=3 signal_frequency=50000 mHz"));
+        if (d.running() || d.svStopReason_ != QStringLiteral("AWAITING_BOARD_CAUSE"))
+            return false;
+        d.processLine(QStringLiteral(
+            "I ar_smv_ctrl: SVLIFE state=STOPPED stop_cause=LEASE_EXPIRED "
+            "stop_seq=1 stop_uptime_ms=33000 stop_hb_age_ms=2500 "
+            "hb_age_ms=2600 hb_seen=1 lease_ms=2500 watchdog=1"));
+        if (d.svStopReason_ != QStringLiteral("LEASE_EXPIRED") ||
+            !d.logText_.contains(QStringLiteral("BOARD_STOP_READBACK")))
+            return false;
+        // Repeated polling of the same event must be idempotent.
+        d.processLine(QStringLiteral(
+            "SVLIFE state=STOPPED stop_cause=LEASE_EXPIRED stop_seq=1"));
+        if (d.svStopReason_ != QStringLiteral("LEASE_EXPIRED"))
+            return false;
+        // An already restarted board can still return its last-stop history.
+        d.processLine(QStringLiteral(
+            "SVLIFE state=RUNNING stop_cause=LEASE_EXPIRED stop_seq=1"));
+        if (!d.svStopReason_.isEmpty()) return false;
+        // Operator STOP must never be reported as spontaneous lease loss.
+        d.setRunning(true);
+        d.operatorStopPending_ = true;
+        d.processLine(QStringLiteral(
+            "SVLIFE state=STOPPED stop_cause=OPERATOR_STOP stop_seq=2"));
+        return d.svStopReason_.isEmpty();
     }
 
     static bool forcedFirmwareStopRetainsCauseAndIsNotOperatorAck() {
