@@ -1320,6 +1320,7 @@ ApplicationWindow {
                     }
 
                     DockFrame {
+                        objectName: "studioPhasorDock"
                         visible: root.phasorDockVisible && !root.phasorDetached
                         SplitView.fillWidth: true
                         SplitView.minimumHeight: 170
@@ -1359,6 +1360,7 @@ ApplicationWindow {
                     }
 
                     DockFrame {
+                        objectName: "studioWaveformDock"
                         visible: root.waveformDockVisible && !root.waveformDetached
                         SplitView.fillWidth: true
                         SplitView.minimumHeight: 170
