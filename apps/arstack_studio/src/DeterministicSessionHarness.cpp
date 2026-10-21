@@ -611,9 +611,17 @@ private:
         session.setPresentation(QStringLiteral("PREPARING 4I+4V"),
                                 QStringLiteral("Preparing"), false, false);
         const QVariantMap draft = validStartDraft();
-        if (!session.requestStartWithScenario(draft) || !session.startIntentPending() ||
-            device.scenarioApplying() || session.requestStartWithScenario(draft))
+        const bool accepted = session.requestStartWithScenario(draft);
+        if (!accepted || !session.startIntentPending() ||
+            device.scenarioApplying() || session.requestStartWithScenario(draft)) {
+            qWarning().noquote() << "P0 first-click QUEUE failed"
+                << "accepted" << accepted
+                << "pending" << session.startIntentPending()
+                << "state" << session.state()
+                << "generation" << session.sessionGeneration()
+                << "boot" << device.bootId();
             return false;
+        }
         // A verified profile ACK can satisfy exactly this operator's pending
         // click; the C++ coordinator still enforces the CFG/COMMIT/START chain.
         session.profileSyncStage_ = SmartSessionController::ProfileSyncStage::idle;
@@ -622,7 +630,14 @@ private:
         device.profileArmed_ = true;
         session.setPresentation(QStringLiteral("READY"), QStringLiteral("Ready"), true, false);
         session.submitPendingStart();  // deterministic equivalent of posted dispatch
-        if (session.startIntentPending() || !device.scenarioApplying()) return false;
+        if (session.startIntentPending() || !device.scenarioApplying()) {
+            qWarning().noquote() << "P0 first-click DISPATCH failed"
+                << "pending" << session.startIntentPending()
+                << "applying" << device.scenarioApplying()
+                << "state" << session.state()
+                << "board error" << device.lastError_;
+            return false;
+        }
         session.submitPendingStart();  // duplicate READY cannot enqueue twice
         return device.scenarioApplying();
     }
