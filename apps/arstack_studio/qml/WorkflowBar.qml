@@ -17,7 +17,9 @@ SurfacePanel {
     property bool compact: false
     // Firmware transaction is the single source of truth. UI timers and
     // unrelated PTP/serial errors must not bounce the injection START button.
-    readonly property bool startQueued: Boolean(ribbon.device && ribbon.device.scenarioApplying)
+    readonly property bool startQueued: Boolean(
+        (ribbon.device && ribbon.device.scenarioApplying) ||
+        (smartSession && smartSession.startIntentPending))
     Connections {
         target: ribbon.device
         function onRunningChanged() {
@@ -270,10 +272,12 @@ SurfacePanel {
                 controller.showMessage(smartSession.statusText, true)
             return
         }
-        if (!smartSession.startReady) {
-            // One click must explain why a physical START is not queued.
-            // Never make the operator click twice to discover readiness.
-            controller.showMessage("START waiting: " + ribbon.startReason(), true)
+        const preparation = smartSession.state === "PREPARING 4I+4V" ||
+            smartSession.state === "RECOVERING PROFILE"
+        if (!smartSession.startReady && !preparation) {
+            // A non-verified or unsafe START never turns into a speculative
+            // auto-start after device reconnect or identity replacement.
+            controller.showMessage("START unavailable: " + ribbon.startReason(), true)
             return
         }
         // A START always transmits the current 4I+4V table snapshot.
@@ -287,6 +291,13 @@ SurfacePanel {
         if (!accepted) {
             controller.pendingApply = true
             controller.showMessage("Start rejected. Check device status.", true)
+        }
+    }
+
+    Connections {
+        target: smartSession
+        function onStartIntentNotice(message, error) {
+            controller.showMessage(message, error)
         }
     }
 
