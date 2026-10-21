@@ -1073,6 +1073,16 @@ ApplicationWindow {
                     SplitView.maximumWidth: 535
                     theme: studioTheme
 
+                    // Click on unoccupied injection panel space commits the
+                    // currently focused table editor through editingFinished.
+                    // Child input controls remain above this passive surface.
+                    MouseArea {
+                        anchors.fill: parent
+                        z: 0
+                        acceptedButtons: Qt.LeftButton
+                        onClicked: root.forceActiveFocus()
+                    }
+
                     ColumnLayout {
                         anchors.fill: parent
                         anchors.margins: root.compactLayout ? 11 : 13
