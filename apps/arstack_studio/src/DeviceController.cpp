@@ -1520,7 +1520,9 @@ void DeviceController::advancePtpStartup(const QString& line) {
     }
     if (ptpStartStage_ == PtpStartStage::awaiting_stop_readback) {
         const auto readback = kPtpStatusExpression.match(line);
-        if (!readback.hasMatch()) return;
+        // A queued pre-STOP SHOW can arrive while post-STOP readback is
+        // still deferred. It cannot verify the requested STOP.
+        if (!readback.hasMatch() || deferredPtpShow_) return;
         if (readback.captured(1).compare(QStringLiteral("STOPPED"), Qt::CaseInsensitive) == 0) {
             resetPtpStartup();
             ptpRunning_ = false;
@@ -2195,13 +2197,22 @@ void DeviceController::processLine(const QString& rawLine) {
     match = kPtpStatusExpression.match(line);
     if (match.hasMatch()) {
         ptpAvailable_ = true;
-        ptpRunning_ = match.captured(1).compare(QStringLiteral("RUNNING"), Qt::CaseInsensitive) == 0;
+        const bool verifyingStop = ptpStartStage_ == PtpStartStage::awaiting_stop_ack ||
+            ptpStartStage_ == PtpStartStage::awaiting_stop_readback;
+        // A pending STOP is not STOPPED. Ignore unsolicited/stale SHOW state
+        // while waiting for the fresh post-STOP verification request. The
+        // stop state machine below is the only writer of verified STOPPED.
+        if (!verifyingStop) {
+            ptpRunning_ = match.captured(1).compare(
+                QStringLiteral("RUNNING"), Qt::CaseInsensitive) == 0;
+            ptpStatus_ = ptpRunning_ ? QStringLiteral("Lab TX active") :
+                QStringLiteral("Lab TX stopped");
+        }
         ptpAnnounceSent_ = match.captured(2);
         ptpSyncSent_ = match.captured(3);
         ptpFollowUpSent_ = match.captured(4);
         ptpPdelayFrames_ = match.captured(5);
         ptpTxFailures_ = match.captured(6);
-        ptpStatus_ = ptpRunning_ ? QStringLiteral("Lab TX active") : QStringLiteral("Lab TX stopped");
         emit ptpStateChanged();
     }
 
