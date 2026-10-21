@@ -313,10 +313,15 @@ Rectangle {
                             var value = matrix.controller.parseOperatorNumber(text)
                             if (matrix.controller.validMagnitude(matrix.groupIndex, value)) {
                                 invalidInput = false
+                                // Validate immediately, commit atomically only
+                                // at Enter, Tab or focus-out. No 90ms race
+                                // sends half-entered numeric values to board.
                                 signalRow.pendingMagnitude = value
-                                magnitudeApplyTimer.restart()
                             } else invalidInput = true
                         }
+                        // Qt Quick editingFinished fires on Return AND loss of
+                        // active focus (Tab, other field, empty workbench click).
+                        // Both decimal separators are parsed by controller.
                         onEditingFinished: {
                             var value = matrix.controller.parseOperatorNumber(text)
                             if (!matrix.controller.validMagnitude(matrix.groupIndex, value)) {
@@ -377,9 +382,11 @@ Rectangle {
                             if (matrix.controller.validPhase(value)) {
                                 invalidInput = false
                                 signalRow.pendingPhase = value
-                                phaseApplyTimer.restart()
                             } else invalidInput = true
                         }
+                        // Qt Quick editingFinished fires on Return AND loss of
+                        // active focus (Tab, other field, empty workbench click).
+                        // Both decimal separators are parsed by controller.
                         onEditingFinished: {
                             var value = matrix.controller.parseOperatorNumber(text)
                             if (!matrix.controller.validPhase(value)) {
