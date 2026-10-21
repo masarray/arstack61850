@@ -241,13 +241,13 @@ Rectangle {
                 Image {
                     Layout.preferredWidth: 19
                     Layout.preferredHeight: 19
-                    source: Qt.resolvedUrl("../assets/material/electric_bolt.svg")
+                    source: Qt.resolvedUrl(parent.parent.physicalRunning
+                        ? "../assets/material/electric_bolt_run.svg"
+                        : "../assets/material/electric_bolt_stop.svg")
                     sourceSize.width: 24
                     sourceSize.height: 24
                     opacity: parent.parent.physicalRunning ? 1.0 : 0.48
-                    layer.enabled: true
-                    layer.effect: null
-                }
+                 }
                 Label {
                     Layout.fillWidth: true
                     text: bar.device.deviceVerified
