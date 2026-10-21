@@ -144,9 +144,17 @@ DeviceController::DeviceController(QObject* parent) : QObject(parent) {
     connect(&ptpStopPollTimer_, &QTimer::timeout, this, [this] {
         if (ptpStartStage_ == PtpStartStage::awaiting_stop_readback &&
             !sendPtpShow()) {
-            markPtpStopUnconfirmed(QStringLiteral("Could not verify board PTP STOP status."));
+            markPtpStopUnconfirmed(QStringLiteral(
+                "PTP STOP could not be verified from the board. Check USB connection / Copy diagnostics."));
         }
     });
+    // Retry a coalesced readback once after transport authority is released.
+    const auto drainDeferred = [this] {
+        if (deferredShow_ || deferredProfileShow_ || deferredPtpShow_)
+            QTimer::singleShot(0, this, [this] { flushDeferredReadbacks(); });
+    };
+    connect(this, &DeviceController::profileStateChanged, this, drainDeferred);
+    connect(this, &DeviceController::scenarioStateChanged, this, drainDeferred);
     ioWorker_ = new DeviceIoWorker;
     ioWorker_->moveToThread(&ioThread_);
     ioThread_.setObjectName(QStringLiteral("ARStackDeviceIo"));
@@ -659,6 +667,9 @@ void DeviceController::handlePortOpened(const QString& portName, const bool auto
     profileArmed_ = false;
     profileWasReused_ = false;
     profileDeploying_ = false;
+    deferredShow_ = false;
+    deferredProfileShow_ = false;
+    deferredPtpShow_ = false;
     resetBinaryProfileTransfer();
     resetScenarioStart();
     resetPtpState();
@@ -687,6 +698,9 @@ void DeviceController::handlePortClosed(const QString& portName) {
     profileDeploying_ = false;
     profileArmed_ = false;
     profileWasReused_ = false;
+    deferredShow_ = false;
+    deferredProfileShow_ = false;
+    deferredPtpShow_ = false;
     resetBinaryProfileTransfer();
     deviceVerified_ = false;
     clearIdentity();
@@ -1370,7 +1384,9 @@ bool DeviceController::beginPtpStopVerification() {
         markPtpStopUnconfirmed(QStringLiteral("Could not queue safety PTP STOP."));
         return false;
     }
-    ptpStartTimer_.start(5000);
+    // Absolute STOP readback deadline; STOP itself uses the worker safety lane.
+    ptpStartTimer_.start(profileDeploying_ || scenarioStage_ != ScenarioStage::idle
+        ? 12000 : 5000);
     return true;
 }
 
@@ -1493,10 +1509,12 @@ void DeviceController::advancePtpStartup(const QString& line) {
             ptpStatus_ = QStringLiteral("Checking that board PTP is stopped...");
             emit ptpStateChanged();
             if (!sendPtpShow()) {
-                markPtpStopUnconfirmed(QStringLiteral("Could not request PTP STOP readback."));
+                markPtpStopUnconfirmed(QStringLiteral(
+                    "PTP STOP readback could not be queued. Check USB connection / Copy diagnostics."));
                 return;
             }
-            ptpStartTimer_.start(5000);
+            // Preserve the absolute deadline from STOP dispatch; do not
+            // restart it on ACK while another transaction owns the console.
         }
         return;
     }
@@ -1684,6 +1702,21 @@ bool DeviceController::sendQuietCommand(const QString& command) {
 }
 
 bool DeviceController::sendCommandBatch(const QStringList& commands, const bool quiet, const bool exclusive) {
+    const bool single = !exclusive && commands.size() == 1;
+    const QString onlyCommand = single ? commands.constFirst() : QString{};
+    const bool readback = onlyCommand == QStringLiteral("SHOW") ||
+        onlyCommand == QStringLiteral("PROFILE SHOW") ||
+        onlyCommand == QStringLiteral("PTP SHOW");
+    const auto deferReadback = [this, &onlyCommand] {
+        bool* pending = onlyCommand == QStringLiteral("SHOW") ? &deferredShow_ :
+            onlyCommand == QStringLiteral("PROFILE SHOW") ? &deferredProfileShow_ : &deferredPtpShow_;
+        if (!*pending) {
+            *pending = true;
+            appendLog(QStringLiteral("·"),
+                QStringLiteral("Coalesced %1 until exclusive serial authority is released.").arg(onlyCommand));
+        }
+        return true;
+    };
     if (profileDeploying_) {
         const bool exactlyOne = !exclusive && commands.size() == 1;
         const QString command = exactlyOne ? commands.constFirst() : QString{};
@@ -1694,9 +1727,8 @@ bool DeviceController::sendCommandBatch(const QStringList& commands, const bool 
         const bool safety = command == QStringLiteral("STOP") ||
             command == QStringLiteral("PTP STOP");
         if (!exactlyOne || (!protocolReply && !safety)) {
-            setError(QStringLiteral(
-                "Canonical binary profile transaction owns the device console; "
-                "concurrent polling and live mutations were deferred/rejected."));
+            if (readback) return deferReadback();
+            setError(QStringLiteral("Device profile is being prepared; wait before changing live setpoints."));
             return false;
         }
     }
@@ -1707,11 +1739,11 @@ bool DeviceController::sendCommandBatch(const QStringList& commands, const bool 
             (commands.constFirst() == QStringLiteral("STOP") ||
              commands.constFirst() == QStringLiteral("PTP STOP") ||
              commands.constFirst() == QStringLiteral("HEARTBEAT") ||
-             commands.constFirst() == QStringLiteral("SHOW") ||
              commands.constFirst().startsWith(QStringLiteral("CFG SHOW ")) ||
              commands.constFirst().startsWith(QStringLiteral("START ")));
         if (!stagingBatch && !safeCommand) {
-            setError(QStringLiteral("SV transaction pending: concurrent configuration rejected."));
+            if (readback) return deferReadback();
+            setError(QStringLiteral("SV configuration is being verified; wait before changing live setpoints."));
             return false;
         }
     }
@@ -1729,6 +1761,24 @@ bool DeviceController::sendCommandBatch(const QStringList& commands, const bool 
         Qt::QueuedConnection);
     if (!queued) setError(QStringLiteral("Device queue dispatcher unavailable."));
     return queued;
+}
+
+void DeviceController::flushDeferredReadbacks() {
+    if (profileDeploying_ || binaryProfileStage_ != BinaryProfileStage::idle ||
+        scenarioStage_ != ScenarioStage::idle ||
+        !connected_ || !ioWorkerReady_ || ioWorker_ == nullptr || sessionGeneration_ == 0)
+        return;
+    // At most one of each telemetry/readback type. No competing serial writer.
+    if (std::exchange(deferredPtpShow_, false)) {
+        if (!sendQuietCommand(QStringLiteral("PTP SHOW")) &&
+            ptpStartStage_ == PtpStartStage::awaiting_stop_readback)
+            markPtpStopUnconfirmed(QStringLiteral(
+                "PTP STOP readback could not be sent. Check USB connection / Copy diagnostics."));
+    }
+    if (std::exchange(deferredShow_, false))
+        static_cast<void>(sendQuietCommand(QStringLiteral("SHOW")));
+    if (std::exchange(deferredProfileShow_, false))
+        static_cast<void>(sendQuietCommand(QStringLiteral("PROFILE SHOW")));
 }
 
 void DeviceController::setSessionHeartbeatEnabled(const bool enabled) {
