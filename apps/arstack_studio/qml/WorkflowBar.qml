@@ -65,11 +65,12 @@ SurfacePanel {
             cancelStartIntent()
             return
         }
+        const requestedBoot = startIntentBoot
         cancelStartIntent()
         Qt.callLater(function() {
-            // Verify the device again AFTER scheduling, never replay a stale
-            // intent across a new session, and snapshot the actual GUI now.
-            if (device.deviceVerified && device.connected && smartSession.startReady &&
+            // Prevent a reconnect between readiness notification and dispatch.
+            if (device.deviceVerified && device.connected &&
+                String(device.bootId) === requestedBoot && smartSession.startReady &&
                 !device.running && !device.scenarioApplying)
                 ribbon.requestStart()
         })
