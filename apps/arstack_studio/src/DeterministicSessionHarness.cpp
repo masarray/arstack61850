@@ -80,7 +80,8 @@ public:
             {"same COM firmware reboot invalidates old START and profile authority", samePortFirmwareRebootResetsAuthority()},
             {"corrupt console PROFILE command reports cause and blocks START", malformedProfileLineFailsClosed()},
             {"PTP polling suspended while binary PROFILE stage owns serial", ptpRefreshBlockedDuringProfileSync()},
-            {"binary PROFILE excludes PTP/SHOW/SET and buffers live setpoints", binaryProfileReservesSerialConsole()},
+            {"binary PROFILE coalesces PTP/SHOW without internal toast", binaryProfileReservesSerialConsole()},
+            {"PTP STOP during exclusive CFG/BIN defers proof, never invents OFF", ptpStopReadbackDeferredDuringExclusive()},
             {"UART paced but STOP remains reserved queue preemption", serialPacingDoesNotRemoveSafetySlot()},
             {"binary progress -> per-step deadline rearmed", binaryProfileProgressRearmsDeadline()},
             {"READY unplug/replug COM renumber -> READY stopped", readyReplugRecoversWithoutStart()},
@@ -1543,15 +1544,53 @@ private:
         d.profileDeploying_ = true;
         d.profileArmed_ = false;
         d.binaryProfileStage_ = DeviceController::BinaryProfileStage::waiting_chunk;
-        const bool ptpBlocked = !d.sendPtpShow();
-        const bool showBlocked = !d.sendShow();
+        const QString initialError = d.lastError_;
+        const bool ptpDeferred = d.sendPtpShow();
+        const bool showDeferred = d.sendShow();
+        const bool coalesced = d.sendPtpShow() && d.sendShow() &&
+            d.deferredPtpShow_ && d.deferredShow_ &&
+            d.lastError_ == initialError;
         const bool setBlocked = !d.setEnabled(QStringLiteral("IA"), true);
         d.frequencyPending_ = true;
         d.pendingFrequencyHz_ = 60.0;
-        const bool deferred = d.flushLiveCommands() && d.frequencyPending_;
+        const bool deferredMutation = d.flushLiveCommands() && d.frequencyPending_;
         d.liveFlushTimer_.stop();
-        return ptpBlocked && showBlocked && setBlocked && deferred &&
-            d.lastError_.contains(QStringLiteral("owns the device console"));
+        // Busy telemetry is normal, but an unsafe mutation remains rejected.
+        return ptpDeferred && showDeferred && coalesced && setBlocked &&
+            deferredMutation && d.lastError_.contains(QStringLiteral("being prepared")) &&
+            !d.lastError_.contains(QStringLiteral("owns the device console"));
+    }
+
+    static bool ptpStopReadbackDeferredDuringExclusive() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
+        auto& d = fixture.device;
+        d.ptpAvailable_ = true;
+        d.ptpRunning_ = true;
+        d.ioWorkerReady_ = true;
+        d.profileDeploying_ = true;
+        d.binaryProfileStage_ = DeviceController::BinaryProfileStage::waiting_chunk;
+        const QString previousError = d.lastError_;
+        if (!d.stopPtp() ||
+            d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_ack)
+            return false;
+        d.processLine(QStringLiteral("PTP stop requested"));
+        if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_readback ||
+            !d.deferredPtpShow_ || !d.ptpRunning_ || d.lastError_ != previousError)
+            return false;
+        // When the lock is released, exactly one readback is submitted to
+        // the existing serial owner; no readback is accepted as STOP proof.
+        d.profileDeploying_ = false;
+        d.resetBinaryProfileTransfer();
+        d.flushDeferredReadbacks();
+        if (d.deferredPtpShow_ || !d.ptpRunning_ ||
+            d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_readback)
+            return false;
+        d.markPtpStopUnconfirmed(QStringLiteral("Injected STOP timeout: Copy diagnostics."));
+        return d.ptpRunning_ &&
+            d.ptpStartStage_ == DeviceController::PtpStartStage::stop_unconfirmed &&
+            d.lastError_.contains(QStringLiteral("Copy diagnostics."));
     }
 
     static bool serialPacingDoesNotRemoveSafetySlot() {
