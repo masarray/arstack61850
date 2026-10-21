@@ -62,6 +62,7 @@ public:
             {"ABC live SET encoder remains consistent and bounded", abcSetpointBatchContract()},
             {"PTP STOP full queue uses bounded priority slot", ptpSafetyStopBypassesFullQueue()},
             {"SV STOP remains responsive with full command queue", svPriorityStopBypassesFullQueue()},
+            {"control lease heartbeat coalesces outside saturated exclusive queue", heartbeatKeepsBoundedSafetySlotUnderExclusiveLoad()},
             {"PTP STOP requires firmware ACK and stopped readback", ptpStopConfirmationCannotBeGuessed()},
             {"PTP STOP timeout blocks restart pending manual recovery", ptpUnverifiedStopBlocksRestart()},
             {"App teardown must stop PTP without SV output", ptpOnlyShutdownIntent()},
@@ -976,6 +977,30 @@ private:
                                worker.svStopPending_;
         worker.queuePrioritySvStop();
         return cancelled && worker.svStopPending_ && worker.commandQueue_.isEmpty();
+    }
+
+    static bool heartbeatKeepsBoundedSafetySlotUnderExclusiveLoad() {
+        DeviceIoWorker worker;
+        // Normal 64-command FIFO is saturated by an exclusive CFG batch.
+        // A 700ms lease heartbeat must remain deliverable without growing
+        // this FIFO; safety STOP must still own the highest priority.
+        for (int i = 0; i < DeviceIoWorker::commandQueueCapacity(); ++i) {
+            worker.commandQueue_.enqueue(DeviceIoWorker::PendingCommand{
+                QStringLiteral("CFG SET IA 1000 0 0"),
+                QByteArrayLiteral("CFG SET IA 1000 0 0\n"), false, true});
+        }
+        worker.exclusiveCommandsRemaining_ = DeviceIoWorker::commandQueueCapacity();
+        worker.queuePriorityHeartbeat(); // isolated, no live COM needed
+        worker.queuePriorityHeartbeat(); // repeated keepalive coalesces
+        if (!worker.heartbeatPending_ ||
+            worker.commandQueue_.size() != DeviceIoWorker::commandQueueCapacity())
+            return false;
+        worker.queuePrioritySvStop();
+        if (!worker.svStopPending_ || !worker.heartbeatPending_ ||
+            !worker.commandQueue_.isEmpty())
+            return false; // STOP does not wait behind keepalive
+        worker.heartbeatPending_ = false; // explicit session deactivation
+        return !worker.heartbeatPending_ && worker.svStopPending_;
     }
 
     static bool ptpSafetyStopBypassesFullQueue() {
