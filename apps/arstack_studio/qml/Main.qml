@@ -1064,7 +1064,6 @@ ApplicationWindow {
 
                 SurfacePanel {
                     objectName: "studioInjectionSurface"
-                    SplitView.fillWidth: true
                     SplitView.fillHeight: true
                     SplitView.minimumWidth: 370
                     SplitView.preferredWidth: 425
@@ -1324,8 +1323,8 @@ ApplicationWindow {
                         visible: root.phasorDockVisible && !root.phasorDetached
                         SplitView.fillWidth: true
                         SplitView.minimumHeight: 170
-                        SplitView.preferredHeight: 285
-                        SplitView.fillHeight: true
+                        SplitView.preferredHeight: Math.max(170, (workspaceSplit.height - 9) / 2)
+                        SplitView.fillHeight: false
                         theme: studioTheme
                         titleText: "Phasor"
                         statusText: ""
@@ -1363,7 +1362,7 @@ ApplicationWindow {
                         visible: root.waveformDockVisible && !root.waveformDetached
                         SplitView.fillWidth: true
                         SplitView.minimumHeight: 170
-                        SplitView.preferredHeight: 285
+                        SplitView.preferredHeight: Math.max(170, (workspaceSplit.height - 9) / 2)
                         SplitView.fillHeight: true
                         theme: studioTheme
                         titleText: "Waveform"
