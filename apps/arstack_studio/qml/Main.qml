@@ -1065,7 +1065,7 @@ ApplicationWindow {
                 SurfacePanel {
                     objectName: "studioInjectionSurface"
                     SplitView.fillHeight: true
-                    SplitView.minimumWidth: 370
+                    SplitView.minimumWidth: 405
                     SplitView.preferredWidth: 425
                     SplitView.maximumWidth: 465
                     SplitView.fillWidth: false
@@ -1081,14 +1081,17 @@ ApplicationWindow {
                     ColumnLayout {
                         z: 1
                         anchors.fill: parent
-                        anchors.margins: root.compactLayout ? 11 : 13
-                        spacing: root.compactLayout ? 6 : 8
+                        // Injection width stays 405..465px at every desktop size.
+                        // Never expand its children just because the whole window
+                        // crosses the 1220px toolbar breakpoint.
+                        anchors.margins: 10
+                        spacing: 6
 
                         RowLayout {
                             Layout.fillWidth: true
                             ColumnLayout {
                                 spacing: 1
-                                Label { text: "4I + 4V Injection"; color: studioTheme.text; font.family: root.uiFont; font.pixelSize: root.compactLayout ? 17 : 18; font.weight: Font.DemiBold }
+                                Label { text: "4I + 4V Injection"; color: studioTheme.text; font.family: root.uiFont; font.pixelSize: 17; font.weight: Font.DemiBold }
                             }
                             Item { Layout.fillWidth: true }
                             // START owns the single ordered scenario transaction.
@@ -1149,7 +1152,7 @@ ApplicationWindow {
                                     }
                                     theme: studioTheme
                                     monoFont: root.monoFont
-                                    compact: root.compactLayout
+                                    compact: true
                                     implicitWidth: 90
                                     text: "50.000"
                                     suffixText: "Hz"
@@ -1226,7 +1229,7 @@ ApplicationWindow {
                                 titleText: "Voltage"
                                 symbolText: "U"
                                 unitText: root.signalFrequency === 0 ? "V DC" : "V RMS"
-                                compact: root.compactLayout
+                                compact: true
                             }
                             SignalMatrix {
                                 id: currentMatrix
@@ -1247,7 +1250,7 @@ ApplicationWindow {
                                 titleText: "Current"
                                 symbolText: "I"
                                 unitText: root.signalFrequency === 0 ? "A DC" : "A RMS"
-                                compact: root.compactLayout
+                                compact: true
                             }
 
                         }
@@ -1263,23 +1266,18 @@ ApplicationWindow {
                             session: workflowBar.session
                             uiFont: root.uiFont
                             monoFont: root.monoFont
-                            compact: root.compactLayout
+                            compact: true
                         }
                         Rectangle { Layout.fillWidth: true; height: 1; color: studioTheme.lineSoft }
                         RowLayout {
                             objectName: "studioQualityRow"
                             Layout.fillWidth: true
-                            spacing: 8
+                            spacing: 6
                             Rectangle { width: 6; height: 6; radius: 3; color: studioTheme.accent }
                             Label { text: root.activeSignal; color: studioTheme.textSoft; font.family: root.monoFont; font.pixelSize: studioTheme.labelSize; font.weight: Font.Bold }
-                            Label {
-                                text: root.signalFrequency === 0
-                                    ? root.activeMagnitude.toFixed(3) + " " + root.activeUnit + " DC"
-                                    : root.activeMagnitude.toFixed(3) + " " + root.activeUnit + " RMS · " + root.activePhase.toFixed(2) + "°"
-                                color: studioTheme.muted
-                                font.family: root.uiFont
-                                font.pixelSize: 9
-                            }
+                            // The same magnitude/phase is already visible in
+                            // the active matrix row and plots. Removing this
+                            // duplicate avoids squeezing the quality controls.
                             Rectangle { width: 1; height: 20; color: studioTheme.lineSoft }
                             QualityEditor {
                                 enabled: !workflowBar.startQueued
@@ -1290,7 +1288,7 @@ ApplicationWindow {
                                 uiFont: root.uiFont
                                 monoFont: root.monoFont
                                 qualityValue: root.activeQuality
-                                compact: root.compactLayout
+                                compact: true
                             }
                         }
                         // No trailing filler: vertically stacked matrices
