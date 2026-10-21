@@ -53,6 +53,7 @@ public:
             {"PTP runtime requires matching PTP2 role", ptpRuntimeRoleEvidenceRequired()},
             {"PTP RUNNING before PTP2 is bounded success", ptpRuntimeOutOfOrderProof()},
             {"PTP source rejection survives verified safety STOP", ptpSourceReasonSurvivesSafetyStop()},
+            {"PTP LINK_DOWN is classified early; MAC INVALID_STATE keeps STOP verification", ptpPhysicalEthernetPreflightAndMacFailure()},
             {"PTP rejected config never starts", ptpGuidedRejectedConfigStops()},
             {"PTP STOP cancels pending start after verified readback", ptpGuidedStopCancelsStart()},
             {"legacy bare SV START refuses stale eight-channel state", legacyBareStartFailsClosed()},
@@ -744,6 +745,49 @@ private:
         d.processLine(ptpStoppedStatus());
         return !d.ptpStarting() && !d.ptpRunning_ &&
             d.ptpStatus_.contains(QStringLiteral("confirmed by board"));
+    }
+
+    static bool ptpPhysicalEthernetPreflightAndMacFailure() {
+        {
+            Fixture f;
+            if (!setupGuidedPtp(f, QStringLiteral("SOURCE"))) return false;
+            auto& d = f.device;
+            d.processLine(QStringLiteral("PTPROLE accepted"));
+            d.processLine(QStringLiteral("PTPROLE role=SOURCE value=0 running=0"));
+            d.processLine(QStringLiteral("PTP configuration accepted"));
+            if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_start)
+                return false;
+            d.processLine(QStringLiteral(
+                "PTP start rejected: source_reason=ETHERNET_LINK_DOWN"));
+            // ETH preflight has not launched ANY source runtime, therefore
+            // a generic rollback PTP STOP would be unsafe and misleading.
+            if (d.ptpStarting() || d.ptpRunning_ ||
+                !d.ptpLastStartFailure_.contains(QStringLiteral("link is DOWN")) ||
+                !d.ptpStatus_.contains(QStringLiteral("link is DOWN")))
+                return false;
+            if (d.logText_.contains(QStringLiteral("→ PTP STOP"))) return false;
+        }
+        {
+            Fixture f;
+            if (!setupGuidedPtp(f, QStringLiteral("SOURCE"))) return false;
+            auto& d = f.device;
+            d.processLine(QStringLiteral("PTPROLE accepted"));
+            d.processLine(QStringLiteral("PTPROLE role=SOURCE value=0 running=0"));
+            d.processLine(QStringLiteral("PTP configuration accepted"));
+            d.processLine(QStringLiteral(
+                "PTP start rejected: source_reason=ETHERNET_TX_INVALID_STATE"));
+            // A source TX error is NOT physical evidence PTP is OFF until
+            // its teardown/STOP is acknowledged by the board.
+            if (d.ptpStartStage_ != DeviceController::PtpStartStage::awaiting_stop_ack ||
+                !d.ptpLastStartFailure_.contains(QStringLiteral("ESP_ERR_INVALID_STATE")) ||
+                d.ptpRunning_) return false;
+            d.processLine(QStringLiteral("PTP stop requested"));
+            d.processLine(ptpStoppedStatus());
+            if (d.ptpStarting() || d.ptpRunning_ ||
+                !d.ptpLastStartFailure_.contains(QStringLiteral("ESP_ERR_INVALID_STATE")))
+                return false;
+        }
+        return true;
     }
 
     static bool ptpSourceReasonSurvivesSafetyStop() {
