@@ -72,6 +72,17 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
         }
     });
 
+    // A single operator START pressed during the first verified profile
+    // preparation is preserved ONLY for this boot/session and bounded to 34s.
+    // This is a native operator intent, not an asynchronous UI auto-restart.
+    startIntentTimer_.setSingleShot(true);
+    startIntentTimer_.setInterval(profileSyncHardDeadlineMs() + 4000);
+    connect(&startIntentTimer_, &QTimer::timeout, this, [this] {
+        cancelPendingStart(QStringLiteral(
+            "START was not sent: board profile was not ready within the safety deadline. "
+            "Check connection / profile sync, then press START again."));
+    });
+
     prepareTimer_.setInterval(650);
     prepareTimer_.setSingleShot(true);
     connect(&prepareTimer_, &QTimer::timeout, this, &SmartSessionController::reconcile);
@@ -140,6 +151,7 @@ void SmartSessionController::shutdown() {
     shuttingDown_ = true;
     started_ = false;
     discoveryTimer_.stop();
+    cancelPendingStart();
     prepareTimer_.stop();
     reconnectTimer_.stop();
     profileSyncTimer_.stop();
@@ -246,6 +258,7 @@ QString SmartSessionController::deviceFirmwareVersion() const { return deviceFir
 QString SmartSessionController::deviceFirmwareBuildId() const { return deviceFirmwareBuildId_; }
 
 quint64 SmartSessionController::advanceSessionGeneration() {
+    cancelPendingStart();
     sessionGeneration_ = nextSessionGeneration(sessionGeneration_);
     if (device_ != nullptr) device_->setSessionGeneration(sessionGeneration_);
     if (firmware_ != nullptr) firmware_->setSessionGeneration(sessionGeneration_);
@@ -335,12 +348,67 @@ bool SmartSessionController::requestStart() {
     return false;
 }
 
+void SmartSessionController::cancelPendingStart(const QString& reason) {
+    if (pendingStartScenario_.isEmpty()) return;
+    pendingStartScenario_.clear();
+    pendingStartGeneration_ = 0U;
+    pendingStartBootId_.clear();
+    pendingStartDeviceId_.clear();
+    startIntentTimer_.stop();
+    emit stateChanged();
+    if (!reason.isEmpty()) emit startIntentNotice(reason, true);
+}
+
+void SmartSessionController::submitPendingStart() {
+    if (pendingStartScenario_.isEmpty()) return;
+    if (!deviceControlAvailable() || device_ == nullptr || !device_->deviceVerified() ||
+        pendingStartGeneration_ != sessionGeneration_ ||
+        pendingStartBootId_ != device_->bootId() ||
+        pendingStartDeviceId_ != device_->deviceId() ||
+        !startReady_ || state_ != QStringLiteral("READY") ||
+        !device_->profileArmed() || device_->profileDeploying() ||
+        device_->scenarioApplying() || device_->running()) {
+        cancelPendingStart(QStringLiteral(
+            "Pending START cancelled: device identity, profile or session changed. "
+            "Check board status before retrying."));
+        return;
+    }
+    const QVariantMap snapshot = pendingStartScenario_;
+    cancelPendingStart();
+    if (!device_->startWithScenario(snapshot))
+        emit startIntentNotice(QStringLiteral(
+            "START could not be submitted to the board. Check the device transaction log."), true);
+}
+
 bool SmartSessionController::requestStartWithScenario(const QVariantMap& scenario) {
-    if (!startReady_ || !deviceControlAvailable() || device_ == nullptr || device_->running()) return false;
-    return device_->startWithScenario(scenario);
+    if (scenario.isEmpty() || !deviceControlAvailable() || device_ == nullptr ||
+        device_->running() || device_->scenarioApplying() || startIntentPending())
+        return false;
+    if (startReady_) return device_->startWithScenario(scenario);
+
+    // First click while initial profile deployment is still underway:
+    // preserve exactly one explicit click. Never queue START for an
+    // unidentified, incompatible, disconnected, or changing board.
+    if (state_ != QStringLiteral("PREPARING 4I+4V") &&
+        state_ != QStringLiteral("RECOVERING PROFILE"))
+        return false;
+    if (device_->bootId().isEmpty() || device_->deviceId().isEmpty())
+        return false;
+    pendingStartScenario_ = scenario;
+    pendingStartGeneration_ = sessionGeneration_;
+    pendingStartBootId_ = device_->bootId();
+    pendingStartDeviceId_ = device_->deviceId();
+    startIntentTimer_.start();
+    emit stateChanged();
+    emit startIntentNotice(
+        QStringLiteral("START queued. Studio is verifying the 4I+4V profile "
+                       "and will start once on this same board."), false);
+    return true;
 }
 
 bool SmartSessionController::requestStop() {
+    // STOP is authoritative even before a deferred START reaches firmware.
+    cancelPendingStart();
     if (device_ == nullptr) return false;
     // STOP is a cancellation authority even before SV RUNNING telemetry: an
     // ACKed staging transaction may still be advancing toward START.
@@ -1144,6 +1212,8 @@ void SmartSessionController::latchProfileSyncFailure(QString reason) {
     needsProfileSync_ = true;
     reason = reason.trimmed();
     if (reason.isEmpty()) reason = QStringLiteral("Profile synchronization did not complete.");
+    cancelPendingStart(QStringLiteral(
+        "Pending START cancelled: profile synchronization failed. Review the error and retry explicitly."));
     profileSyncError_ = QStringLiteral(
         "%1 Studio stopped after %2 bounded attempts; Start remains inhibited. Retry profile synchronization or reconnect the device.")
         .arg(reason)
@@ -1173,6 +1243,18 @@ void SmartSessionController::setPresentation(
     if (changed) emit stateChanged();
     if (readyNow && !wasReady_) emit readyForLiveApply();
     wasReady_ = readyNow;
+    if (startIntentPending()) {
+        if (readyNow) {
+            // Queue after READY is committed and all its listeners have
+            // run; the C++ session validates again at actual dispatch.
+            QTimer::singleShot(0, this, [this] { submitPendingStart(); });
+        } else if (state_ != QStringLiteral("PREPARING 4I+4V") &&
+                   state_ != QStringLiteral("RECOVERING PROFILE")) {
+            cancelPendingStart(QStringLiteral(
+                "Pending START cancelled: the board left the preparation state. "
+                "Check firmware and connection before retrying."));
+        }
+    }
 }
 
 void SmartSessionController::refreshFirmwareIdentity() {
