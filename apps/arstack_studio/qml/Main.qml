@@ -162,6 +162,7 @@ ApplicationWindow {
     property string lastOperatorNoticeKey: ""
     property double lastOperatorNoticeMs: 0
     property bool lastPtpStartPending: false
+    property string lastPtpPhyLink: "UNKNOWN"
     property bool phasorDockVisible: true
     property bool phasorDetached: false
     property bool waveformDockVisible: true
@@ -224,7 +225,17 @@ ApplicationWindow {
             // repeated physical fault merely because its code is the same.
             if (pending && !root.lastPtpStartPending)
                 root.lastOperatorNoticeKey = ""
+            if (!pending && root.lastPtpStartPending && !device.ptpRunning &&
+                device.ptpLastStartFailure.length > 0)
+                root.showMessage(device.ptpLastStartFailure, true)
             root.lastPtpStartPending = pending
+
+            // Report a real PHY recovery once, never an inferred USB link.
+            const phy = device.ptpEthernetLink
+            if (root.lastPtpPhyLink === "DOWN" && phy === "UP" &&
+                device.ptpEthernetDriver === "STARTED")
+                root.showMessage("Ethernet ESP32-P4 connected and verified.", false)
+            root.lastPtpPhyLink = phy
         }
         function onSvStopReasonChanged() {
             if (!device.running && device.svStopReason !== "" &&
@@ -242,6 +253,11 @@ ApplicationWindow {
 
     Connections {
         target: workflowBar.session
+        function onStateChanged() {
+            const currentState = workflowBar.session.state
+            if (/ERROR|FAILED|BLOCKED/i.test(currentState))
+                root.showMessage(workflowBar.session.statusText, true)
+        }
         function onFirmwareUpdateFinished(success) {
             if (success)
                 root.showMessage("Firmware updated and verified on the board.", false)
@@ -379,7 +395,7 @@ ApplicationWindow {
         if (failure)
             return { key: "error:" + m.slice(0, 100), title: "Perintah belum berhasil",
                      detail: m.length > 190 ? m.slice(0, 187) + "…" : m, error: true }
-        if (/copied|saved|verified|firmware updated|successfully|completed/i.test(m))
+        if (/copied|saved|verified|firmware updated|successfully|completed|Ethernet ESP32-P4 connected/i.test(m))
             return { key: "info:" + m.slice(0, 90), title: "Selesai",
                      detail: m.length > 180 ? m.slice(0, 177) + "…" : m, error: false }
         // High-frequency telemetry and routine informational chatter never
