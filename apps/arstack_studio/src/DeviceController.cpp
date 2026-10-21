@@ -1972,6 +1972,10 @@ void DeviceController::processLine(const QString& rawLine) {
             .arg(sessionGeneration_).arg(identity_.bootId).arg(line));
         const QString reason = line.contains(QStringLiteral("Control session lease expired"), Qt::CaseInsensitive)
             ? QStringLiteral("LEASE_EXPIRED") : QStringLiteral("RUNTIME_FAULT");
+        if (svLastStopCause_ != reason) {
+            svLastStopCause_ = reason;
+            emit svStopReasonChanged();
+        }
         if (svStopReason_ != reason) {
             svStopReason_ = reason;
             emit svStopReasonChanged();
@@ -1989,6 +1993,10 @@ void DeviceController::processLine(const QString& rawLine) {
         if (seqOk && (seq >= lastSvStopSeq_ || !deviceVerified_)) {
             lastSvStopSeq_ = seq;
             const QString lastReason = svLife.captured(2);
+            if (seq > 0U && svLastStopCause_ != lastReason) {
+                svLastStopCause_ = lastReason;
+                emit svStopReasonChanged();
+            }
             const bool boardStopped = svLife.captured(1) == QStringLiteral("STOPPED");
             const QString effective = boardStopped && lastReason != QStringLiteral("OPERATOR_STOP") &&
                 lastReason != QStringLiteral("NONE") ? lastReason : QString{};
@@ -2195,6 +2203,7 @@ void DeviceController::processLine(const QString& rawLine) {
 void DeviceController::resetTelemetry() {
     operatorStopPending_ = false;
     lastSvStopSeq_ = 0;
+    svLastStopCause_.clear();
     if (!svStopReason_.isEmpty()) {
         svStopReason_.clear();
         emit svStopReasonChanged();
