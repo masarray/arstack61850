@@ -548,6 +548,10 @@ def main() -> None:
             and "SplitView.preferredWidth: root.compactLayout ? 450 : 470" in responsive_main
             and "electric_bolt_run.svg" in ribbon_layout
             and "electric_bolt_stop.svg" in ribbon_layout
+            and "assets/material/electric_bolt_run.svg" in
+                (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8")
+            and "assets/material/electric_bolt_stop.svg" in
+                (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8")
             and "bar.device.running ? \"RUN\" : \"STOP\"" in ribbon_layout,
             "Studio default workbench must balance channels and charts; physical RUN/STOP uses supplied bolt")
     require("property bool startIntentPending: false" in start_flow
