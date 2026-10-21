@@ -88,7 +88,7 @@ enum class PtpSourceStartReason : std::uint8_t {
     ieee1588_clock_unavailable, mac_identity_unavailable,
     invalid_runtime_profile, runtime_start_rejected,
     pdelay_rx_timestamp_unavailable, source_tx_evidence_timeout,
-    source_task_create_failed, source_task_unsupported
+    ethernet_tx_invalid_state, source_task_create_failed, source_task_unsupported
 };
 std::atomic<PtpSourceStartReason> g_source_start_reason{
     PtpSourceStartReason::not_attempted};
@@ -125,6 +125,7 @@ std::atomic<PtpConfigFailure> g_ptp_config_failure{PtpConfigFailure::none};
     case PtpSourceStartReason::runtime_start_rejected: return "RUNTIME_START_REJECTED";
     case PtpSourceStartReason::pdelay_rx_timestamp_unavailable: return "PDELAY_RX_TIMESTAMP_UNAVAILABLE";
     case PtpSourceStartReason::source_tx_evidence_timeout: return "SOURCE_TX_EVIDENCE_TIMEOUT";
+    case PtpSourceStartReason::ethernet_tx_invalid_state: return "ETHERNET_TX_INVALID_STATE";
     case PtpSourceStartReason::source_task_create_failed: return "SOURCE_TASK_CREATE_FAILED";
     case PtpSourceStartReason::source_task_unsupported: return "SOURCE_TASK_UNSUPPORTED";
     }
@@ -440,6 +441,9 @@ void disable_hardware_ptp(const esp_eth_handle_t eth_handle) noexcept {
     if (frame.empty()) return false;
     const auto result = esp_eth_transmit(eth_handle, frame.data(), frame.size());
     if (result != ESP_OK) {
+        if (result == ESP_ERR_INVALID_STATE)
+            g_source_start_reason.store(
+                PtpSourceStartReason::ethernet_tx_invalid_state, std::memory_order_release);
         ESP_LOGE(kTag, "PTP general TX failed: %s", esp_err_to_name(result));
         return false;
     }
@@ -462,6 +466,9 @@ void disable_hardware_ptp(const esp_eth_handle_t eth_handle) noexcept {
         frame.data(),
         frame.size());
     if (result != ESP_OK) {
+        if (result == ESP_ERR_INVALID_STATE)
+            g_source_start_reason.store(
+                PtpSourceStartReason::ethernet_tx_invalid_state, std::memory_order_release);
         ESP_LOGE(kTag, "PTP hardware-timestamp TX failed: %s", esp_err_to_name(result));
         return false;
     }
@@ -909,14 +916,23 @@ void start_ptp_lab(const esp_eth_handle_t eth_handle) {
         return;
     }
 
-    constexpr unsigned kStartReadyPolls = 160U;
+    // At 1 s Announce/Sync intervals the first TX after PTP MAC activation
+    // can fail transiently even with an established PHY link. Allow three
+    // full source epochs; do NOT call it ready without actual three-frame TX.
+    // GUI awaiting_start has a separate bounded 10-second deadline.
+    constexpr unsigned kStartReadyPolls = 350U;
     for (unsigned attempt = 0U; attempt < kStartReadyPolls; ++attempt) {
         if (source_has_fresh_evidence() || !g_ptp_started.load(std::memory_order_acquire)) return;
         vTaskDelay(pdMS_TO_TICKS(10));
     }
-    g_source_start_reason.store(
-        PtpSourceStartReason::source_tx_evidence_timeout, std::memory_order_release);
-    ESP_LOGE(kTag, "PTP source readiness timeout: no verified Announce/Sync/Follow_Up TX");
+    if (g_source_start_reason.load(std::memory_order_acquire) !=
+        PtpSourceStartReason::ethernet_tx_invalid_state) {
+        g_source_start_reason.store(
+            PtpSourceStartReason::source_tx_evidence_timeout, std::memory_order_release);
+    }
+    ESP_LOGE(kTag,
+             "PTP source readiness timeout: no verified Announce/Sync/Follow_Up TX; reason=%s",
+             source_start_reason_name(g_source_start_reason.load(std::memory_order_acquire)));
     stop_ptp_lab();
 }
 
