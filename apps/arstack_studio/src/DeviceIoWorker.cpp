@@ -77,8 +77,7 @@ void DeviceIoWorker::initialize() {
             heartbeatTimer_->stop();
             return;
         }
-        static_cast<void>(enqueueCommandsInternal(
-            {QStringLiteral("HEARTBEAT")}, true, false, false));
+        queuePriorityHeartbeat();
     });
 
     connect(serial_, &QSerialPort::readyRead, this, &DeviceIoWorker::processReadyRead);
@@ -123,6 +122,7 @@ void DeviceIoWorker::shutdown(const bool requestSvStop, const bool requestPtpSto
     if (heartbeatTimer_ != nullptr) heartbeatTimer_->stop();
     if (writeGapTimer_ != nullptr) writeGapTimer_->stop();
     heartbeatEnabled_ = false;
+    heartbeatPending_ = false;
     probeQueue_.clear();
     genericProbeActive_ = false;
 
@@ -297,6 +297,7 @@ void DeviceIoWorker::closePortInternal(const bool emitRelease) {
     if (heartbeatTimer_ != nullptr) heartbeatTimer_->stop();
     if (writeGapTimer_ != nullptr) writeGapTimer_->stop();
     heartbeatEnabled_ = false;
+    heartbeatPending_ = false;
     identityConfirmed_ = false;
     identifyAttempts_ = 0;
     pendingRx_.clear();
@@ -451,6 +452,17 @@ void DeviceIoWorker::queuePrioritySvStop() {
     pumpWriteQueue();
 }
 
+void DeviceIoWorker::queuePriorityHeartbeat() {
+    // The 2.5-second firmware control lease must not be starved by a saturated
+    // 64-command queue or an exclusive profile CFG transaction. A single
+    // coalesced keepalive uses the same QSerialPort owner and normal pacing;
+    // it never bypasses a pending safety STOP or interrupts an active write.
+    // A disconnected/stalled serial port still fails closed in firmware.
+    if (!(writeActive_ && activeCommand_.text == QStringLiteral("HEARTBEAT")))
+        heartbeatPending_ = true;
+    pumpWriteQueue();
+}
+
 void DeviceIoWorker::queuePriorityPtpStop() {
     // Bounded (64 entries) and infrequent: revoke every unsent PTP START.
     // Preserve all other queued commands; STOP runs after the active write.
@@ -474,7 +486,8 @@ void DeviceIoWorker::queuePriorityPtpStop() {
 
 void DeviceIoWorker::pumpWriteQueue() {
     if (serial_ == nullptr || !serial_->isOpen() || writeActive_ ||
-        (!svStopPending_ && !ptpStopPending_ && commandQueue_.isEmpty())) return;
+        (!svStopPending_ && !ptpStopPending_ && !heartbeatPending_ &&
+         commandQueue_.isEmpty())) return;
     // bytesToWrite()==0 proves only host/driver drain, not ESP console line
     // consumption. Throttle ordinary writes; reserved STOPs always bypass.
     if (!svStopPending_ && !ptpStopPending_ && writeGapTimer_ != nullptr &&
@@ -490,6 +503,10 @@ void DeviceIoWorker::pumpWriteQueue() {
         ptpStopPending_ = false;
         activeCommand_ = PendingCommand{
             QStringLiteral("PTP STOP"), QByteArrayLiteral("PTP STOP\n"), false, false};
+    } else if (heartbeatPending_) {
+        heartbeatPending_ = false;
+        activeCommand_ = PendingCommand{
+            QStringLiteral("HEARTBEAT"), QByteArrayLiteral("HEARTBEAT\n"), true, false};
     } else {
         activeCommand_ = commandQueue_.dequeue();
     }
@@ -568,11 +585,11 @@ void DeviceIoWorker::setHeartbeatEnabled(const bool enabled, const quint64 gener
     if (heartbeatTimer_ == nullptr) return;
 
     if (!enabled || serial_ == nullptr || !serial_->isOpen() || !identityConfirmed_) {
+        heartbeatPending_ = false;
         heartbeatTimer_->stop();
         return;
     }
 
-    static_cast<void>(enqueueCommandsInternal(
-        {QStringLiteral("HEARTBEAT")}, true, false, false));
+    queuePriorityHeartbeat();
     if (!heartbeatTimer_->isActive()) heartbeatTimer_->start();
 }
