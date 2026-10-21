@@ -87,6 +87,7 @@ public:
             {"READY unplug/replug COM renumber -> READY stopped", readyReplugRecoversWithoutStart()},
             {"RUNNING unplug/replug -> never auto-restarts", runningReplugNeverAutoStarts()},
             {"wrong device during recovery -> SETUP ERROR", wrongDeviceRecoveryFailsClosed()},
+            {"CFG transport exclusivity cannot trigger false health loss", healthProbeDefersDuringScenario()},
             {"control health misses -> bounded failure", healthTimeoutIsBounded()},
             {"worker teardown -> joins cleanly", workerTeardownCompletes()},
         };
@@ -1676,6 +1677,26 @@ private:
             fixture.session.state() == QStringLiteral("SETUP ERROR") &&
             fixture.session.statusText().contains(QStringLiteral("different ARStack injector"), Qt::CaseInsensitive) &&
             !fixture.session.startReady();
+    }
+
+    static bool healthProbeDefersDuringScenario() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
+        auto& d = fixture.device;
+        d.controlResponsive_ = true;
+        d.healthProbeOutstanding_ = true;
+        d.missedHealthReplies_ = 0;
+        d.scenarioStage_ = DeviceController::ScenarioStage::awaiting_commit;
+        d.serviceControlHealth();
+        d.serviceControlHealth();
+        // Known exclusive queue occupancy cannot mimic two missing COM replies.
+        const bool quietBusy = d.controlResponsive_ && d.healthProbeOutstanding_ &&
+            d.missedHealthReplies_ == 0 && d.connected_;
+        d.scenarioStage_ = DeviceController::ScenarioStage::idle;
+        d.serviceControlHealth();
+        return quietBusy && !d.controlResponsive_ &&
+            d.missedHealthReplies_ == 1; // real timeout remains detectable
     }
 
     static bool healthTimeoutIsBounded() {
