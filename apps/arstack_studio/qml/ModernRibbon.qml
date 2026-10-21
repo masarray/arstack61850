@@ -92,7 +92,9 @@ Rectangle {
             uiFont: bar.uiFont
             text: bar.workflow.startQueued ? "Starting" : "Start"
             tone: !bar.device.deviceVerified ? "accent"
-                : bar.session.startReady ? "success" : "neutral"
+                : bar.session.startReady ? "success"
+                : (bar.session.state === "PREPARING 4I+4V" ||
+                   bar.session.state === "RECOVERING PROFILE") ? "accent" : "neutral"
             iconSource: Qt.resolvedUrl("../assets/material/play_arrow.svg")
             enabled: !bar.workflow.injectionRunning && !bar.workflow.startQueued && !bar.controller.offlinePreviewRunning
                 && !bar.session.updatingFirmware && !bar.session.updateNeedsBootloaderHelp
@@ -220,15 +222,15 @@ Rectangle {
         }
 
         Rectangle {
-            Layout.preferredWidth: bar.compact ? 84 : 108
+            readonly property bool svRunning: Boolean(bar.device && bar.device.running)
+            readonly property bool svPending: bar.workflow.startQueued
+            Layout.preferredWidth: bar.compact ? 82 : 105
             Layout.preferredHeight: 36
             Layout.alignment: Qt.AlignVCenter
-            radius: 15
-            color: "#0a1016"
+            radius: 12
+            color: svRunning ? "#112820" : svPending ? "#1e2224" : "#25191d"
             border.width: 1
-            border.color: Qt.rgba(bar.workflow.smartStateColor.r,
-                                  bar.workflow.smartStateColor.g,
-                                  bar.workflow.smartStateColor.b, 0.48)
+            border.color: svRunning ? "#36785a" : svPending ? bar.theme.amber : "#653b44"
 
             RowLayout {
                 anchors.fill: parent
@@ -236,21 +238,24 @@ Rectangle {
                 anchors.rightMargin: 9
                 spacing: 6
 
-                Rectangle {
-                    width: 6
-                    height: 6
-                    radius: 3
-                    color: bar.workflow.smartStateColor
+                Image {
+                    width: 20
+                    height: 20
+                    source: Qt.resolvedUrl(svRunning
+                        ? "../assets/material/bolt_run.svg"
+                        : "../assets/material/bolt_stop.svg")
+                    sourceSize.width: 24
+                    sourceSize.height: 24
+                    fillMode: Image.PreserveAspectFit
                 }
-
                 Label {
                     Layout.fillWidth: true
-                    text: bar.conciseState()
-                    color: bar.workflow.smartStateColor
+                    text: svRunning ? "RUN" : svPending ? "WAIT" : "STOP"
+                    color: svRunning ? "#41dfa1" : svPending ? bar.theme.amber : "#d1848d"
                     font.family: bar.uiFont
-                    font.pixelSize: 9
-                    font.weight: Font.DemiBold
-                    elide: Text.ElideRight
+                    font.pixelSize: 11
+                    font.weight: Font.Bold
+                    horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                 }
             }
@@ -264,7 +269,10 @@ Rectangle {
                 onClicked: bar.reconnectOrOpenDevice()
             }
             ToolTip.visible: stateMouse.containsMouse
-            ToolTip.text: bar.device.deviceVerified ? "Device details" : "Reconnect"
+            ToolTip.text: bar.device.deviceVerified
+                ? "SV " + (bar.device.running ? "RUNNING" : "STOPPED") +
+                  " · " + bar.conciseState() + " · Click for board details"
+                : "Connect ESP32-P4"
             ToolTip.delay: 900
         }
     }
