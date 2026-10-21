@@ -576,10 +576,13 @@ private:
         auto rows = [](const double mag) {
             QVariantList value;
             for (int i = 0; i < 4; ++i) {
-                value.append(QVariantList{
+                // QList::append(QVariantList) would FLATTEN four cells
+                // into the outer list. Wrap each channel as one QVariant
+                // exactly like the nested ListModel->QVariantMap payload.
+                value.append(QVariant(QVariantList{
                     i == 3 ? 0.0 : mag,
                     i == 0 ? 0.0 : i == 1 ? -120.0 : i == 2 ? 120.0 : 0.0,
-                    true, 0U});
+                    true, 0U}));
             }
             return value;
         };
