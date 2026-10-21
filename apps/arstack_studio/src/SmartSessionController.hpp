@@ -21,6 +21,7 @@ class SmartSessionController : public QObject {
     Q_PROPERTY(QString state READ state NOTIFY stateChanged)
     Q_PROPERTY(QString statusText READ statusText NOTIFY stateChanged)
     Q_PROPERTY(bool startReady READ startReady NOTIFY stateChanged)
+    Q_PROPERTY(bool startIntentPending READ startIntentPending NOTIFY stateChanged)
     Q_PROPERTY(bool canDeployProfile READ canDeployProfile NOTIFY stateChanged)
     Q_PROPERTY(bool liveControlReady READ liveControlReady NOTIFY stateChanged)
     Q_PROPERTY(bool engineeringEditable READ engineeringEditable NOTIFY stateChanged)
@@ -76,6 +77,7 @@ public:
     [[nodiscard]] QString state() const;
     [[nodiscard]] QString statusText() const;
     [[nodiscard]] bool startReady() const noexcept;
+    [[nodiscard]] bool startIntentPending() const noexcept { return !pendingStartScenario_.isEmpty(); }
     [[nodiscard]] bool canDeployProfile() const noexcept;
     [[nodiscard]] bool liveControlReady() const noexcept;
     [[nodiscard]] bool engineeringEditable() const noexcept;
@@ -219,6 +221,7 @@ signals:
     void dependenciesChanged();
     void stateChanged();
     void readyForLiveApply();
+    void startIntentNotice(const QString& text, bool error);
     void firmwareUpdateFinished(bool success);
 
 private:
@@ -361,6 +364,8 @@ private:
     bool beginFirmwareOperation(const QString& portName);
     bool ensureDefaultProfile();
     void setPresentation(QString state, QString status, bool startReady, bool firmwareUpdateRequired);
+    void cancelPendingStart(const QString& reason = {});
+    void submitPendingStart();
     void refreshFirmwareIdentity();
     void continueFirmwareUpdate();
     bool startFirmwareProbe();
@@ -385,6 +390,11 @@ private:
     QTimer profileSyncTimer_;
     QTimer profileRetryTimer_;
     QTimer profileSyncTotalTimer_;
+    QTimer startIntentTimer_;
+    QVariantMap pendingStartScenario_;
+    quint64 pendingStartGeneration_{0};
+    QString pendingStartBootId_;
+    QString pendingStartDeviceId_;
     QString state_{QStringLiteral("WAITING FOR DEVICE")};
     QString statusText_{QStringLiteral("Connect ESP32-P4; ARStack Studio will detect it automatically.")};
     QString deviceFirmwareVersion_;
