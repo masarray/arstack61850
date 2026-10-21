@@ -169,6 +169,7 @@ private:
         bool reportRejection);
     void queuePriorityPtpStop();
     void queuePrioritySvStop();
+    void queuePriorityHeartbeat();
     void pumpWriteQueue();
     void completeActiveWrite();
     void processReadyRead();
@@ -186,6 +187,10 @@ private:
     QByteArray pendingRx_;
     QQueue<PendingCommand> commandQueue_;
     bool svStopPending_{false};
+    // One coalesced safety-lease keepalive slot, outside normal 64-item FIFO.
+    // STOP priority remains higher. This is transport queue ownership, not
+    // a duplicate firmware RUNNING/LOCK state.
+    bool heartbeatPending_{false};
     PendingCommand activeCommand_;
     QString lastPort_;
 
