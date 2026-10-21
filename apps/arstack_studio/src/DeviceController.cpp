@@ -1532,10 +1532,30 @@ void DeviceController::advancePtpStartup(const QString& line) {
             setError(ptpLastStartFailure_);
             return;
         }
-        const bool rollback = ptpStartStage_ == PtpStartStage::awaiting_start ||
-                              ptpStartStage_ == PtpStartStage::awaiting_runtime;
+        const bool phyDown = line.contains(QStringLiteral("source_reason=ETHERNET_LINK_DOWN"),
+                                           Qt::CaseInsensitive);
+        const bool driverDown = line.contains(QStringLiteral("source_reason=ETHERNET_DRIVER_"),
+                                              Qt::CaseInsensitive);
+        const bool txInvalid = line.contains(QStringLiteral("source_reason=ETHERNET_TX_INVALID_STATE"),
+                                             Qt::CaseInsensitive);
+        // A preflight rejection happens BEFORE any PTP runtime is launched;
+        // never send a redundant STOP that could race a later user action.
+        const bool rollback = !phyDown && !driverDown &&
+            (ptpStartStage_ == PtpStartStage::awaiting_start ||
+             ptpStartStage_ == PtpStartStage::awaiting_runtime);
         const QString step = ptpStartPhase();
-        failPtpStartup(QStringLiteral("Board rejected PTP %1 command: %2").arg(step, line), rollback);
+        const QString actionable = phyDown
+            ? QStringLiteral("Ethernet PHY link is DOWN. Connect a live switch/cable to the ESP32-P4 Ethernet port, wait for LINK LED, then retry PTP START.")
+            : driverDown
+            ? QStringLiteral("ESP32-P4 Ethernet driver is not STARTED. Inspect hardware Ethernet initialization and reset the board if the driver remains stopped.")
+            : txInvalid
+            ? QStringLiteral("Ethernet reports link but EMAC rejected PTP transmission (ESP_ERR_INVALID_STATE). Inspect PTP ETH readback and firmware/driver state; PTP remains OFF.")
+            : QStringLiteral("Board rejected PTP %1 command: %2").arg(step, line);
+        appendLog(QStringLiteral("PTP"), QStringLiteral(
+            "START_REJECTED step=%1 preflight_link_down=%2 driver_down=%3 tx_invalid=%4 cause=%5")
+            .arg(step).arg(phyDown ? 1 : 0).arg(driverDown ? 1 : 0)
+            .arg(txInvalid ? 1 : 0).arg(line));
+        failPtpStartup(actionable, rollback);
         return;
     }
     if (ptpStartStage_ == PtpStartStage::awaiting_role_ack) {
@@ -2186,9 +2206,15 @@ void DeviceController::processLine(const QString& rawLine) {
         ptpRunning_ = false;
         ptpStatus_ = QStringLiteral("PTP start failed: %1").arg(line);
         emit ptpStateChanged();
-        setError(ptpRole_ == QStringLiteral("SOURCE")
-            ? QStringLiteral("PTP source did not emit Announce/Sync/Follow_Up. Check the Ethernet link and retry Start PTP Source.")
-            : QStringLiteral("PTP %1 could not start. Check the Ethernet link and retry.").arg(ptpRole_.toLower()));
+        // Preserve the exact classified first-hand board failure rather
+        // than replacing it with an unhelpful generic "retry" toast.
+        const QString hint = line.contains(QStringLiteral("ETHERNET_TX_INVALID_STATE"),
+                                            Qt::CaseInsensitive)
+            ? QStringLiteral("Ethernet MAC TX rejected by driver state; inspect PTP ETH driver/link.")
+            : line.contains(QStringLiteral("ETHERNET_LINK_DOWN"), Qt::CaseInsensitive)
+            ? QStringLiteral("Physical Ethernet link is DOWN; verify cable and switch LINK.")
+            : QStringLiteral("PTP SOURCE did not establish real Announce + Sync + Follow_Up TX.");
+        setError(hint);
     }
 
     advancePtpStartup(line);
