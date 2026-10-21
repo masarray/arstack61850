@@ -169,10 +169,15 @@ Rectangle {
             CalmButton {
                 theme: tray.theme
                 uiFont: tray.uiFont
-                text: "Details"
+                text: ""
                 iconSource: Qt.resolvedUrl("../assets/material/settings.svg")
+                iconSize: 16
                 objectName: "studioTimingDetails"
-                implicitWidth: 66
+                implicitWidth: 34
+                implicitHeight: 32
+                toolTipText: "Time sync & SV lock details"
+                Accessible.name: "Time sync & SV lock details"
+                Accessible.description: "Open PTP and SV synchronization settings"
 
                 onClicked: if (tray.controller) tray.controller.openTimingSettings()
             }
