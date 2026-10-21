@@ -147,6 +147,102 @@ void check_external_gm_receiver_requires_real_sv_egress_and_phase() {
     REQUIRE(!entry.observe(true, 8U, 1U, 4U, 23U));
 }
 
+void check_warm_phase_preflight_cannot_fake_canonical_mac() {
+    SvLocalRefAcquisition gate;
+    static_assert(SvLocalRefAcquisition::kWarmRequiredLiveEpochs == 3U);
+    // SOURCE/RECEIVER may accumulate phase-only evidence with SV TX OFF.
+    // No number of such observations may ever assert smpSynch.
+    for (std::uint32_t e = 1U; e <= 10U; ++e) {
+        gate.observe_preflight(true, 7U, 0U, 3U, e);
+        REQUIRE(gate.clean_epochs() == 0U);
+    }
+    REQUIRE(gate.preflight_epochs() == 10U);
+    // Descriptor baseline does not exist during the first live epochs:
+    // preserve stable phase history but NEVER claim LOCAL without real MAC.
+    REQUIRE(!gate.observe_live(true, false, 7U, 0U, 3U, 11U));
+    REQUIRE(!gate.observe_live(true, false, 7U, 0U, 3U, 12U));
+    REQUIRE(gate.preflight_epochs() == 10U);
+    REQUIRE(!gate.observe_live(true, true, 7U, 0U, 3U, 13U));
+    REQUIRE(!gate.observe_live(true, true, 7U, 0U, 3U, 14U));
+    REQUIRE(gate.observe_live(true, true, 7U, 0U, 3U, 15U));
+    REQUIRE(gate.clean_epochs() == 3U);
+    // An established MAC evidence loss must revoke immediately.
+    REQUIRE(!gate.observe_live(true, false, 7U, 0U, 3U, 16U));
+    REQUIRE(gate.clean_epochs() == 0U);
+    REQUIRE(gate.preflight_epochs() == 0U);
+    // Cold recovery still demands ten complete live phase+MAC epochs.
+    for (std::uint32_t e = 17U; e <= 26U; ++e) {
+        REQUIRE(gate.observe_live(true, true, 7U, 0U, 3U, e)
+                == (e == 26U));
+    }
+    REQUIRE(!gate.observe_live(false, true, 7U, 0U, 3U, 27U));
+}
+
+void check_warm_preflight_negative_session_and_clock_faults() {
+    auto warm = [](SvLocalRefAcquisition& gate) {
+        for (std::uint32_t e = 1U; e <= 10U; ++e)
+            gate.observe_preflight(true, 7U, 0U, 3U, e);
+        REQUIRE(gate.preflight_epochs() == 10U);
+    };
+    {
+        SvLocalRefAcquisition gate;
+        warm(gate);
+        REQUIRE(!gate.observe_live(true, true, 7U, 0U, 4U, 11U)); // GM/source change
+        REQUIRE(!gate.observe_live(true, true, 7U, 0U, 4U, 12U));
+        REQUIRE(!gate.observe_live(true, true, 7U, 0U, 4U, 13U));
+    }
+    {
+        SvLocalRefAcquisition gate;
+        warm(gate);
+        REQUIRE(!gate.observe_live(true, true, 7U, 1U, 3U, 11U)); // publisher fault
+        REQUIRE(gate.preflight_epochs() == 0U);
+    }
+    {
+        SvLocalRefAcquisition gate;
+        warm(gate);
+        REQUIRE(!gate.observe_live(true, true, 8U, 0U, 3U, 11U)); // new timer session
+        REQUIRE(gate.preflight_epochs() == 0U);
+    }
+    {
+        SvLocalRefAcquisition gate;
+        warm(gate);
+        REQUIRE(!gate.observe_live(true, true, 7U, 0U, 3U, 12U)); // skipped epoch
+        REQUIRE(gate.preflight_epochs() == 0U);
+    }
+    {
+        SvLocalRefAcquisition gate;
+        warm(gate);
+        REQUIRE(!gate.observe_live(false, true, 7U, 0U, 3U, 11U)); // phase/lease loss
+        REQUIRE(gate.preflight_epochs() == 0U);
+    }
+    {
+        SvLocalRefAcquisition gate;
+        warm(gate);
+        REQUIRE(!gate.observe_live(true, true, 7U, 0U, 3U, 11U));
+        REQUIRE(!gate.observe_live(true, true, 7U, 0U, 3U, 11U)); // duplicate
+        REQUIRE(gate.preflight_epochs() == 0U);
+    }
+    {
+        SvLocalRefAcquisition gate;
+        warm(gate);
+        // No MAC descriptor evidence for eight live seconds: the warm
+        // privilege expires and COLD retains the strict ten-live gate.
+        for (std::uint32_t e = 11U; e <= 19U; ++e)
+            REQUIRE(!gate.observe_live(true, false, 7U, 0U, 3U, e));
+        REQUIRE(gate.preflight_epochs() == 0U);
+        for (std::uint32_t e = 20U; e <= 29U; ++e)
+            REQUIRE(gate.observe_live(true, true, 7U, 0U, 3U, e) == (e == 29U));
+    }
+    {
+        SvLocalRefAcquisition gate;
+        for (std::uint32_t e = 1U; e <= 9U; ++e)
+            gate.observe_preflight(true, 7U, 0U, 3U, e);
+        // Nine warm phase epochs are not enough for the 3-live shortcut.
+        for (std::uint32_t e = 10U; e <= 19U; ++e)
+            REQUIRE(gate.observe_live(true, true, 7U, 0U, 3U, e) == (e == 19U));
+    }
+}
+
 void check_no_intermitttent_local_at_start() {
     SvLocalRefAcquisition gate;
     static_assert(SvLocalRefAcquisition::kRequiredCleanEpochs == 10U);
@@ -309,6 +405,8 @@ int main() {
         check_auto_local_sync_gate_requires_both_clocks_and_fresh_mac();
         check_fast_source_auto_qualification_with_fresh_evidence();
         check_external_gm_receiver_requires_real_sv_egress_and_phase();
+        check_warm_phase_preflight_cannot_fake_canonical_mac();
+        check_warm_preflight_negative_session_and_clock_faults();
         check_no_intermitttent_local_at_start();
         check_local_only_after_ten_clean_seconds();
         check_baseline_and_contiguous_ptp();
