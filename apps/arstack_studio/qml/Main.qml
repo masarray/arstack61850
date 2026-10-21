@@ -575,8 +575,9 @@ ApplicationWindow {
         return ok
     }
     function startScenarioSnapshot() {
-        // The table editors debounce keyboard edits for live preview. Flush
-        // them synchronously before creating the ordered board START payload.
+        // Table editor values are committed by Enter/focus departure, not by
+        // debounce while the engineer is halfway through a number. Flush
+        // synchronously before building the atomic START scenario.usly before creating the ordered board START payload.
         if (!currentMatrix.flushPendingEdits() || !voltageMatrix.flushPendingEdits()) {
             showMessage("Invalid signal input: correct highlighted field before Start.", true)
             return null
@@ -1063,11 +1064,14 @@ ApplicationWindow {
 
                 SurfacePanel {
                     objectName: "studioInjectionSurface"
-                    SplitView.fillWidth: true
+                    // Injection setpoints are a FIXED-WIDTH editing rail.
+                    // Old fillWidth:true made this the horizontal stretch owner
+                    // and starved charts despite its preferredWidth.
+                    SplitView.fillWidth: false
                     SplitView.fillHeight: true
-                    SplitView.minimumWidth: root.compactLayout ? 500 : 540
-                    SplitView.preferredWidth: root.compactLayout ? 600 : 690
-                    SplitView.maximumWidth: 750
+                    SplitView.minimumWidth: 425
+                    SplitView.preferredWidth: 470
+                    SplitView.maximumWidth: 515
                     theme: studioTheme
 
                     ColumnLayout {
@@ -1296,9 +1300,10 @@ ApplicationWindow {
                 SplitView {
                     visible: (root.phasorDockVisible && !root.phasorDetached) ||
                              (root.waveformDockVisible && !root.waveformDetached)
-                    SplitView.preferredWidth: root.compactLayout ? 450 : 470
-                    SplitView.minimumWidth: root.compactLayout ? 300 : 340
-                    SplitView.maximumWidth: 680
+                    // The visual-analysis rail owns unused horizontal space.
+                    SplitView.fillWidth: true
+                    SplitView.preferredWidth: 640
+                    SplitView.minimumWidth: 385
                     SplitView.fillHeight: true
                     orientation: Qt.Vertical
                     handle: Rectangle {
@@ -1317,10 +1322,11 @@ ApplicationWindow {
                     DockFrame {
                         visible: root.phasorDockVisible && !root.phasorDetached
                         SplitView.fillWidth: true
-                        SplitView.minimumHeight: 170
-                        SplitView.preferredHeight: 225
-                        SplitView.maximumHeight: 265
-                        SplitView.fillHeight: false
+                        SplitView.minimumHeight: 190
+                        SplitView.preferredHeight: 300
+                        // Phasor takes leftover vertical space rather than
+                        // being capped at 265 px regardless of window size.
+                        SplitView.fillHeight: true
                         theme: studioTheme
                         titleText: "Phasor"
                         statusText: ""
@@ -1357,9 +1363,9 @@ ApplicationWindow {
                     DockFrame {
                         visible: root.waveformDockVisible && !root.waveformDetached
                         SplitView.fillWidth: true
-                        SplitView.minimumHeight: 170
-                        SplitView.preferredHeight: 328
-                        SplitView.fillHeight: true
+                        SplitView.minimumHeight: 190
+                        SplitView.preferredHeight: 300
+                        SplitView.fillHeight: false
                         theme: studioTheme
                         titleText: "Waveform"
                         statusText: root.signalFrequency.toFixed(3) + " Hz"
