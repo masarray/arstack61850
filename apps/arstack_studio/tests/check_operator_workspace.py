@@ -558,6 +558,8 @@ def main() -> None:
             and "Math.round(workspaceSplit.width * 0.41)" in responsive_main
             and responsive_main.count("SplitView.preferredHeight: 310") == 2
             and responsive_main.count("SplitView.fillHeight: true") >= 3
+            and "id: injectionPanel" in responsive_main
+            and responsive_main.count("visible: injectionPanel.width >= 505") == 2
             and "SplitView.maximumHeight: 265" not in responsive_main
             and "electric_bolt_run.svg" in ribbon_layout
             and "electric_bolt_stop.svg" in ribbon_layout
