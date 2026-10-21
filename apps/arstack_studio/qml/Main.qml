@@ -7,10 +7,10 @@ import ARStack.Studio 1.0
 
 ApplicationWindow {
     id: root
-    width: 1150
-    height: 790
-    minimumWidth: 960
-    minimumHeight: 620
+    width: 1024
+    height: 748
+    minimumWidth: 940
+    minimumHeight: 640
     visible: true
     title: "ARStack Studio · SMV + PTP · v" + Qt.application.version
     color: studioTheme.bg
@@ -432,15 +432,16 @@ ApplicationWindow {
 
     function parseOperatorNumber(text) {
         var normalized = String(text).trim()
-            .replace(/\s/g, "")
             .replace(/degrees?/ig, "")
             .replace(/deg/ig, "")
             .replace(/°/g, "")
             .replace(/Hz/ig, "")
-            .replace(/[AV]$/i, "")
+            .replace(/[AV]$/i, "").trim()
+        // Decimal comma and dot are equally valid. Never interpret mixed
+        // punctuation or thousands-grouping as a silently altered number.
         if (normalized.indexOf(",") >= 0 && normalized.indexOf(".") < 0)
             normalized = normalized.replace(",", ".")
-        if (!normalized.length || normalized === "+" || normalized === "-" || normalized === ".")
+        if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalized))
             return NaN
         return Number(normalized)
     }
@@ -575,8 +576,8 @@ ApplicationWindow {
         return ok
     }
     function startScenarioSnapshot() {
-        // The table editors debounce keyboard edits for live preview. Flush
-        // them synchronously before creating the ordered board START payload.
+        // Flush every local draft once before serializing the canonical
+        // 4I+4V scenario. An invalid draft cannot be sent to the board.
         if (!currentMatrix.flushPendingEdits() || !voltageMatrix.flushPendingEdits()) {
             showMessage("Invalid signal input: correct highlighted field before Start.", true)
             return null
@@ -1065,12 +1066,21 @@ ApplicationWindow {
                     objectName: "studioInjectionSurface"
                     SplitView.fillWidth: true
                     SplitView.fillHeight: true
-                    SplitView.minimumWidth: root.compactLayout ? 500 : 540
-                    SplitView.preferredWidth: root.compactLayout ? 600 : 690
-                    SplitView.maximumWidth: 750
+                    SplitView.minimumWidth: 370
+                    SplitView.preferredWidth: 425
+                    SplitView.maximumWidth: 465
+                    SplitView.fillWidth: false
                     theme: studioTheme
 
+                    // Clicking unoccupied workspace commits the focused cell.
+                    // Controls above this background retain their own taps.
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: root.contentItem.forceActiveFocus()
+                    }
+
                     ColumnLayout {
+                        z: 1
                         anchors.fill: parent
                         anchors.margins: root.compactLayout ? 11 : 13
                         spacing: root.compactLayout ? 6 : 8
@@ -1168,10 +1178,6 @@ ApplicationWindow {
                                     }
                                 }
 
-                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "0"; implicitWidth: 44; toolTipText: "DC"; onClicked: root.setFrequencyValue(0) }
-                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "50"; implicitWidth: 44; onClicked: root.setFrequencyValue(50) }
-                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "60"; implicitWidth: 44; onClicked: root.setFrequencyValue(60) }
-                                Rectangle { width: 1; height: 24; color: studioTheme.lineSoft }
                                 StudioLinkSwitch {
                                     theme: studioTheme
                                     uiFont: root.uiFont
@@ -1296,9 +1302,9 @@ ApplicationWindow {
                 SplitView {
                     visible: (root.phasorDockVisible && !root.phasorDetached) ||
                              (root.waveformDockVisible && !root.waveformDetached)
-                    SplitView.preferredWidth: root.compactLayout ? 450 : 470
-                    SplitView.minimumWidth: root.compactLayout ? 300 : 340
-                    SplitView.maximumWidth: 680
+                    SplitView.preferredWidth: 560
+                    SplitView.minimumWidth: 390
+                    SplitView.fillWidth: true
                     SplitView.fillHeight: true
                     orientation: Qt.Vertical
                     handle: Rectangle {
@@ -1318,9 +1324,8 @@ ApplicationWindow {
                         visible: root.phasorDockVisible && !root.phasorDetached
                         SplitView.fillWidth: true
                         SplitView.minimumHeight: 170
-                        SplitView.preferredHeight: 225
-                        SplitView.maximumHeight: 265
-                        SplitView.fillHeight: false
+                        SplitView.preferredHeight: 285
+                        SplitView.fillHeight: true
                         theme: studioTheme
                         titleText: "Phasor"
                         statusText: ""
@@ -1358,7 +1363,7 @@ ApplicationWindow {
                         visible: root.waveformDockVisible && !root.waveformDetached
                         SplitView.fillWidth: true
                         SplitView.minimumHeight: 170
-                        SplitView.preferredHeight: 328
+                        SplitView.preferredHeight: 285
                         SplitView.fillHeight: true
                         theme: studioTheme
                         titleText: "Waveform"
