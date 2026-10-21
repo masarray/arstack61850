@@ -979,6 +979,7 @@ QString SmartSessionController::diagnosticsText() const {
         add(QStringLiteral("Profile generation"), device_->profileGeneration());
         add(QStringLiteral("Profile armed"), device_->profileArmed() ? QStringLiteral("yes") : QStringLiteral("no"));
         add(QStringLiteral("SMV running"), device_->running() ? QStringLiteral("yes") : QStringLiteral("no"));
+        add(QStringLiteral("Last SV stop reason (board readback)"), device_->svStopReason());
         add(QStringLiteral("SMV FPS reported"), device_->fps());
         add(QStringLiteral("SMV missed reported"), device_->missed());
         add(QStringLiteral("SMV TX failures reported"), device_->txFailures());
