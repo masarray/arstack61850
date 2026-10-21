@@ -252,10 +252,11 @@ private:
             return;
         }
 
-        // Profile deployment is an exclusive transport transaction. Health
-        // observation is deferred instead of interleaving another command or
-        // treating intentional queue exclusivity as a missed response.
-        if (profileDeploying()) return;
+        // Canonical BIN and CFG scenario transactions both own the serial
+        // console. Suppress only probe accounting during known exclusivity,
+        // never the worker's independent safety heartbeat/STOP. Resume
+        // measured liveness normally as soon as the transaction completes.
+        if (profileDeploying() || scenarioApplying()) return;
 
         if (healthProbeOutstanding_) {
             ++missedHealthReplies_;
