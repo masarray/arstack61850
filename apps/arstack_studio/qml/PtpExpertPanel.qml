@@ -168,6 +168,45 @@ SurfacePanel {
                 }
             }
 
+            // Board-issued Ethernet event evidence, never a USB/COM guess.
+            // A DOWN or UNKNOWN PHY cannot authorize SOURCE START.
+            RowLayout {
+                visible: panel.device && panel.device.deviceVerified
+                Layout.fillWidth: true
+                spacing: 10
+                Label {
+                    text: "Ethernet (board)"
+                    color: panel.theme.muted
+                    font.family: panel.uiFont
+                    font.pixelSize: 10
+                }
+                Label {
+                    text: "Driver " + panel.device.ptpEthernetDriver +
+                          "  ·  PHY " + panel.device.ptpEthernetLink
+                    color: panel.device.ptpEthernetLink === "DOWN" ||
+                           panel.device.ptpEthernetDriver === "STOPPED"
+                        ? panel.theme.red
+                        : panel.device.ptpEthernetLink === "UP" &&
+                          panel.device.ptpEthernetDriver === "STARTED"
+                        ? panel.theme.green : panel.theme.amber
+                    font.family: panel.monoFont
+                    font.pixelSize: 10
+                    font.weight: Font.DemiBold
+                }
+                Item { Layout.fillWidth: true }
+                Label {
+                    text: panel.device.ptpEthernetLink === "DOWN"
+                        ? "Check Ethernet cable / active switch"
+                        : panel.device.ptpEthernetLink === "UNKNOWN"
+                        ? "Refresh to read physical link"
+                        : "Link status from ESP32-P4"
+                    color: panel.device.ptpEthernetLink === "DOWN"
+                        ? panel.theme.red : panel.theme.muted
+                    font.family: panel.uiFont
+                    font.pixelSize: 9
+                }
+            }
+
             Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: 82
