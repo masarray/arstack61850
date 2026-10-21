@@ -8,7 +8,7 @@ import ARStack.Studio 1.0
 ApplicationWindow {
     id: root
     width: 1150
-    height: 790
+    height: 800
     minimumWidth: 960
     minimumHeight: 620
     visible: true
@@ -1065,9 +1065,12 @@ ApplicationWindow {
                     objectName: "studioInjectionSurface"
                     SplitView.fillWidth: true
                     SplitView.fillHeight: true
-                    SplitView.minimumWidth: root.compactLayout ? 500 : 540
-                    SplitView.preferredWidth: root.compactLayout ? 600 : 690
-                    SplitView.maximumWidth: 750
+                    // Hard width budget prevents input columns from stretching
+                    // at desktop sizes. Visualization owns spare horizontal
+                    // space; operator may still resize within useful bounds.
+                    SplitView.minimumWidth: 450
+                    SplitView.preferredWidth: root.width < 1100 ? 470 : 500
+                    SplitView.maximumWidth: 535
                     theme: studioTheme
 
                     ColumnLayout {
@@ -1296,9 +1299,9 @@ ApplicationWindow {
                 SplitView {
                     visible: (root.phasorDockVisible && !root.phasorDetached) ||
                              (root.waveformDockVisible && !root.waveformDetached)
-                    SplitView.preferredWidth: root.compactLayout ? 450 : 470
-                    SplitView.minimumWidth: root.compactLayout ? 300 : 340
-                    SplitView.maximumWidth: 680
+                    SplitView.preferredWidth: Math.max(440, root.width - 540)
+                    SplitView.minimumWidth: 410
+                    SplitView.fillWidth: true
                     SplitView.fillHeight: true
                     orientation: Qt.Vertical
                     handle: Rectangle {
@@ -1317,10 +1320,11 @@ ApplicationWindow {
                     DockFrame {
                         visible: root.phasorDockVisible && !root.phasorDetached
                         SplitView.fillWidth: true
-                        SplitView.minimumHeight: 170
-                        SplitView.preferredHeight: 225
-                        SplitView.maximumHeight: 265
-                        SplitView.fillHeight: false
+                        // Phasor and waveform each own half of available
+                        // height; no hidden 265px cap on the phasor plot.
+                        SplitView.minimumHeight: 245
+                        SplitView.preferredHeight: 310
+                        SplitView.fillHeight: true
                         theme: studioTheme
                         titleText: "Phasor"
                         statusText: ""
@@ -1357,8 +1361,8 @@ ApplicationWindow {
                     DockFrame {
                         visible: root.waveformDockVisible && !root.waveformDetached
                         SplitView.fillWidth: true
-                        SplitView.minimumHeight: 170
-                        SplitView.preferredHeight: 328
+                        SplitView.minimumHeight: 245
+                        SplitView.preferredHeight: 310
                         SplitView.fillHeight: true
                         theme: studioTheme
                         titleText: "Waveform"
