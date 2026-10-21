@@ -196,12 +196,15 @@ def main() -> None:
             and 'startWatchdog' not in source("WorkflowBar.qml"),
             "SV STOP must remain actionable while the acknowledged scenario transaction is pending")
     require("function flushPendingEdits()" in matrix
-            and "magnitudeApplyTimer.stop()" in matrix
-            and "phaseApplyTimer.stop()" in matrix
+            and "function commitRowField(column)" in matrix
+            and "magnitudeApplyTimer" not in matrix
+            and "phaseApplyTimer" not in matrix
+            and "onEditingFinished: signalRow.commitRowField(0)" in matrix
+            and "onEditingFinished: signalRow.commitRowField(1)" in matrix
             and "currentMatrix.flushPendingEdits()" in main_qml
             and "voltageMatrix.flushPendingEdits()" in main_qml
             and "if (!scenario) return" in source("WorkflowBar.qml"),
-            "START must commit last visible I/V angle before ordered scenario serialization")
+            "START must flush each operator draft once, never after a 90ms typing timer")
     require("Layout.fillHeight: true" in main_qml
             and "Layout.maximumHeight: root.compactLayout ? 352 : 384" not in main_qml
             and main_qml.index("id: voltageMatrix") < main_qml.index("id: currentMatrix"),
@@ -377,9 +380,9 @@ def main() -> None:
     assert "text: \"Generated setpoint · not independent on-wire proof\"" not in preview
     assert "No ESP32 board detected · Preview mode only" in main_qml
     require("Layout.preferredHeight: 57" in main_qml
-            and "SplitView.maximumHeight: 265" in main_qml
-            and "SplitView.fillHeight: false" in main_qml,
-            "compact timing strip and bounded phasor panel must avoid dead space")
+            and "SplitView.maximumHeight: 265" not in main_qml
+            and 'Math.max(170, (workspaceSplit.height - 9) / 2)' in main_qml,
+            "compact timing strip must share height evenly between phasor and waveform")
     require("TIME SYNC  /  SV SIMULATION" not in tray
             and "StateBadge {" not in tray,
             "device/PTP status must not be duplicated in the control tray")
@@ -543,9 +546,15 @@ def main() -> None:
     responsive_main = source("Main.qml")
     ribbon_layout = source("ModernRibbon.qml")
     start_flow = source("WorkflowBar.qml")
-    require("width: 1150" in responsive_main
-            and "SplitView.maximumWidth: 750" in responsive_main
-            and "SplitView.preferredWidth: root.compactLayout ? 450 : 470" in responsive_main
+    require("width: 1024" in responsive_main
+            and "height: 748" in responsive_main
+            and "SplitView.maximumWidth: 465" in responsive_main
+            and "SplitView.preferredWidth: 425" in responsive_main
+            and "SplitView.fillWidth: false" in responsive_main
+            and "SplitView.minimumWidth: 390" in responsive_main
+            and 'text: "0"; implicitWidth: 44' not in responsive_main
+            and 'text: "50"; implicitWidth: 44' not in responsive_main
+            and 'text: "60"; implicitWidth: 44' not in responsive_main
             and "electric_bolt_run.svg" in ribbon_layout
             and "electric_bolt_stop.svg" in ribbon_layout
             and "assets/material/electric_bolt_run.svg" in
@@ -600,6 +609,29 @@ def main() -> None:
             and "status.timing_authority_clock_usable = source_clock_qualified;" in ptp_facade,
             "PTP SOURCE physical RUNNING must survive unqualified clock freshness; "
             "canonical timing authority must remain independently fail-closed")
+
+    # The GUI's normal transient conditions are never shown as operator faults.
+    # Validate both intended (positive) paths and removed (negative) paths.
+    require("Coalesced %1 until exclusive serial authority is released." in device_cpp
+            and "flushDeferredReadbacks()" in device_cpp
+            and "std::exchange(deferredPtpShow_, false)" in device_cpp
+            and "if (readback) return deferReadback();" in device_cpp
+            and "Canonical binary profile transaction owns" not in device_cpp
+            and "Could not request PTP STOP readback." not in device_cpp
+            and "ptpStartTimer_.start(profileDeploying_" in device_cpp,
+            "busy device polling must defer quietly; verified STOP has an absolute deadline")
+    require('toolTipText: "Time sync & SV lock details"' in timing_ui
+            and 'Accessible.name: "Time sync & SV lock details"' in timing_ui
+            and 'objectName: "studioTimingDetails"' in timing_ui
+            and 'text: "Details"' not in timing_ui,
+            "PTP Details must be an accessible icon-only button")
+    require("signalRow.magnitudeDirty = true" in matrix
+            and "signalRow.phaseDirty = true" in matrix
+            and "matrix.controller.editSignal(" in matrix
+            and "field.invalidInput = true" in matrix
+            and "return false // keep the draft visible" in matrix
+            and "!/^[+-]?" in main_qml,
+            "numeric editors must validate local draft and commit only once at edit completion")
 
     print("Studio operator workspace contract: PASS")
 
