@@ -190,7 +190,18 @@ SurfacePanel {
         }
     }
 
+    // Never display green READY immediately after an unsolicited board STOP.
+    // The board-reported reason is distinct from the physical PTP role.
+    readonly property bool unexpectedSvStop: Boolean(
+        ribbon.device && ribbon.device.deviceVerified &&
+        !ribbon.device.running && ribbon.device.svStopReason.length > 0 &&
+        !ribbon.startQueued)
     readonly property string displayState: {
+        if (ribbon.unexpectedSvStop) {
+            if (ribbon.device.svStopReason === "LEASE_EXPIRED") return "SV stopped · USB control lease expired"
+            if (ribbon.device.svStopReason === "RUNTIME_FAULT") return "SV stopped · board runtime fault"
+            return "SV stopped · checking board cause"
+        }
         if (smartSession.state === "WAITING FOR DEVICE") return "Connect device"
         if (smartSession.state === "DEVICE FOUND" || smartSession.state === "CONNECTING") return "Connecting"
         if (smartSession.state === "CHECKING DEVICE") return "Checking device"
@@ -209,6 +220,7 @@ SurfacePanel {
     }
 
     readonly property color smartStateColor: {
+        if (ribbon.unexpectedSvStop) return theme.red
         if (smartSession.state === "RUNNING" || smartSession.state === "READY") return theme.green
         if (smartSession.state === "CONNECTING" || smartSession.state === "CHECKING DEVICE" ||
             smartSession.state === "FIRMWARE RECOVERY" || smartSession.state === "PREPARING 4I+4V" ||
