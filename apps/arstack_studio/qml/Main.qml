@@ -1085,6 +1085,7 @@ ApplicationWindow {
                 }
 
                 SurfacePanel {
+                    id: injectionPanel
                     objectName: "studioInjectionSurface"
                     SplitView.fillWidth: true
                     SplitView.fillHeight: true
@@ -1297,6 +1298,9 @@ ApplicationWindow {
                             Rectangle { width: 6; height: 6; radius: 3; color: studioTheme.accent }
                             Label { text: root.activeSignal; color: studioTheme.textSoft; font.family: root.monoFont; font.pixelSize: studioTheme.labelSize; font.weight: Font.Bold }
                             Label {
+                                // Redundant selection readback yields space
+                                // to Quality controls in the narrow table.
+                                visible: injectionPanel.width >= 505
                                 text: root.signalFrequency === 0
                                     ? root.activeMagnitude.toFixed(3) + " " + root.activeUnit + " DC"
                                     : root.activeMagnitude.toFixed(3) + " " + root.activeUnit + " RMS · " + root.activePhase.toFixed(2) + "°"
@@ -1304,7 +1308,12 @@ ApplicationWindow {
                                 font.family: root.uiFont
                                 font.pixelSize: 9
                             }
-                            Rectangle { width: 1; height: 20; color: studioTheme.lineSoft }
+                            Rectangle {
+                                visible: injectionPanel.width >= 505
+                                width: 1
+                                height: 20
+                                color: studioTheme.lineSoft
+                            }
                             QualityEditor {
                                 enabled: !workflowBar.startQueued
                                 Layout.fillWidth: true
