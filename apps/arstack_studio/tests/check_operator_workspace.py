@@ -481,6 +481,7 @@ def main() -> None:
     ptp_firmware = (STUDIO.parent.parent / "embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp").read_text(encoding="utf-8")
     eth_port = (STUDIO.parent.parent / "embedded/esp32p4_smv_injector/main/ethernet_port.c").read_text(encoding="utf-8")
     ptp_studio = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
+    ptp_console = (STUDIO.parent.parent / "embedded/esp32p4_smv_injector/main/live_control.cpp").read_text(encoding="utf-8")
     require("ETHERNET_EVENT_START" in eth_port
             and "ETHERNET_EVENT_CONNECTED" in eth_port
             and "ETHERNET_EVENT_DISCONNECTED" in eth_port
@@ -501,7 +502,6 @@ def main() -> None:
             "and never mark a failed START as RUNNING")
 
 
-    ptp_console = (STUDIO.parent.parent / "embedded/esp32p4_smv_injector/main/live_control.cpp").read_text(encoding="utf-8")
     require('SOURCE_REQUIRES_1S_ANNOUNCE_1S_SYNC_AND_PDELAY' in ptp_firmware and
             'ar_ptp_lab_last_config_error()' in ptp_console and
             'PDELAY_RX_TIMESTAMP_UNAVAILABLE' in ptp_firmware and
