@@ -210,6 +210,10 @@ ApplicationWindow {
         function onDeviceMessage(message) {
             root.showMessage(message, false)
         }
+        function onLastErrorChanged() {
+            if (device.lastError && device.lastError.length > 0)
+                root.showMessage(device.lastError, true)
+        }
         function onSvStopReasonChanged() {
             if (!device.running && device.svStopReason !== "" &&
                 device.svStopReason !== "AWAITING_BOARD_CAUSE") {
@@ -310,10 +314,44 @@ ApplicationWindow {
         ListElement { timeText: "--:--:--"; messageText: "ARStack Studio ready."; isError: false }
     }
 
+    property string lastToastKey: ""
+    property double lastToastAt: 0
+    function explainFailure(message) {
+        const m = String(message || "")
+        if (m.indexOf("ETHERNET_LINK_DOWN") >= 0 ||
+            m.indexOf("Ethernet PHY link is DOWN") >= 0 ||
+            m.indexOf("source did not emit") >= 0 ||
+            m.indexOf("no verified Announce") >= 0)
+            return "PTP belum bisa aktif. Sambungkan kabel LAN ESP32-P4 ke switch/port Ethernet aktif, tunggu PHY UP, lalu START PTP."
+        if (m.indexOf("ETHERNET_DRIVER_NOT_STARTED") >= 0 ||
+            m.indexOf("ETHERNET_DRIVER_UNAVAILABLE") >= 0)
+            return "Driver Ethernet ESP32-P4 belum siap. Periksa koneksi board, lalu restart perangkat bila driver tetap STOPPED."
+        if (m.indexOf("ETHERNET_TX_INVALID_STATE") >= 0 ||
+            m.indexOf("ESP_ERR_INVALID_STATE") >= 0)
+            return "PTP TX ditolak EMAC. Periksa Driver/PHY di Advanced → Time Sync; salin diagnostics jika PHY sudah UP."
+        if (m.indexOf("LEASE_EXPIRED") >= 0)
+            return "Injeksi SV berhenti: heartbeat kontrol USB terputus. Periksa kabel USB/COM lalu START kembali."
+        if (m.indexOf("RUNTIME_FAULT") >= 0)
+            return "Board menghentikan injeksi SV karena gangguan runtime. Buka Copy diagnostics sebelum START ulang."
+        return m
+    }
     function showMessage(message, error) {
+        if (!message || String(message).trim().length === 0) return
         statusMessage = message
-        transientMessage = error === true ? message : ""
-        transientError = error === true
+        const critical = error === true
+        const userMessage = critical ? explainFailure(message) : String(message)
+        const key = (critical ? "E:" : "I:") + userMessage
+        const now = Date.now()
+        const duplicate = key === lastToastKey && now - lastToastAt < 4000
+        const meaningful = critical || /accepted|ready|connected|installed|updated|stopped|started|saved|completed|success/i.test(userMessage)
+        if (meaningful && !duplicate) {
+            lastToastKey = key
+            lastToastAt = now
+            transientMessage = userMessage
+            transientError = critical
+            messageTimer.interval = critical ? 4200 : 2300
+            messageTimer.restart()
+        }
         statusHistoryModel.append({
             timeText: new Date().toLocaleTimeString(Qt.locale(), "HH:mm:ss"),
             messageText: message,
@@ -321,7 +359,6 @@ ApplicationWindow {
         })
         while (statusHistoryModel.count > 100)
             statusHistoryModel.remove(0)
-        messageTimer.restart()
     }
 
     function detachPhasor() {
@@ -847,6 +884,15 @@ ApplicationWindow {
             configurationWindow.hide()
         }
 
+        StatusToast {
+            anchors.centerIn: parent
+            z: 1500
+            theme: studioTheme
+            uiFont: root.uiFont
+            message: root.toastMessage
+            error: root.toastError
+        }
+
         DockFrame {
             anchors.fill: parent
             anchors.margins: 10
@@ -1370,9 +1416,8 @@ ApplicationWindow {
     }
 
     StatusToast {
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 38
+        anchors.centerIn: parent
+        z: 1500
         theme: studioTheme
         uiFont: root.uiFont
         message: root.toastMessage
