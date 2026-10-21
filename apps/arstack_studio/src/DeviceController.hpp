@@ -52,6 +52,7 @@ class DeviceController : public QObject {
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(bool running READ running NOTIFY runningChanged)
     Q_PROPERTY(QString svStopReason READ svStopReason NOTIFY svStopReasonChanged)
+    Q_PROPERTY(QString svLastStopCause READ svLastStopCause NOTIFY svStopReasonChanged)
     Q_PROPERTY(bool scenarioApplying READ scenarioApplying NOTIFY scenarioStateChanged)
     Q_PROPERTY(QString portName READ portName NOTIFY connectedChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
@@ -142,6 +143,7 @@ public:
     [[nodiscard]] bool connected() const noexcept;
     [[nodiscard]] bool running() const noexcept;
     [[nodiscard]] QString svStopReason() const { return svStopReason_; }
+    [[nodiscard]] QString svLastStopCause() const { return svLastStopCause_; }
     [[nodiscard]] bool scenarioApplying() const noexcept;
     [[nodiscard]] QString portName() const;
     [[nodiscard]] QString lastError() const;
@@ -421,6 +423,7 @@ private:
     bool running_{false};
     bool operatorStopPending_{false};
     QString svStopReason_;
+    QString svLastStopCause_;
     quint64 lastSvStopSeq_{0};
     bool connected_{false};
     bool discovering_{false};
