@@ -537,6 +537,27 @@ def main() -> None:
             "SV output must fail-closed on measured heartbeat loss, preserve board STOP cause, "
             "and never show misleading green READY after an unrequested stop")
 
+    # Operator desktop layout: bounded injector column, space for plots,
+    # no extra QML START authority and no abandoned first-click intent.
+    layout = source("Main.qml")
+    ribbon = source("ModernRibbon.qml")
+    workflow = source("WorkflowBar.qml")
+    require("SplitView.maximumWidth: 660" in layout
+            and "SplitView.preferredWidth: root.compactLayout ? 505 : 610" in layout
+            and "SplitView.preferredWidth: root.compactLayout ? 420 : 560" in layout
+            and "run-bolt.svg" in ribbon and "stop-bolt.svg" in ribbon
+            and 'text: bar.device.running ? "RUN" : "STOP"' in ribbon
+            and "property bool startIntentWaiting: false" in workflow
+            and "interval: 8000" in workflow
+            and "startIntentBootId" in workflow
+            and "function cancelStartIntent()" in workflow
+            and "function deliverReadyStart()" in workflow
+            and "smartSession.state === \"PREPARING 4I+4V\"" in workflow
+            and "if (startIntentWaiting)" in workflow
+            and "smartSession.requestStartWithScenario(snapshot)" in workflow,
+            "Studio must offer proportional engineering panels, verified bolt RUN/STOP "
+            "and first-click START through a bounded same-boot cancellable intent")
+
     toast_layout = source("Main.qml")
     toast_view = source("StatusToast.qml")
     require("function explainFailure(message)" in toast_layout
