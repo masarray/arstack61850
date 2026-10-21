@@ -17,14 +17,77 @@ SurfacePanel {
     property bool compact: false
     // Firmware transaction is the single source of truth. UI timers and
     // unrelated PTP/serial errors must not bounce the injection START button.
-    readonly property bool startQueued: Boolean(ribbon.device && ribbon.device.scenarioApplying)
+    // Operator intent may arrive before first profile synchronization ends.
+    // One bounded, boot-bound pending click is consumed as soon as the SAME
+    // verified board enters READY. Never persist/replay across reconnect.
+    property bool startIntentPending: false
+    property string startIntentBoot: ""
+    property double startIntentDeadline: 0
+    readonly property bool startQueued: Boolean(
+        startIntentPending || (ribbon.device && ribbon.device.scenarioApplying))
+    Timer {
+        id: startIntentExpiry
+        interval: 6500
+        repeat: false
+        onTriggered: {
+            if (!ribbon.startIntentPending) return
+            ribbon.cancelStartIntent()
+            controller.showMessage(
+                "START not sent: device preparation timed out. Check board/profile state and retry.", true)
+        }
+    }
+    function cancelStartIntent() {
+        startIntentPending = false
+        startIntentBoot = ""
+        startIntentDeadline = 0
+        startIntentExpiry.stop()
+    }
+    function queueFirstStart() {
+        // Only a verified, physically connected board may receive deferred
+        // START. Never arm for offline, firmware update or reconnect.
+        if (!device.deviceVerified || !device.connected ||
+            smartSession.updatingFirmware || smartSession.firmwareUpdateRequired ||
+            smartSession.firmwareInstallRequired) return false
+        const boot = String(device.deviceIdentity ? device.deviceIdentity.bootId : device.bootId)
+        if (!boot || boot === "undefined") return false
+        startIntentBoot = boot
+        startIntentPending = true
+        startIntentDeadline = Date.now() + 6500
+        startIntentExpiry.restart()
+        controller.showMessage("START queued — waiting for 4I+4V profile readiness on this board.", false)
+        return true
+    }
+    function tryConsumeFirstStart() {
+        if (!startIntentPending || !smartSession.startReady) return
+        const boot = String(device.deviceIdentity ? device.deviceIdentity.bootId : device.bootId)
+        if (!device.deviceVerified || !device.connected || boot !== startIntentBoot ||
+            Date.now() > startIntentDeadline) {
+            cancelStartIntent()
+            return
+        }
+        cancelStartIntent()
+        Qt.callLater(function() {
+            // Verify the device again AFTER scheduling, never replay a stale
+            // intent across a new session, and snapshot the actual GUI now.
+            if (device.deviceVerified && device.connected && smartSession.startReady &&
+                !device.running && !device.scenarioApplying)
+                ribbon.requestStart()
+        })
+    }
+    Connections {
+        target: smartSession
+        function onStateChanged() { ribbon.tryConsumeFirstStart() }
+    }
     Connections {
         target: ribbon.device
         function onRunningChanged() {
             if (ribbon.device.running) controller.pendingApply = false
         }
         function onDeviceVerifiedChanged() {
-            if (!ribbon.device.deviceVerified) controller.pendingApply = true
+            if (!ribbon.device.deviceVerified) {
+                controller.pendingApply = true
+                ribbon.cancelStartIntent()
+            }
         }
     }
     property bool updatePromptDeferred: false
@@ -271,8 +334,13 @@ SurfacePanel {
             return
         }
         if (!smartSession.startReady) {
-            // One click must explain why a physical START is not queued.
-            // Never make the operator click twice to discover readiness.
+            // A first click during same-device profile preparation is retained
+            // briefly and dispatched once READY. Other errors are explained.
+            if (smartSession.state === "PREPARING 4I+4V" ||
+                smartSession.state === "RECOVERING PROFILE" ||
+                smartSession.state === "DEVICE FOUND") {
+                if (ribbon.queueFirstStart()) return
+            }
             controller.showMessage("START waiting: " + ribbon.startReason(), true)
             return
         }
@@ -291,6 +359,11 @@ SurfacePanel {
     }
 
     function requestStop() {
+        if (ribbon.startIntentPending) {
+            ribbon.cancelStartIntent()
+            controller.showMessage("Pending START cancelled.", false)
+            return
+        }
         // A pending CFG transaction can progress to START: Stop must remain
         // actionable before RUNNING telemetry, not only after it.
         if (!ribbon.injectionRunning && !ribbon.startQueued) return
