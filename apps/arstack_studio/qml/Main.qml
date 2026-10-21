@@ -431,16 +431,20 @@ ApplicationWindow {
     }
 
     function parseOperatorNumber(text) {
+        // Dot and comma are alternative DECIMAL separators, irrespective of
+        // Windows/keyboard locale. Never guess thousands separators or
+        // silently reinterpret ambiguous mixed punctuation.
         var normalized = String(text).trim()
-            .replace(/\s/g, "")
+            .replace(/[\s\u00a0]/g, "")
             .replace(/degrees?/ig, "")
             .replace(/deg/ig, "")
             .replace(/°/g, "")
             .replace(/Hz/ig, "")
             .replace(/[AV]$/i, "")
-        if (normalized.indexOf(",") >= 0 && normalized.indexOf(".") < 0)
-            normalized = normalized.replace(",", ".")
-        if (!normalized.length || normalized === "+" || normalized === "-" || normalized === ".")
+        if (normalized.indexOf(",") !== -1 && normalized.indexOf(".") !== -1)
+            return NaN
+        normalized = normalized.replace(/,/g, ".")
+        if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(normalized))
             return NaN
         return Number(normalized)
     }
@@ -1005,9 +1009,28 @@ ApplicationWindow {
     }
 
     ColumnLayout {
+        id: mainWorkspaceLayout
         anchors.fill: parent
         anchors.margins: 8
         spacing: 8
+
+        // Passive parent-level tap: clicking an unused surface also commits
+        // an edited channel field. A tap on that same field keeps editing.
+        // Child controls retain ownership of their own clicks/key handling.
+        TapHandler {
+            acceptedButtons: Qt.LeftButton
+            gesturePolicy: TapHandler.DragThreshold
+            onTapped: function(point) {
+                const editor = root.activeFocusItem
+                if (!editor || (editor.objectName !== "matrixMagnitudeEditor" &&
+                                editor.objectName !== "matrixPhaseEditor")) return
+                const local = editor.mapFromItem(mainWorkspaceLayout,
+                                                point.position.x, point.position.y)
+                if (local.x < 0 || local.y < 0 ||
+                    local.x >= editor.width || local.y >= editor.height)
+                    editor.focus = false
+            }
+        }
 
         WorkflowBar {
             id: workflowBar
@@ -1065,9 +1088,13 @@ ApplicationWindow {
                     objectName: "studioInjectionSurface"
                     SplitView.fillWidth: true
                     SplitView.fillHeight: true
-                    SplitView.minimumWidth: root.compactLayout ? 500 : 540
-                    SplitView.preferredWidth: root.compactLayout ? 600 : 690
-                    SplitView.maximumWidth: 750
+                    // Proportional initial balance. The edit table is a
+                    // narrow control surface, not a full-width spreadsheet.
+                    // Splitter remains operator-draggable within safe limits.
+                    SplitView.minimumWidth: 405
+                    SplitView.preferredWidth: Math.max(420,
+                        Math.min(485, Math.round(workspaceSplit.width * 0.41)))
+                    SplitView.maximumWidth: 535
                     theme: studioTheme
 
                     ColumnLayout {
@@ -1118,10 +1145,10 @@ ApplicationWindow {
                                 anchors.fill: parent
                                 anchors.leftMargin: 11
                                 anchors.rightMargin: 11
-                                spacing: 8
+                                spacing: root.compactLayout ? 4 : 8
 
                                 Label {
-                                    text: "Frequency"
+                                    text: root.compactLayout ? "Freq" : "Frequency"
                                     color: studioTheme.textSoft
                                     font.family: root.uiFont
                                     font.pixelSize: 10
@@ -1141,7 +1168,8 @@ ApplicationWindow {
                                     theme: studioTheme
                                     monoFont: root.monoFont
                                     compact: root.compactLayout
-                                    implicitWidth: 90
+                                    implicitWidth: root.compactLayout ? 76 : 90
+                                    Layout.preferredWidth: root.compactLayout ? 76 : 90
                                     text: "50.000"
                                     suffixText: "Hz"
                                     enabled: true
@@ -1168,14 +1196,15 @@ ApplicationWindow {
                                     }
                                 }
 
-                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "0"; implicitWidth: 44; toolTipText: "DC"; onClicked: root.setFrequencyValue(0) }
-                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "50"; implicitWidth: 44; onClicked: root.setFrequencyValue(50) }
-                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "60"; implicitWidth: 44; onClicked: root.setFrequencyValue(60) }
+                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "0"; implicitWidth: root.compactLayout ? 32 : 44; toolTipText: "DC"; onClicked: root.setFrequencyValue(0) }
+                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "50"; implicitWidth: root.compactLayout ? 32 : 44; onClicked: root.setFrequencyValue(50) }
+                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "60"; implicitWidth: root.compactLayout ? 32 : 44; onClicked: root.setFrequencyValue(60) }
                                 Rectangle { width: 1; height: 24; color: studioTheme.lineSoft }
                                 StudioLinkSwitch {
                                     theme: studioTheme
                                     uiFont: root.uiFont
                                     enabled: root.signalFrequency > 0 && !workflowBar.startQueued
+                                    text: root.compactLayout ? "Link A/B/C" : "3-phase link"
                                     checked: root.phaseLink
                                     onToggled: {
                                         // Link is an editing preference, not a wire
@@ -1296,8 +1325,9 @@ ApplicationWindow {
                 SplitView {
                     visible: (root.phasorDockVisible && !root.phasorDetached) ||
                              (root.waveformDockVisible && !root.waveformDetached)
-                    SplitView.preferredWidth: root.compactLayout ? 450 : 470
-                    SplitView.minimumWidth: root.compactLayout ? 300 : 340
+                    SplitView.preferredWidth: Math.max(490,
+                        Math.round(workspaceSplit.width * 0.59))
+                    SplitView.minimumWidth: 360
                     SplitView.maximumWidth: 680
                     SplitView.fillHeight: true
                     orientation: Qt.Vertical
@@ -1317,10 +1347,9 @@ ApplicationWindow {
                     DockFrame {
                         visible: root.phasorDockVisible && !root.phasorDetached
                         SplitView.fillWidth: true
-                        SplitView.minimumHeight: 170
-                        SplitView.preferredHeight: 225
-                        SplitView.maximumHeight: 265
-                        SplitView.fillHeight: false
+                        SplitView.minimumHeight: 210
+                        SplitView.preferredHeight: 310
+                        SplitView.fillHeight: true
                         theme: studioTheme
                         titleText: "Phasor"
                         statusText: ""
@@ -1357,8 +1386,8 @@ ApplicationWindow {
                     DockFrame {
                         visible: root.waveformDockVisible && !root.waveformDetached
                         SplitView.fillWidth: true
-                        SplitView.minimumHeight: 170
-                        SplitView.preferredHeight: 328
+                        SplitView.minimumHeight: 210
+                        SplitView.preferredHeight: 310
                         SplitView.fillHeight: true
                         theme: studioTheme
                         titleText: "Waveform"
