@@ -57,6 +57,9 @@ public:
             {"PTP rejected config never starts", ptpGuidedRejectedConfigStops()},
             {"PTP STOP cancels pending start after verified readback", ptpGuidedStopCancelsStart()},
             {"legacy bare SV START refuses stale eight-channel state", legacyBareStartFailsClosed()},
+            {"first verified START click is retained during profile preparation and dispatched exactly once", firstStartClickWaitsForSameBoardAndDispatchesOnce()},
+            {"STOP and board session changes cancel pending first START", deferredFirstStartCannotSurviveStopOrIdentityChange()},
+            {"pending first START times out instead of running later", deferredFirstStartTimesOutFailClosed()},
             {"SV commit ACK/readback START chain is generation bound", svTransactionAckChain()},
             {"SV stale ACK and mismatched firmware readback fail closed", svTransactionNegativeAcks()},
             {"STOP cancels pending SV commit-to-START chain", svStopCancelsPendingStart()},
@@ -567,6 +570,97 @@ private:
         d.scenarioBoot_ = d.identity_.bootId;
         d.scenarioSessionGeneration_ = d.sessionGeneration_;
         d.scenarioProfileGeneration_ = d.profileGeneration_;
+    }
+
+    static QVariantMap validStartDraft() {
+        auto rows = [](const double mag) {
+            QVariantList value;
+            for (int i = 0; i < 4; ++i) {
+                value.append(QVariantList{
+                    i == 3 ? 0.0 : mag,
+                    i == 0 ? 0.0 : i == 1 ? -120.0 : i == 2 ? 120.0 : 0.0,
+                    true, 0U});
+            }
+            return value;
+        };
+        return QVariantMap{
+            {QStringLiteral("hz"), 50.0},
+            {QStringLiteral("currentScale"), 1000.0},
+            {QStringLiteral("voltageScale"), 100.0},
+            {QStringLiteral("current"), rows(1.0)},
+            {QStringLiteral("voltage"), rows(57.74)},
+            {QStringLiteral("ct"), QVariantMap{
+                {QStringLiteral("enabled"), false},
+                {QStringLiteral("dc"), 0.0},
+                {QStringLiteral("harmonic"), 0.0},
+                {QStringLiteral("order"), 2},
+                {QStringLiteral("clip"), 100.0}}}};
+    }
+
+    static bool firstStartClickWaitsForSameBoardAndDispatchesOnce() {
+        Fixture f;
+        auto identityWithTxn = identity();
+        identityWithTxn.capabilities << QStringLiteral("SV-CONFIG-TXN-V1");
+        seedVerified(f, identityWithTxn, QStringLiteral("COM7"), false);
+        auto& session = f.session;
+        auto& device = f.device;
+        device.ioWorkerReady_ = true;
+        session.needsProfileSync_ = true;
+        session.profileSyncStage_ = SmartSessionController::ProfileSyncStage::deploying;
+        device.profileDeploying_ = true;
+        session.setPresentation(QStringLiteral("PREPARING 4I+4V"),
+                                QStringLiteral("Preparing"), false, false);
+        const QVariantMap draft = validStartDraft();
+        if (!session.requestStartWithScenario(draft) || !session.startIntentPending() ||
+            device.scenarioApplying() || session.requestStartWithScenario(draft))
+            return false;
+        // A verified profile ACK can satisfy exactly this operator's pending
+        // click; the C++ coordinator still enforces the CFG/COMMIT/START chain.
+        session.profileSyncStage_ = SmartSessionController::ProfileSyncStage::idle;
+        session.needsProfileSync_ = false;
+        device.profileDeploying_ = false;
+        device.profileArmed_ = true;
+        session.setPresentation(QStringLiteral("READY"), QStringLiteral("Ready"), true, false);
+        session.submitPendingStart();  // deterministic equivalent of posted dispatch
+        if (session.startIntentPending() || !device.scenarioApplying()) return false;
+        session.submitPendingStart();  // duplicate READY cannot enqueue twice
+        return device.scenarioApplying();
+    }
+
+    static bool deferredFirstStartCannotSurviveStopOrIdentityChange() {
+        auto prepared = [](Fixture& f) {
+            seedVerified(f, identity(), QStringLiteral("COM7"), false);
+            f.session.setPresentation(QStringLiteral("PREPARING 4I+4V"),
+                                      QStringLiteral("Preparing"), false, false);
+        };
+        {
+            Fixture f;
+            prepared(f);
+            if (!f.session.requestStartWithScenario(validStartDraft())) return false;
+            if (!f.session.requestStop() || f.session.startIntentPending()) return false;
+            f.session.setPresentation(QStringLiteral("READY"),
+                                      QStringLiteral("Ready"), true, false);
+            f.session.submitPendingStart();
+            if (f.device.scenarioApplying()) return false;
+        }
+        {
+            Fixture f;
+            prepared(f);
+            if (!f.session.requestStartWithScenario(validStartDraft())) return false;
+            f.session.advanceSessionGeneration();
+            return !f.session.startIntentPending();
+        }
+    }
+
+    static bool deferredFirstStartTimesOutFailClosed() {
+        Fixture f;
+        seedVerified(f, identity(), QStringLiteral("COM7"), false);
+        f.session.setPresentation(QStringLiteral("PREPARING 4I+4V"),
+                                  QStringLiteral("Preparing"), false, false);
+        if (!f.session.requestStartWithScenario(validStartDraft())) return false;
+        if (!QMetaObject::invokeMethod(&f.session.startIntentTimer_,
+                                       "timeout", Qt::DirectConnection)) return false;
+        return !f.session.startIntentPending() && !f.device.scenarioApplying();
     }
 
     static bool svTransactionAckChain() {
