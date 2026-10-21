@@ -156,8 +156,12 @@ ApplicationWindow {
     property real activePhase: 0.0
     property real activeQuality: 0
     property string transientMessage: ""
+    property string transientDetail: ""
     property string statusMessage: ""
     property bool transientError: false
+    property string lastOperatorNoticeKey: ""
+    property double lastOperatorNoticeMs: 0
+    property bool lastPtpStartPending: false
     property bool phasorDockVisible: true
     property bool phasorDetached: false
     property bool waveformDockVisible: true
@@ -196,6 +200,7 @@ ApplicationWindow {
     readonly property bool canDeploy: workflowBar.session ? workflowBar.session.canDeployProfile : false
     readonly property bool canStart: workflowBar.session ? workflowBar.session.startReady : false
     readonly property string toastMessage: transientMessage
+    readonly property string toastDetail: transientDetail
     readonly property bool toastError: transientError
 
     SclProfileModel { id: sclProfiles }
@@ -208,7 +213,18 @@ ApplicationWindow {
                 root.profileDirty = false
         }
         function onDeviceMessage(message) {
-            root.showMessage(message, false)
+            // DeviceController::setError() emits deviceMessage after updating
+            // lastError. Previously all real firmware faults arrived as INFO
+            // and were silently relegated to the 9px footer.
+            root.showMessage(message, message === device.lastError)
+        }
+        function onPtpStateChanged() {
+            const pending = device.ptpStarting
+            // New explicit START = new operator action; do not suppress a
+            // repeated physical fault merely because its code is the same.
+            if (pending && !root.lastPtpStartPending)
+                root.lastOperatorNoticeKey = ""
+            root.lastPtpStartPending = pending
         }
         function onSvStopReasonChanged() {
             if (!device.running && device.svStopReason !== "" &&
@@ -227,6 +243,11 @@ ApplicationWindow {
     Connections {
         target: workflowBar.session
         function onFirmwareUpdateFinished(success) {
+            if (success)
+                root.showMessage("Firmware updated and verified on the board.", false)
+            else
+                root.showMessage("Firmware update failed: " +
+                    workflowBar.session.firmwareUpdateResult, true)
             // Reset during firmware install stops the board's PTP SOURCE.
             // If the operator explicitly enabled it in this live Studio
             // session, restore once after the verified board is ready.
@@ -250,6 +271,13 @@ ApplicationWindow {
             if (!session || !device.deviceVerified || !session.startReady ||
                     session.updatingFirmware || device.ptpStarting) return
             root.ptpDefaultStartAttempted = true
+            if (device.ptpEthernetLink === "DOWN" ||
+                device.ptpEthernetDriver === "STOPPED") {
+                // This default is a convenience, not an excuse to send a
+                // doomed START without a board-proven physical Ethernet link.
+                root.showMessage("ETHERNET_LINK_DOWN: PTP auto-start held", true)
+                return
+            }
             if (!device.ptpRunning && !root.startPtpRole("SOURCE"))
                 root.showMessage("PTP could not start automatically; use PTP On to retry.", true)
         }
@@ -284,6 +312,7 @@ ApplicationWindow {
         interval: 2600
         onTriggered: {
             root.transientMessage = ""
+            root.transientDetail = ""
             root.transientError = false
             root.statusMessage = ""
         }
@@ -310,18 +339,80 @@ ApplicationWindow {
         ListElement { timeText: "--:--:--"; messageText: "ARStack Studio ready."; isError: false }
     }
 
+    // Single operator notification policy for Main + Advanced. The original
+    // error remains in the bounded event history and Copy diagnostics; only
+    // the short, actionable explanation is shown over the controls.
+    function operatorNotice(raw, failure) {
+        const m = String(raw || "").trim()
+        const linkDown = /ETHERNET_LINK_DOWN|Ethernet PHY link is DOWN/i.test(m) ||
+            (/PTP/i.test(m) && device.ptpEthernetLink === "DOWN")
+        if (linkDown) return {
+            key: "ptp-link-down",
+            title: "PTP belum bisa dimulai — Ethernet terputus",
+            detail: "Hubungkan port Ethernet ESP32-P4 ke laptop atau switch yang aktif. Tunggu LINK menyala, lalu tekan Start PTP lagi.",
+            error: true
+        }
+        if (/ETHERNET_DRIVER_NOT_STARTED|ETHERNET_DRIVER_UNAVAILABLE|ETHERNET_DRIVER_NOT_READY/i.test(m))
+            return { key: "ptp-driver", title: "Driver Ethernet board belum siap",
+                     detail: "Periksa status Driver di Time Sync. Jika tetap STOPPED, restart board dan coba lagi.", error: true }
+        if (/ETHERNET_TX_INVALID_STATE|ESP_ERR_INVALID_STATE/i.test(m))
+            return { key: "ptp-mac-tx", title: "PTP gagal mengirim lewat Ethernet",
+                     detail: "EMAC menolak TX. Periksa Driver dan PHY di Time Sync, lalu Copy diagnostics.", error: true }
+        if (/LEASE_EXPIRED|control.session.lease.expired/i.test(m))
+            return { key: "sv-heartbeat", title: "Injeksi SV berhenti — komunikasi terputus",
+                     detail: "Periksa USB/COM dan koneksi Studio–board sebelum menekan Start lagi.", error: true }
+        if (/RUNTIME_FAULT|FIRMWARE_STOP_CAUSE/i.test(m))
+            return { key: "sv-fault", title: "Injeksi SV dihentikan oleh board",
+                     detail: "Buka Copy diagnostics untuk melihat fault. Pastikan board siap sebelum Start ulang.", error: true }
+        if (/PTP .*failed|PTP .*rejected|PTP .*timed out|PTP could not start|PTP did not restart|PTP source did not|PTP start did not/i.test(m))
+            return { key: "ptp-failed", title: "PTP belum berhasil aktif",
+                     detail: "Periksa Driver/PHY pada Time Sync. Detail penyebab tersedia di Copy diagnostics.", error: true }
+        if (/firmware.*(fail|reject|error|timeout)|firmware update failed/i.test(m))
+            return { key: "firmware-failed", title: "Pembaruan firmware belum berhasil",
+                     detail: "Periksa koneksi USB dan tahap update di Advanced → Firmware. Lihat diagnostics sebelum mencoba lagi.", error: true }
+        if (/profile.*(fail|reject|error|blocked)|configuration.*(fail|reject)/i.test(m))
+            return { key: "profile-failed", title: "Konfigurasi belum diterapkan",
+                     detail: "Periksa profil dan koneksi board. Gunakan Copy diagnostics untuk rincian.", error: true }
+        if (/capture.*(fail|reject|error|unavailable)/i.test(m))
+            return { key: "capture-failed", title: "Capture belum berhasil",
+                     detail: "Periksa adapter Ethernet yang dipilih dan akses capture. Lihat detail diagnostik.", error: true }
+        if (failure)
+            return { key: "error:" + m.slice(0, 100), title: "Perintah belum berhasil",
+                     detail: m.length > 190 ? m.slice(0, 187) + "…" : m, error: true }
+        if (/copied|saved|verified|firmware updated|successfully|completed/i.test(m))
+            return { key: "info:" + m.slice(0, 90), title: "Selesai",
+                     detail: m.length > 180 ? m.slice(0, 177) + "…" : m, error: false }
+        // High-frequency telemetry and routine informational chatter never
+        // steal focus or overwrite a currently displayed fault.
+        return null
+    }
+
     function showMessage(message, error) {
-        statusMessage = message
-        transientMessage = error === true ? message : ""
-        transientError = error === true
+        const raw = String(message || "").trim()
+        if (raw.length === 0) return
+        statusMessage = raw
         statusHistoryModel.append({
             timeText: new Date().toLocaleTimeString(Qt.locale(), "HH:mm:ss"),
-            messageText: message,
+            messageText: raw,
             isError: error === true
         })
         while (statusHistoryModel.count > 100)
             statusHistoryModel.remove(0)
-        messageTimer.restart()
+
+        const notice = operatorNotice(raw, error === true)
+        if (!notice) return
+        const now = Date.now()
+        if (notice.key === lastOperatorNoticeKey && now - lastOperatorNoticeMs < 8000)
+            return
+        if (messageTimer.running && transientError && !notice.error)
+            return // a success/info notice must not bury an active failure
+        lastOperatorNoticeKey = notice.key
+        lastOperatorNoticeMs = now
+        transientMessage = notice.title
+        transientDetail = notice.detail
+        transientError = notice.error
+        messageTimer.interval = notice.error ? 4600 : 2800
+        messageTimer.restart() // toast clears; board fault remains unchanged
     }
 
     function detachPhasor() {
@@ -870,6 +961,17 @@ ApplicationWindow {
                 monoFont: root.monoFont
             }
         }
+
+        // The active Advanced window is its own native Window; an overlay
+        // attached only to Main.qml is invisible behind this window.
+        StatusToast {
+            anchors.centerIn: parent
+            theme: studioTheme
+            uiFont: root.uiFont
+            message: root.toastMessage
+            detail: root.toastDetail
+            error: root.toastError
+        }
     }
 
     Window {
@@ -1370,12 +1472,12 @@ ApplicationWindow {
     }
 
     StatusToast {
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 38
+        anchors.centerIn: parent
+        visible: root.toastMessage.length > 0 && !configurationWindow.visible
         theme: studioTheme
         uiFont: root.uiFont
         message: root.toastMessage
+        detail: root.toastDetail
         error: root.toastError
     }
 }
