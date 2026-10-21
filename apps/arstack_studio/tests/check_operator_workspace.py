@@ -504,7 +504,9 @@ def main() -> None:
             and "SvStopCause::lease_expired" in life_firmware
             and "SvStopCause::runtime_fault" in life_firmware
             and "Q_PROPERTY(QString svStopReason READ svStopReason NOTIFY svStopReasonChanged)" in life_header
-            and "ribbon.unexpectedSvStop" in life_qml,
+            and "ribbon.unexpectedSvStop" in life_qml
+            and "workflowBar.displayState" in source("Main.qml")
+            and "function onSvStopReasonChanged()" in source("Main.qml"),
             "SV output must fail-closed on measured heartbeat loss, preserve board STOP cause, "
             "and never show misleading green READY after an unrequested stop")
 
