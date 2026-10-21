@@ -552,7 +552,8 @@ def main() -> None:
             and "SplitView.maximumWidth: 535" in responsive_main
             and "SplitView.preferredHeight: 310" in responsive_main
             and "SplitView.maximumHeight: 265" not in responsive_main
-            and "onClicked: root.forceActiveFocus()" in responsive_main
+            and "id: injectionFocusSink" in responsive_main
+            and "onClicked: injectionFocusSink.forceActiveFocus()" in responsive_main
             and "electric_bolt_run.svg" in ribbon_layout
             and "electric_bolt_stop.svg" in ribbon_layout
             and "assets/material/electric_bolt_run.svg" in
