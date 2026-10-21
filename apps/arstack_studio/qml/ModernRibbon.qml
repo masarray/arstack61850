@@ -222,15 +222,16 @@ Rectangle {
         }
 
         Rectangle {
+            id: svStatusChip
             readonly property bool svRunning: Boolean(bar.device && bar.device.running)
             readonly property bool svPending: bar.workflow.startQueued
             Layout.preferredWidth: bar.compact ? 82 : 105
             Layout.preferredHeight: 36
             Layout.alignment: Qt.AlignVCenter
             radius: 12
-            color: svRunning ? "#112820" : svPending ? "#1e2224" : "#25191d"
+            color: svStatusChip.svRunning ? "#112820" : svStatusChip.svPending ? "#1e2224" : "#25191d"
             border.width: 1
-            border.color: svRunning ? "#36785a" : svPending ? bar.theme.amber : "#653b44"
+            border.color: svStatusChip.svRunning ? "#36785a" : svStatusChip.svPending ? bar.theme.amber : "#653b44"
 
             RowLayout {
                 anchors.fill: parent
@@ -241,7 +242,7 @@ Rectangle {
                 Image {
                     width: 20
                     height: 20
-                    source: Qt.resolvedUrl(svRunning
+                    source: Qt.resolvedUrl(svStatusChip.svRunning
                         ? "../assets/material/bolt_run.svg"
                         : "../assets/material/bolt_stop.svg")
                     sourceSize.width: 24
@@ -250,8 +251,8 @@ Rectangle {
                 }
                 Label {
                     Layout.fillWidth: true
-                    text: svRunning ? "RUN" : svPending ? "WAIT" : "STOP"
-                    color: svRunning ? "#41dfa1" : svPending ? bar.theme.amber : "#d1848d"
+                    text: svStatusChip.svRunning ? "RUN" : svStatusChip.svPending ? "WAIT" : "STOP"
+                    color: svStatusChip.svRunning ? "#41dfa1" : svStatusChip.svPending ? bar.theme.amber : "#d1848d"
                     font.family: bar.uiFont
                     font.pixelSize: 11
                     font.weight: Font.Bold
