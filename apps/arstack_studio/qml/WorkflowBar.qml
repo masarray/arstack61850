@@ -48,7 +48,7 @@ SurfacePanel {
         if (!device.deviceVerified || !device.connected ||
             smartSession.updatingFirmware || smartSession.firmwareUpdateRequired ||
             smartSession.firmwareInstallRequired) return false
-        const boot = String(device.deviceIdentity ? device.deviceIdentity.bootId : device.bootId)
+        const boot = String(device.bootId)
         if (!boot || boot === "undefined") return false
         startIntentBoot = boot
         startIntentPending = true
@@ -59,7 +59,7 @@ SurfacePanel {
     }
     function tryConsumeFirstStart() {
         if (!startIntentPending || !smartSession.startReady) return
-        const boot = String(device.deviceIdentity ? device.deviceIdentity.bootId : device.bootId)
+        const boot = String(device.bootId)
         if (!device.deviceVerified || !device.connected || boot !== startIntentBoot ||
             Date.now() > startIntentDeadline) {
             cancelStartIntent()
