@@ -148,7 +148,7 @@ def main() -> None:
             and 'SplitView.fillWidth: true' in main_qml
             and 'bolt_run.svg' in ribbon_now
             and 'bolt_stop.svg' in ribbon_now
-            and 'text: svRunning ? "RUN" : svPending ? "WAIT" : "STOP"' in ribbon_now
+            and 'text: svStatusChip.svRunning ? "RUN" : svStatusChip.svPending ? "WAIT" : "STOP"' in ribbon_now
             and 'startIntentPending READ startIntentPending' in session_h
             and 'pendingStartGeneration_ != sessionGeneration_' in session_cpp_now
             and 'pendingStartBootId_ != device_->bootId()' in session_cpp_now
