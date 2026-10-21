@@ -196,12 +196,21 @@ def main() -> None:
             and 'startWatchdog' not in source("WorkflowBar.qml"),
             "SV STOP must remain actionable while the acknowledged scenario transaction is pending")
     require("function flushPendingEdits()" in matrix
-            and "magnitudeApplyTimer.stop()" in matrix
-            and "phaseApplyTimer.stop()" in matrix
+            and "function commitMagnitude()" in matrix
+            and "function commitPhase()" in matrix
+            and "return commitMagnitude() && commitPhase()" in matrix
+            and "magnitudeApplyTimer" not in matrix
+            and "phaseApplyTimer" not in matrix
+            and "onEditingFinished: signalRow.commitMagnitude()" in matrix
+            and "onEditingFinished: signalRow.commitPhase()" in matrix
+            and "else signalRow.commitMagnitude()" in matrix
+            and "else signalRow.commitPhase()" in matrix
+            and "onTextEdited:" in matrix
+            and "onTriggered: matrix.controller.editSignal" not in matrix
             and "currentMatrix.flushPendingEdits()" in main_qml
             and "voltageMatrix.flushPendingEdits()" in main_qml
             and "if (!scenario) return" in source("WorkflowBar.qml"),
-            "START must commit last visible I/V angle before ordered scenario serialization")
+            "Each numeric edit must commit only on Enter/Tab/blur/START, never via keyboard debounce")
     require("Layout.fillHeight: true" in main_qml
             and "Layout.maximumHeight: root.compactLayout ? 352 : 384" not in main_qml
             and main_qml.index("id: voltageMatrix") < main_qml.index("id: currentMatrix"),
@@ -544,8 +553,11 @@ def main() -> None:
     ribbon_layout = source("ModernRibbon.qml")
     start_flow = source("WorkflowBar.qml")
     require("width: 1150" in responsive_main
-            and "SplitView.maximumWidth: 750" in responsive_main
-            and "SplitView.preferredWidth: root.compactLayout ? 450 : 470" in responsive_main
+            and "SplitView.maximumWidth: 535" in responsive_main
+            and "Math.round(workspaceSplit.width * 0.41)" in responsive_main
+            and responsive_main.count("SplitView.preferredHeight: 310") == 2
+            and responsive_main.count("SplitView.fillHeight: true") >= 3
+            and "SplitView.maximumHeight: 265" not in responsive_main
             and "electric_bolt_run.svg" in ribbon_layout
             and "electric_bolt_stop.svg" in ribbon_layout
             and "assets/material/electric_bolt_run.svg" in
@@ -554,6 +566,19 @@ def main() -> None:
                 (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8")
             and "bar.device.running ? \"RUN\" : \"STOP\"" in ribbon_layout,
             "Studio default workbench must balance channels and charts; physical RUN/STOP uses supplied bolt")
+    require("function parseOperatorNumber(text)" in responsive_main
+            and 'normalized = normalized.replace(/,/g, ".")' in responsive_main
+            and "normalized.indexOf(\",\") !== -1 && normalized.indexOf(\".\") !== -1" in responsive_main
+            and "objectName: \"matrixMagnitudeEditor\"" in matrix
+            and "objectName: \"matrixPhaseEditor\"" in matrix
+            and "id: mainWorkspaceLayout" in responsive_main
+            and "TapHandler {" in responsive_main
+            and "editor.focus = false" in responsive_main
+            and "Previous value restored" in matrix
+            and "if (value === mag) return true" in matrix
+            and "if (value === angle) return true" in matrix,
+            "Accept comma/dot decimals, commit on outside click and restore invalid drafts without duplicate SET")
+
     require("property bool startIntentPending: false" in start_flow
             and "String(device.bootId)" in start_flow
             and "startIntentDeadline = Date.now() + 6500" in start_flow
