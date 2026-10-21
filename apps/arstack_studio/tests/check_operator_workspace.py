@@ -206,7 +206,7 @@ def main() -> None:
             and "else signalRow.commitMagnitude()" in matrix
             and "else signalRow.commitPhase()" in matrix
             and "onTextEdited:" in matrix
-            and "onTriggered: matrix.controller.editSignal" not in matrix
+            and "interval: 90" not in matrix
             and "currentMatrix.flushPendingEdits()" in main_qml
             and "voltageMatrix.flushPendingEdits()" in main_qml
             and "if (!scenario) return" in source("WorkflowBar.qml"),
