@@ -2130,9 +2130,16 @@ void DeviceController::processLine(const QString& rawLine) {
     if (match.hasMatch()) {
         // Only the board's ETH_EVENT stream may establish this state;
         // NEVER infer it from COM, profile selection or PTP SOURCE intent.
+        const QString previousLink = ptpEthernetLink_;
         ptpEthernetDriver_ = match.captured(1).toUpper();
         ptpEthernetLink_ = match.captured(2).toUpper();
         emit ptpStateChanged();
+        if (previousLink == QStringLiteral("DOWN") &&
+            ptpEthernetLink_ == QStringLiteral("UP") &&
+            ptpEthernetDriver_ == QStringLiteral("STARTED")) {
+            emit deviceMessage(QStringLiteral(
+                "Ethernet connected — PHY UP. PTP dapat di-START kembali."));
+        }
     }
 
     match = kPtpStatusExpression.match(line);
