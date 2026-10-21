@@ -7,8 +7,8 @@ import ARStack.Studio 1.0
 
 ApplicationWindow {
     id: root
-    width: 1240
-    height: 760
+    width: 1150
+    height: 790
     minimumWidth: 960
     minimumHeight: 620
     visible: true
@@ -192,7 +192,7 @@ ApplicationWindow {
         source: Qt.resolvedUrl("../assets/InterVariable.ttf")
     }
 
-    readonly property bool compactLayout: width < 1120
+    readonly property bool compactLayout: width < 1220
     readonly property bool canDeploy: workflowBar.session ? workflowBar.session.canDeployProfile : false
     readonly property bool canStart: workflowBar.session ? workflowBar.session.startReady : false
     readonly property string toastMessage: transientMessage
@@ -1065,8 +1065,9 @@ ApplicationWindow {
                     objectName: "studioInjectionSurface"
                     SplitView.fillWidth: true
                     SplitView.fillHeight: true
-                    SplitView.minimumWidth: root.compactLayout ? 500 : 550
-                    SplitView.preferredWidth: root.compactLayout ? 700 : 860
+                    SplitView.minimumWidth: root.compactLayout ? 500 : 540
+                    SplitView.preferredWidth: root.compactLayout ? 600 : 690
+                    SplitView.maximumWidth: 750
                     theme: studioTheme
 
                     ColumnLayout {
@@ -1295,8 +1296,8 @@ ApplicationWindow {
                 SplitView {
                     visible: (root.phasorDockVisible && !root.phasorDetached) ||
                              (root.waveformDockVisible && !root.waveformDetached)
-                    SplitView.preferredWidth: root.compactLayout ? 300 : 380
-                    SplitView.minimumWidth: root.compactLayout ? 270 : 300
+                    SplitView.preferredWidth: root.compactLayout ? 450 : 470
+                    SplitView.minimumWidth: root.compactLayout ? 300 : 340
                     SplitView.maximumWidth: 680
                     SplitView.fillHeight: true
                     orientation: Qt.Vertical
