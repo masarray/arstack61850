@@ -546,7 +546,9 @@ def main() -> None:
             and toast_layout.count("anchors.centerIn: parent") >= 2
             and "lastToastAt" in toast_layout
             and "messageTimer.interval = critical ? 4200 : 2300" in toast_layout
-            and "wrapMode: Text.WordWrap" in toast_view,
+            and "wrapMode: Text.WordWrap" in toast_view
+            and "Ethernet connected" in
+                (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8"),
             "PTP physical-link and board failures must generate bounded actionable center-screen toasts "
             "in both the main window and Advanced")
 
