@@ -158,6 +158,8 @@ qt_add_qml_module(arstack_studio
         assets/material/file_upload.svg
         assets/material/stop.svg
         assets/material/play_arrow.svg
+        assets/material/run-bolt.svg
+        assets/material/stop-bolt.svg
         assets/material/dashboard.svg
         assets/material/folder_open.svg
         assets/material/search.svg
