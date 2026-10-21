@@ -59,12 +59,19 @@ def main() -> None:
             and "measured_pairs() const noexcept" in sv_gate,
             "PTP startup must compensate GPTimer enable delay and expose early acquisition measurements")
     require("SvLocalRefAcquisition local_acquisition;" in firmware_source
-            and "local_acquisition.observe(" in firmware_source
+            and "local_acquisition.observe_preflight(" in firmware_source
+            and "local_acquisition.observe_live(" in firmware_source
             and "local_acquisition.reset();" in firmware_source
-            and "clean=%lu/%lu" in firmware_source
+            and "live_clean=%lu/%lu warm_phase=%lu/%lu live_age=%lu" in firmware_source
             and "kRequiredCleanEpochs = 10U" in sv_gate
-            and "check_no_intermitttent_local_at_start()" in sv_tests,
-            "LOCAL REF startup must require ten clean real epochs and immediately revoke on faults")
+            and "kWarmRequiredLiveEpochs = 3U" in sv_gate
+            and "kMaxWarmMacAcquisitionEpochs = 8U" in sv_gate
+            and "if (had_mac_evidence_) reset();" in sv_gate
+            and "check_no_intermitttent_local_at_start()" in sv_tests
+            and "check_warm_phase_preflight_cannot_fake_canonical_mac()" in sv_tests
+            and "check_warm_preflight_negative_session_and_clock_faults()" in sv_tests,
+            "LOCAL REF: ten LIVE epochs for COLD, ten stable phase-only PREFLIGHT epochs "
+            "plus three verified LIVE MAC epochs for WARM; invalidate on loss of evidence")
     phase_header = (project_root / "include/ariec61850/time_sync/sv_ptp_phase_authority.hpp").read_text(encoding="utf-8")
     phase_tests = (project_root / "tests/test_sv_ptp_phase_authority.cpp").read_text(encoding="utf-8")
     require("g_preflight_phase_clock_active" in firmware_source
