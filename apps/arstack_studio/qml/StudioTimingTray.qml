@@ -72,7 +72,7 @@ Rectangle {
         // This is an action strip, not a second diagnostic/status card.
         RowLayout {
             Layout.fillWidth: true
-            spacing: tray.compact ? 7 : 10
+            spacing: tray.compact ? 5 : 10
             StudioPtpSwitch {
                 id: powerSwitch
                 objectName: "studioPtpSwitch"
@@ -112,7 +112,7 @@ Rectangle {
                 theme: tray.theme
                 uiFont: tray.uiFont
                 Layout.fillWidth: true
-                Layout.minimumWidth: 118
+                Layout.minimumWidth: tray.compact ? 102 : 118
                 model: ["Source", "Follower", "Monitor"]
                 currentIndex: tray.device && tray.device.ptpRunning
                     ? tray.roleIndex(tray.device.ptpRole) : tray.selectedRoleIndex
@@ -140,7 +140,7 @@ Rectangle {
                 theme: tray.theme
                 uiFont: tray.uiFont
                 Layout.fillWidth: true
-                Layout.minimumWidth: 100
+                Layout.minimumWidth: tray.compact ? 84 : 100
                 model: ["AUTO", "0 · No sync", "1 · Local (sim)", "2 · Global (sim)"]
                 currentIndex: tray.boardOnline
                     ? tray.syncIndex(tray.device.smpSynchMode) : offlineSettings.lastSynch
