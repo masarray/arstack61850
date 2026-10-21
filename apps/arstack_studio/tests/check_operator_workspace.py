@@ -549,6 +549,8 @@ def main() -> None:
             and "SplitView.preferredWidth: root.compactLayout ? 505 : 610" in layout
             and "SplitView.preferredWidth: root.compactLayout ? 420 : 560" in layout
             and "run-bolt.svg" in ribbon and "stop-bolt.svg" in ribbon
+            and "assets/material/run-bolt.svg" in (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8")
+            and "assets/material/stop-bolt.svg" in (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8")
             and 'text: bar.device.running ? "RUN" : "STOP"' in ribbon
             and "property bool startIntentWaiting: false" in workflow
             and "interval: 8000" in workflow
