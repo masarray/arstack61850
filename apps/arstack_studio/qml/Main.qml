@@ -1006,9 +1006,30 @@ ApplicationWindow {
     }
 
     ColumnLayout {
+        id: workbenchColumn
         anchors.fill: parent
         anchors.margins: 8
         spacing: 8
+
+        // Passive tap observer: clicking outside the currently focused numeric
+        // cell (including blank workspace/plots) commits via focus loss.
+        // Do not intercept ordinary buttons or text selection.
+        TapHandler {
+            acceptedButtons: Qt.LeftButton
+            onTapped: function(point) {
+                const editor = root.activeFocusItem
+                if (!editor || editor.suffixText === undefined || !editor.activeFocus)
+                    return
+                const at = editor.mapFromItem(
+                    workbenchColumn, point.position.x, point.position.y)
+                if (at.x >= 0 && at.x <= editor.width &&
+                    at.y >= 0 && at.y <= editor.height)
+                    return // a click inside the editing cell must never commit
+                Qt.callLater(function() {
+                    if (editor.activeFocus) root.forceActiveFocus()
+                })
+            }
+        }
 
         WorkflowBar {
             id: workflowBar
