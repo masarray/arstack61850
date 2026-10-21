@@ -101,6 +101,30 @@ def main() -> None:
             and "Firmware recovery" in ribbon_qml,
             "never infer missing firmware from USB timeout; retry identification and prioritize semantic-verified ports")
     main_qml = source("Main.qml")
+    toast_qml = source("StatusToast.qml")
+    require(main_qml.count("StatusToast {") == 2
+            and main_qml.count("anchors.centerIn: parent") >= 2
+            and "anchors.bottom: parent.bottom" not in main_qml[main_qml.rfind("StatusToast {"):]
+            and "property string transientDetail" in main_qml
+            and "function operatorNotice(raw, failure)" in main_qml
+            and "function showMessage(message, error)" in main_qml
+            and "root.showMessage(message, message === device.lastError)" in main_qml
+            and "onStateChanged()" in main_qml
+            and "root.showMessage(workflowBar.session.statusText, true)" in main_qml
+            and "root.showMessage(device.ptpLastStartFailure, true)" in main_qml
+            and "ETHERNET_LINK_DOWN" in main_qml
+            and "Hubungkan port Ethernet ESP32-P4" in main_qml
+            and "ptpEthernetLink === \"DOWN\"" in main_qml
+            and "lastOperatorNoticeMs" in main_qml
+            and "now - lastOperatorNoticeMs < 8000" in main_qml
+            and "messageTimer.interval = notice.error ? 4600 : 2800" in main_qml
+            and "statusHistoryModel.append({" in main_qml
+            and "anchors.centerIn: parent" not in toast_qml
+            and 'objectName: "centralOperatorToast"' in toast_qml
+            and "wrapMode: Text.WordWrap" in toast_qml
+            and "property string detail" in toast_qml,
+            "PTP/firmware/session faults and attention must display briefly in active-window "
+            "center with actionable PHY advice, bounded dedupe and retained history")
     preview = source("SignalPreview.qml")
     tray = source("StudioTimingTray.qml")
     expert = source("PtpExpertPanel.qml")
