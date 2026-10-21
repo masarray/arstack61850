@@ -386,9 +386,10 @@ def main() -> None:
     assert "text: \"Generated setpoint · not independent on-wire proof\"" not in preview
     assert "No ESP32 board detected · Preview mode only" in main_qml
     require("Layout.preferredHeight: 57" in main_qml
-            and "SplitView.maximumHeight: 265" in main_qml
-            and "SplitView.fillHeight: false" in main_qml,
-            "compact timing strip and bounded phasor panel must avoid dead space")
+            and main_qml.count("SplitView.preferredHeight: 310") == 2
+            and "SplitView.maximumHeight: 265" not in main_qml
+            and main_qml.count("SplitView.minimumHeight: 210") == 2,
+            "compact timing strip and balanced resizable phasor/waveform must avoid dead space")
     require("TIME SYNC  /  SV SIMULATION" not in tray
             and "StateBadge {" not in tray,
             "device/PTP status must not be duplicated in the control tray")
