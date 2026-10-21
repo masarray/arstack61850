@@ -488,7 +488,8 @@ def main() -> None:
             and "kTxReady" in eth_port
             and "ETHERNET_LINK_DOWN" in eth_port
             and "ETHERNET_DRIVER_NOT_STARTED" in eth_port
-            and "ar_esp32p4_ptp_print_link_status()" in eth_port
+            and "void ar_esp32p4_ptp_print_link_status(void)" in eth_port
+            and "ar_esp32p4_ptp_print_link_status();" in ptp_console
             and "ethernet_tx_invalid_state" in ptp_firmware
             and "ETHERNET_TX_INVALID_STATE" in ptp_firmware
             and "kStartReadyPolls = 350U" in ptp_firmware
