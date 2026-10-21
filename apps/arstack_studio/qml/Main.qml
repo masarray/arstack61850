@@ -210,6 +210,14 @@ ApplicationWindow {
         function onDeviceMessage(message) {
             root.showMessage(message, false)
         }
+        function onSvStopReasonChanged() {
+            if (!device.running && device.svStopReason !== "" &&
+                device.svStopReason !== "AWAITING_BOARD_CAUSE") {
+                root.showMessage(
+                    "ESP32-P4 stopped SV: " + device.svStopReason +
+                    ". PTP state is independent. Open Copy diagnostics.", true)
+            }
+        }
         function onDeviceVerifiedChanged() {
             root.pendingApply = true
             root.offlinePreviewRunning = false
@@ -771,11 +779,14 @@ ApplicationWindow {
             Label {
                 text: !device.deviceVerified
                     ? "No ESP32 board detected · Preview mode only"
-                    : device.portName + " · ESP32-P4" + (workflowBar.injectionRunning ? " · Injecting" : " · Ready")
-                color: device.deviceVerified ? studioTheme.textSoft : studioTheme.muted
+                    : device.portName + " · ESP32-P4 · " + workflowBar.displayState
+                color: workflowBar.unexpectedSvStop ? studioTheme.red
+                     : device.deviceVerified ? studioTheme.textSoft : studioTheme.muted
+                Layout.maximumWidth: root.compactLayout ? 255 : 410
+                elide: Text.ElideRight
                 font.family: root.uiFont
                 font.pixelSize: 9
-                font.weight: Font.Medium
+                font.weight: workflowBar.unexpectedSvStop ? Font.DemiBold : Font.Medium
             }
             Rectangle { width: 1; height: 12; color: studioTheme.lineSoft }
             Label {
