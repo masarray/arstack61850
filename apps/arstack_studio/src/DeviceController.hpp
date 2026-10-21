@@ -394,6 +394,7 @@ private:
     void advancePtpStartup(const QString& line);
     void failPtpStartup(const QString& reason, bool rollback);
     bool beginPtpStopVerification();
+    void flushDeferredReadbacks();
     void markPtpStopUnconfirmed(const QString& reason);
     void resetPtpStartup() noexcept;
     [[nodiscard]] static QString ptpConfigCommand(const QVariantMap& profile);
@@ -435,6 +436,10 @@ private:
     bool profileArmed_{false};
     bool profileWasReused_{false};
     bool profileDeploying_{false};
+    // One coalesced readback of each kind; no second serial writer or retry loop.
+    bool deferredShow_{false};
+    bool deferredProfileShow_{false};
+    bool deferredPtpShow_{false};
     BinaryProfileStage binaryProfileStage_{BinaryProfileStage::idle};
     BinaryProfileTransfer binaryProfile_{};
     bool ptpAvailable_{false};
