@@ -198,6 +198,10 @@ def main() -> None:
     require("function flushPendingEdits()" in matrix
             and "magnitudeApplyTimer.stop()" in matrix
             and "phaseApplyTimer.stop()" in matrix
+            and "magnitudeApplyTimer.restart()" not in matrix
+            and "phaseApplyTimer.restart()" not in matrix
+            and matrix.count("onEditingFinished:") >= 2
+            and "parseOperatorNumber(text)" in matrix
             and "currentMatrix.flushPendingEdits()" in main_qml
             and "voltageMatrix.flushPendingEdits()" in main_qml
             and "if (!scenario) return" in source("WorkflowBar.qml"),
@@ -544,8 +548,10 @@ def main() -> None:
     ribbon_layout = source("ModernRibbon.qml")
     start_flow = source("WorkflowBar.qml")
     require("width: 1150" in responsive_main
-            and "SplitView.maximumWidth: 750" in responsive_main
-            and "SplitView.preferredWidth: root.compactLayout ? 450 : 470" in responsive_main
+            and "SplitView.maximumWidth: 535" in responsive_main
+            and "SplitView.preferredHeight: 310" in responsive_main
+            and "SplitView.maximumHeight: 265" not in responsive_main
+            and "onClicked: root.forceActiveFocus()" in responsive_main
             and "electric_bolt_run.svg" in ribbon_layout
             and "electric_bolt_stop.svg" in ribbon_layout
             and "assets/material/electric_bolt_run.svg" in
