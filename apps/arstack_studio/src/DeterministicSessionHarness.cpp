@@ -63,6 +63,7 @@ public:
             {"PTP STOP full queue uses bounded priority slot", ptpSafetyStopBypassesFullQueue()},
             {"SV STOP remains responsive with full command queue", svPriorityStopBypassesFullQueue()},
             {"control lease heartbeat coalesces outside saturated exclusive queue", heartbeatKeepsBoundedSafetySlotUnderExclusiveLoad()},
+            {"board fail-safe STOP is not mislabelled as operator STOP ACK", forcedFirmwareStopRetainsCauseAndIsNotOperatorAck()},
             {"PTP STOP requires firmware ACK and stopped readback", ptpStopConfirmationCannotBeGuessed()},
             {"PTP STOP timeout blocks restart pending manual recovery", ptpUnverifiedStopBlocksRestart()},
             {"App teardown must stop PTP without SV output", ptpOnlyShutdownIntent()},
@@ -977,6 +978,23 @@ private:
                                worker.svStopPending_;
         worker.queuePrioritySvStop();
         return cancelled && worker.svStopPending_ && worker.commandQueue_.isEmpty();
+    }
+
+    static bool forcedFirmwareStopRetainsCauseAndIsNotOperatorAck() {
+        Fixture f;
+        auto& d = f.device;
+        d.processLine(QStringLiteral(
+            "STOP accepted: SV transmission suppressed by fail-closed runtime"));
+        if (!d.logText_.contains(QStringLiteral("RUNTIME_FAIL_SAFE_STOP_OBSERVED")) ||
+            d.logText_.contains(QStringLiteral("STOP_ACK_OBSERVED")))
+            return false;
+        d.processLine(QStringLiteral(
+            "Control session lease expired after 2500 ms; SV transmission stopped"));
+        if (!d.logText_.contains(QStringLiteral("FIRMWARE_STOP_CAUSE")) ||
+            !d.logText_.contains(QStringLiteral("lease expired")))
+            return false;
+        d.processLine(QStringLiteral("STOP accepted: SV transmission suppressed"));
+        return d.logText_.contains(QStringLiteral("STOP_ACK_OBSERVED"));
     }
 
     static bool heartbeatKeepsBoundedSafetySlotUnderExclusiveLoad() {
