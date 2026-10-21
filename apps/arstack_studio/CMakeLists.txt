@@ -170,6 +170,8 @@ qt_add_qml_module(arstack_studio
         assets/material/device_hub.svg
         assets/material/help_outline.svg
         assets/material/smv_injector.svg
+        assets/material/electric_bolt_run.svg
+        assets/material/electric_bolt_stop.svg
 )
 
 qt_add_resources(arstack_studio "reference_templates"
