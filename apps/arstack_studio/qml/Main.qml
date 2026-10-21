@@ -1065,8 +1065,12 @@ ApplicationWindow {
                     objectName: "studioInjectionSurface"
                     SplitView.fillWidth: true
                     SplitView.fillHeight: true
-                    SplitView.minimumWidth: root.compactLayout ? 500 : 550
-                    SplitView.preferredWidth: root.compactLayout ? 700 : 860
+                    // Form fields must not expand across the whole screen.
+                    // Keep the injector compact; give spare width to plots.
+                    // Users can still resize the split manually.
+                    SplitView.minimumWidth: root.compactLayout ? 480 : 520
+                    SplitView.preferredWidth: root.compactLayout ? 505 : 610
+                    SplitView.maximumWidth: 660
                     theme: studioTheme
 
                     ColumnLayout {
@@ -1295,9 +1299,9 @@ ApplicationWindow {
                 SplitView {
                     visible: (root.phasorDockVisible && !root.phasorDetached) ||
                              (root.waveformDockVisible && !root.waveformDetached)
-                    SplitView.preferredWidth: root.compactLayout ? 300 : 380
-                    SplitView.minimumWidth: root.compactLayout ? 270 : 300
-                    SplitView.maximumWidth: 680
+                    SplitView.preferredWidth: root.compactLayout ? 420 : 560
+                    SplitView.minimumWidth: root.compactLayout ? 330 : 380
+                    SplitView.maximumWidth: 1200
                     SplitView.fillHeight: true
                     orientation: Qt.Vertical
                     handle: Rectangle {
