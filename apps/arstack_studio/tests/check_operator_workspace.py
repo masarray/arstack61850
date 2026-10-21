@@ -549,7 +549,8 @@ def main() -> None:
     ribbon_layout = source("ModernRibbon.qml")
     start_flow = source("WorkflowBar.qml")
     require("width: 1150" in responsive_main
-            and "SplitView.maximumWidth: 535" in responsive_main
+            and "SplitView.maximumWidth: 490" in responsive_main
+            and "SplitView.preferredWidth: root.width < 1100 ? 450 : 465" in responsive_main
             and "SplitView.preferredHeight: 310" in responsive_main
             and "SplitView.maximumHeight: 265" not in responsive_main
             and "id: injectionFocusSink" in responsive_main
