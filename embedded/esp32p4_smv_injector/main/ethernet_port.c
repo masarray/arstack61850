@@ -3,6 +3,8 @@
 #include "ethernet_port.h"
 
 #include "esp_err.h"
+#include "esp_event.h"
+#include "freertos/event_groups.h"
 #include "esp_eth_mac_esp.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -15,6 +17,62 @@
 
 static const char *TAG = "ar_smv_eth";
 static esp_eth_handle_t s_eth_handle = NULL;
+
+// The owner of this evidence is the ESP-IDF ETH_EVENT stream, NOT GUI
+// "connected" status, a configured PHY address, nor a stale PTP runtime.
+static EventGroupHandle_t s_eth_events = NULL;
+static const EventBits_t kDriverStarted = BIT0;
+static const EventBits_t kPhyLinkUp = BIT1;
+static const EventBits_t kTxReady = BIT0 | BIT1;
+static const TickType_t kLinkWaitTicks = pdMS_TO_TICKS(2500);
+static const char *s_ptp_preflight_failure = NULL;
+
+static void ar_esp32p4_eth_event(void *arg, esp_event_base_t base,
+                                 int32_t event_id, void *data)
+{
+    (void)arg;
+    (void)base;
+    (void)data;
+    if (s_eth_events == NULL) return;
+    switch (event_id) {
+    case ETHERNET_EVENT_START:
+        xEventGroupSetBits(s_eth_events, kDriverStarted);
+        break;
+    case ETHERNET_EVENT_CONNECTED:
+        xEventGroupSetBits(s_eth_events, kPhyLinkUp);
+        break;
+    case ETHERNET_EVENT_DISCONNECTED:
+        xEventGroupClearBits(s_eth_events, kPhyLinkUp);
+        break;
+    case ETHERNET_EVENT_STOP:
+        xEventGroupClearBits(s_eth_events, kTxReady);
+        break;
+    default:
+        break;
+    }
+}
+
+static EventBits_t ar_eth_bits(void)
+{
+    return s_eth_events == NULL ? 0 : xEventGroupGetBits(s_eth_events);
+}
+
+const char *ar_esp32p4_ptp_preflight_reason(void)
+{
+    return s_ptp_preflight_failure;
+}
+
+void ar_esp32p4_ptp_print_link_status(void)
+{
+    const EventBits_t bits = ar_eth_bits();
+    ESP_LOGI(TAG,
+             "PTP ETH driver=%s link=%s tx_ready=%u start_reason=%s",
+             (bits & kDriverStarted) ? "STARTED" : "STOPPED",
+             (bits & kPhyLinkUp) ? "UP" : "DOWN",
+             (bits & kTxReady) == kTxReady ? 1U : 0U,
+             s_ptp_preflight_failure == NULL ? "NONE" : s_ptp_preflight_failure);
+}
+
 
 // Bench-validated ESP32-P4 Ethernet-board RMII wiring.
 // REF_CLK is supplied by the onboard PHY as a 50 MHz input to ESP32-P4.
@@ -98,6 +156,22 @@ esp_eth_handle_t ar_esp32p4_eth_init(void)
         phy->del(phy);
         return NULL;
     }
+    s_eth_events = xEventGroupCreate();
+    if (s_eth_events == NULL) {
+        ESP_LOGE(TAG, "Cannot allocate Ethernet link evidence event group");
+        esp_eth_driver_uninstall(handle);
+        return NULL;
+    }
+    const esp_err_t event_result = esp_event_handler_register(
+        ETH_EVENT, ESP_EVENT_ANY_ID, &ar_esp32p4_eth_event, NULL);
+    if (event_result != ESP_OK) {
+        ESP_LOGE(TAG, "Cannot register Ethernet link evidence: %s",
+                 esp_err_to_name(event_result));
+        vEventGroupDelete(s_eth_events);
+        s_eth_events = NULL;
+        esp_eth_driver_uninstall(handle);
+        return NULL;
+    }
     s_eth_handle = handle;
 
     ESP_LOGI(TAG,
@@ -109,8 +183,27 @@ esp_eth_handle_t ar_esp32p4_eth_init(void)
 bool ar_esp32p4_ptp_start(void)
 {
 #if CONFIG_AR_PTP_LAB_TX
-    if (s_eth_handle == NULL) {
-        ESP_LOGE(TAG, "PTP start rejected: Ethernet driver is not initialized");
+    s_ptp_preflight_failure = NULL;
+    if (s_eth_handle == NULL || s_eth_events == NULL) {
+        s_ptp_preflight_failure = "ETHERNET_DRIVER_UNAVAILABLE";
+        ESP_LOGE(TAG, "PTP preflight failed: ETHERNET_DRIVER_UNAVAILABLE");
+        return false;
+    }
+
+    // Wait for BOTH the driver's START event and actual PHY CONNECTED event.
+    // A USB-verified board is NOT Ethernet-link proof. Do not enter PTP
+    // timestamp mode or attempt ESP-IDF TX against a non-transmitting MAC.
+    const EventBits_t ready = xEventGroupWaitBits(
+        s_eth_events, kTxReady, pdFALSE, pdTRUE, kLinkWaitTicks);
+    if ((ready & kTxReady) != kTxReady) {
+        s_ptp_preflight_failure = (ready & kDriverStarted)
+            ? "ETHERNET_LINK_DOWN" : "ETHERNET_DRIVER_NOT_STARTED";
+        ESP_LOGE(TAG,
+                 "PTP preflight failed: %s; Ethernet driver=%s PHY=%s; "
+                 "attach an active Ethernet switch/cable, check LINK LED, retry",
+                 s_ptp_preflight_failure,
+                 (ready & kDriverStarted) ? "STARTED" : "STOPPED",
+                 (ready & kPhyLinkUp) ? "UP" : "DOWN");
         return false;
     }
 
