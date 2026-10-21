@@ -49,6 +49,16 @@ Rectangle {
         editor.selectAll()
     }
 
+    // Click on any empty part of this panel explicitly releases a numeric
+    // editor's focus. TextField.editingFinished then commits exactly once.
+    // Positioned UNDER actual controls, so buttons, text selection and menus
+    // retain their regular mouse behavior.
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.LeftButton
+        onClicked: matrix.forceActiveFocus()
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
