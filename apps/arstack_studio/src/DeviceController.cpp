@@ -490,6 +490,9 @@ void DeviceController::setSessionGeneration(const quint64 generation) {
     if (generation == 0 || generation == sessionGeneration_) return;
     resetPtpStartup();
     resetScenarioStart();
+    deferredShow_ = false;
+    deferredProfileShow_ = false;
+    deferredPtpShow_ = false;
     sessionGeneration_ = generation;
     pendingAutoDetect_ = false;
     pendingConnectPort_.clear();
@@ -2162,6 +2165,9 @@ void DeviceController::processLine(const QString& rawLine) {
         if (newBoot) {
             resetScenarioStart();
             resetBinaryProfileTransfer();
+            deferredShow_ = false;
+            deferredProfileShow_ = false;
+            deferredPtpShow_ = false;
             profileArmed_ = false;
             profileWasReused_ = false;
             profileDeploying_ = false;
