@@ -814,11 +814,19 @@ bool DeviceController::startWithScenario(const QVariantMap& scenario) {
     scenarioProfileGeneration_ = profileGeneration_;
     if (!sendCommandBatch(commands, false, true)) { resetScenarioStart(); return false; }
     scenarioTimer_.start();
+    appendLog(QStringLiteral("SVTX"), QStringLiteral(
+        "TXN_BEGIN session=%1 boot=%2 token=%3 profile=%4 state=CFG_COMMIT")
+        .arg(sessionGeneration_).arg(scenarioBoot_).arg(scenarioToken_)
+        .arg(scenarioProfileGeneration_));
     emit scenarioStateChanged();
     signalFrequencyHz_ = hz;
     return true;
 }
 bool DeviceController::stop() {
+    appendLog(QStringLiteral("SVTX"), QStringLiteral(
+        "OPERATOR_STOP_REQUEST session=%1 boot=%2 running=%3 cfg_pending=%4")
+        .arg(sessionGeneration_).arg(identity_.bootId)
+        .arg(running_ ? 1 : 0).arg(scenarioStage_ != ScenarioStage::idle ? 1 : 0));
     resetScenarioStart();
     return sendCommand(QStringLiteral("STOP"));
 }
@@ -1728,9 +1736,15 @@ void DeviceController::resetScenarioStart() noexcept {
 
 void DeviceController::failScenarioStart(const QString& message) {
     if (scenarioStage_ == ScenarioStage::idle) return;
+    appendLog(QStringLiteral("SVTX"), QStringLiteral(
+        "TXN_FAILURE session=%1 boot=%2 token=%3 reason=%4")
+        .arg(sessionGeneration_).arg(scenarioBoot_).arg(scenarioToken_).arg(message));
     resetScenarioStart();
     // Even if START ACK was lost after a valid commit, issue STOP. It is not
     // safe to conclude that the physical publisher is stopped from a timeout.
+    appendLog(QStringLiteral("SVTX"), QStringLiteral(
+        "FAIL_SAFE_STOP_REQUEST session=%1 reason=unverified_start")
+        .arg(sessionGeneration_));
     static_cast<void>(sendCommand(QStringLiteral("STOP")));
     setError(message);
 }
@@ -1854,6 +1868,10 @@ void DeviceController::processLine(const QString& rawLine) {
             failScenarioStart(QStringLiteral("SV commit ACK identity/hash mismatch."));
         } else {
             scenarioSignalGeneration_ = scenarioCommitted.captured(3).toULongLong();
+            appendLog(QStringLiteral("SVTX"), QStringLiteral(
+                "CFG_COMMITTED session=%1 token=%2 signal_generation=%3")
+                .arg(sessionGeneration_).arg(scenarioToken_)
+                .arg(scenarioSignalGeneration_));
             scenarioStage_ = ScenarioStage::awaiting_readback;
             if (!sendCommand(QStringLiteral("CFG SHOW %1").arg(scenarioToken_)))
                 failScenarioStart(QStringLiteral("Unable to request firmware-applied SV readback."));
@@ -1866,6 +1884,10 @@ void DeviceController::processLine(const QString& rawLine) {
             failScenarioStart(QStringLiteral("SV firmware readback differs from committed scenario."));
         } else {
             scenarioStage_ = ScenarioStage::awaiting_start_ack;
+            appendLog(QStringLiteral("SVTX"), QStringLiteral(
+                "CFG_VERIFIED session=%1 boot=%2 token=%3 signal_generation=%4")
+                .arg(sessionGeneration_).arg(scenarioBoot_).arg(scenarioToken_)
+                .arg(scenarioSignalGeneration_));
             const QString hash = QString::number(scenarioHash_, 16).toUpper()
                 .rightJustified(16, QLatin1Char('0'));
             if (!sendCommand(QStringLiteral("START %1 %2 %3")
@@ -1897,6 +1919,10 @@ void DeviceController::processLine(const QString& rawLine) {
         // Publish verified RUNNING before clearing the pending START phase.
         // Otherwise QML can briefly see neither RUNNING nor STARTING and
         // bounce the button back to START during a successful ACK handoff.
+        appendLog(QStringLiteral("SVTX"), QStringLiteral(
+            "START_ACK_VERIFIED session=%1 boot=%2 token=%3 signal_generation=%4")
+            .arg(sessionGeneration_).arg(scenarioBoot_).arg(scenarioToken_)
+            .arg(scenarioSignalGeneration_));
         setRunning(true);
         resetScenarioStart();
         return;
@@ -1905,15 +1931,26 @@ void DeviceController::processLine(const QString& rawLine) {
     // SV lifecycle acknowledgements are not PTP lifecycle acknowledgements.
     // Never report 4I+4V output RUNNING merely because PTP START succeeded.
     // Bare/unmatched START text is never evidence of a verified 8-channel START.
-    if (line.contains(QStringLiteral("STOP accepted: SV transmission suppressed"), Qt::CaseInsensitive))
+    if (line.contains(QStringLiteral("STOP accepted: SV transmission suppressed"), Qt::CaseInsensitive)) {
+        appendLog(QStringLiteral("SVTX"), QStringLiteral(
+            "STOP_ACK_OBSERVED session=%1 boot=%2 prior_running=%3")
+            .arg(sessionGeneration_).arg(identity_.bootId).arg(running_ ? 1 : 0));
         setRunning(false);
+    }
 
     auto match = kStateExpression.match(line);
     if (match.hasMatch()) {
         const bool observedRunning = match.captured(1).compare(QStringLiteral("RUNNING"), Qt::CaseInsensitive) == 0;
         // Unsolicited RUNNING telemetry may race the token-bound START ACK.
         // It is neither success nor failure evidence while the commit gate is active.
-        if (scenarioStage_ == ScenarioStage::idle) setRunning(observedRunning);
+        if (scenarioStage_ == ScenarioStage::idle && running_ != observedRunning) {
+            appendLog(QStringLiteral("SVTX"), QStringLiteral(
+                "STATE_READBACK session=%1 boot=%2 running=%3 prior=%4 signal_generation=%5")
+                .arg(sessionGeneration_).arg(identity_.bootId)
+                .arg(observedRunning ? 1 : 0).arg(running_ ? 1 : 0)
+                .arg(match.captured(2)));
+            setRunning(observedRunning);
+        }
         signalGeneration_ = match.captured(2);
         emit telemetryChanged();
     }
