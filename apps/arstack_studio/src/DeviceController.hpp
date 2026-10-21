@@ -51,6 +51,7 @@ class DeviceController : public QObject {
     Q_PROPERTY(QStringList capabilities READ capabilities NOTIFY deviceIdentityChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(bool running READ running NOTIFY runningChanged)
+    Q_PROPERTY(QString svStopReason READ svStopReason NOTIFY svStopReasonChanged)
     Q_PROPERTY(bool scenarioApplying READ scenarioApplying NOTIFY scenarioStateChanged)
     Q_PROPERTY(QString portName READ portName NOTIFY connectedChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
@@ -140,6 +141,7 @@ public:
     [[nodiscard]] DeviceIdentity deviceIdentity() const;
     [[nodiscard]] bool connected() const noexcept;
     [[nodiscard]] bool running() const noexcept;
+    [[nodiscard]] QString svStopReason() const { return svStopReason_; }
     [[nodiscard]] bool scenarioApplying() const noexcept;
     [[nodiscard]] QString portName() const;
     [[nodiscard]] QString lastError() const;
@@ -295,6 +297,7 @@ signals:
     void deviceIdentityChanged();
     void connectedChanged();
     void runningChanged();
+    void svStopReasonChanged();
     void lastErrorChanged();
     void logTextChanged();
     void syncDiagnosticsChanged();
@@ -416,6 +419,9 @@ private:
     int identifyAttempts_{0};
     int highConfidenceCount_{0};
     bool running_{false};
+    bool operatorStopPending_{false};
+    QString svStopReason_;
+    quint64 lastSvStopSeq_{0};
     bool connected_{false};
     bool discovering_{false};
     bool deviceVerified_{false};
