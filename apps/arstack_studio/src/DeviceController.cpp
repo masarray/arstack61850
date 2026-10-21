@@ -1934,10 +1934,25 @@ void DeviceController::processLine(const QString& rawLine) {
     // Never report 4I+4V output RUNNING merely because PTP START succeeded.
     // Bare/unmatched START text is never evidence of a verified 8-channel START.
     if (line.contains(QStringLiteral("STOP accepted: SV transmission suppressed"), Qt::CaseInsensitive)) {
+        // Firmware may emit this prefix for a forced publisher shutdown.
+        // Never mislabel a fail-safe board-originated STOP as an operator ACK.
+        const bool forced = line.contains(QStringLiteral("fail-closed runtime"),
+                                          Qt::CaseInsensitive);
         appendLog(QStringLiteral("SVTX"), QStringLiteral(
-            "STOP_ACK_OBSERVED session=%1 boot=%2 prior_running=%3")
+            "%1 session=%2 boot=%3 prior_running=%4")
+            .arg(forced ? QStringLiteral("RUNTIME_FAIL_SAFE_STOP_OBSERVED")
+                        : QStringLiteral("STOP_ACK_OBSERVED"))
             .arg(sessionGeneration_).arg(identity_.bootId).arg(running_ ? 1 : 0));
         setRunning(false);
+    }
+    if (line.contains(QStringLiteral("Control session lease expired"), Qt::CaseInsensitive) ||
+        line.contains(QStringLiteral("Control session heartbeat could not rearm"), Qt::CaseInsensitive) ||
+        line.contains(QStringLiteral("SV transport fault:"), Qt::CaseInsensitive)) {
+        // Real firmware-originated reasons survive any later STATE=STOPPED
+        // poll; the GUI must not attribute these events to the operator.
+        appendLog(QStringLiteral("SVTX"), QStringLiteral(
+            "FIRMWARE_STOP_CAUSE session=%1 boot=%2 detail=%3")
+            .arg(sessionGeneration_).arg(identity_.bootId).arg(line));
     }
 
     auto match = kStateExpression.match(line);
