@@ -30,6 +30,8 @@ Rectangle {
     // Commit any last keystroke synchronously before constructing an ordered
     // START scenario. The 90ms edit debounce must never make the board
     // receive old angles while the table already displays new ones.
+    // No 90ms live SET while typing: a partial number must never reach
+    // ESP32-P4 or re-render the phasor before operator confirmation.
     function flushPendingEdits() {
         for (var i = 0; i < rowRepeater.count; ++i) {
             const row = rowRepeater.itemAt(i)
@@ -130,27 +132,52 @@ Rectangle {
                 property bool selected: matrix.controller.activeSignal === signalRow.sid
                 property alias magnitudeEditor: magnitudeField
                 property alias phaseEditor: phaseField
-                property real pendingMagnitude: mag
-                property real pendingPhase: angle
+                property bool magnitudeDirty: false
+                property bool phaseDirty: false
+
+                function commitMagnitude() {
+                    if (!magnitudeDirty) return true
+                    const value = matrix.controller.parseOperatorNumber(magnitudeField.text)
+                    magnitudeDirty = false
+                    if (!matrix.controller.validMagnitude(matrix.groupIndex, value)) {
+                        magnitudeField.invalidInput = false
+                        magnitudeField.text = mag.toFixed(3)
+                        matrix.controller.showMessage(
+                            sid + ": invalid magnitude. Restored " + mag.toFixed(3) +
+                            ". Use dot or comma as decimal separator.", true)
+                        return false
+                    }
+                    // Normalize 0,5 and 0.5 to the SAME displayed 0.500.
+                    magnitudeField.invalidInput = false
+                    magnitudeField.text = value.toFixed(3)
+                    if (Math.abs(value - mag) < 0.000000001) return true
+                    return matrix.controller.editSignal(
+                        matrix.groupIndex, rowIndex, "magnitude", value)
+                }
+
+                function commitPhase() {
+                    if (!phaseDirty) return true
+                    const value = matrix.controller.parseOperatorNumber(phaseField.text)
+                    phaseDirty = false
+                    if (!matrix.controller.validPhase(value)) {
+                        phaseField.invalidInput = false
+                        phaseField.text = angle.toFixed(2)
+                        matrix.controller.showMessage(
+                            sid + ": invalid angle. Restored " + angle.toFixed(2) +
+                            "°. Use dot or comma as decimal separator.", true)
+                        return false
+                    }
+                    phaseField.invalidInput = false
+                    phaseField.text = value.toFixed(2)
+                    if (Math.abs(value - angle) < 0.000000001) return true
+                    return matrix.controller.editSignal(
+                        matrix.groupIndex, rowIndex, "phase", value)
+                }
 
                 function flushPendingEdits() {
-                    if (magnitudeApplyTimer.running || magnitudeField.activeFocus) {
-                        const magValue = matrix.controller.parseOperatorNumber(magnitudeField.text)
-                        if (!matrix.controller.validMagnitude(matrix.groupIndex, magValue))
-                            return false
-                        magnitudeApplyTimer.stop()
-                        if (!matrix.controller.editSignal(matrix.groupIndex, rowIndex, "magnitude", magValue))
-                            return false
-                    }
-                    if (phaseApplyTimer.running || phaseField.activeFocus) {
-                        const phaseValue = matrix.controller.parseOperatorNumber(phaseField.text)
-                        if (!matrix.controller.validPhase(phaseValue))
-                            return false
-                        phaseApplyTimer.stop()
-                        if (!matrix.controller.editSignal(matrix.groupIndex, rowIndex, "phase", phaseValue))
-                            return false
-                    }
-                    return true
+                    // Also cover START while a field still owns focus.
+                    if (!commitMagnitude()) return false
+                    return commitPhase()
                 }
 
                 // Align with the field edge, not the left side of the table.
@@ -237,18 +264,8 @@ Rectangle {
 
                 HoverHandler { id: rowHover }
 
-                Timer {
-                    id: magnitudeApplyTimer
-                    interval: 90
-                    repeat: false
-                    onTriggered: matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "magnitude", signalRow.pendingMagnitude)
-                }
-                Timer {
-                    id: phaseApplyTimer
-                    interval: 90
-                    repeat: false
-                    onTriggered: matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "phase", signalRow.pendingPhase)
-                }
+                // Numeric drafts are held in the editor until confirmation.
+                // No background timer sends incomplete values to the board.
 
                 onMagChanged: if (!magnitudeField.activeFocus) magnitudeField.text = mag.toFixed(3)
                 onAngleChanged: if (!phaseField.activeFocus) phaseField.text = angle.toFixed(2)
@@ -306,31 +323,16 @@ Rectangle {
                             if (activeFocus) {
                                 matrix.controller.selectSignal(matrix.groupIndex, signalRow.rowIndex)
                                 text = signalRow.mag.toFixed(3)
+                                signalRow.magnitudeDirty = false
                                 selectAll()
-                            }
+                            } else signalRow.commitMagnitude()
                         }
                         onTextEdited: {
-                            var value = matrix.controller.parseOperatorNumber(text)
-                            if (matrix.controller.validMagnitude(matrix.groupIndex, value)) {
-                                invalidInput = false
-                                signalRow.pendingMagnitude = value
-                                magnitudeApplyTimer.restart()
-                            } else invalidInput = true
+                            signalRow.magnitudeDirty = true
+                            invalidInput = !matrix.controller.validMagnitude(
+                                matrix.groupIndex, matrix.controller.parseOperatorNumber(text))
                         }
-                        onEditingFinished: {
-                            var value = matrix.controller.parseOperatorNumber(text)
-                            if (!matrix.controller.validMagnitude(matrix.groupIndex, value)) {
-                                magnitudeApplyTimer.stop()
-                                text = signalRow.mag.toFixed(3)
-                                invalidInput = false
-                                matrix.controller.showMessage(signalRow.sid + " value is outside the supported range.", true)
-                            } else {
-                                signalRow.pendingMagnitude = value
-                                magnitudeApplyTimer.stop()
-                                matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "magnitude", value)
-                                text = value.toFixed(3)
-                            }
-                        }
+                        onEditingFinished: signalRow.commitMagnitude()
                         Keys.onPressed: function(event) {
                             if (event.key === Qt.Key_Menu ||
                                     (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
@@ -340,7 +342,9 @@ Rectangle {
                                 matrix.controller.navigate(matrix.groupIndex, signalRow.rowIndex, 0, event.key)
                                 event.accepted = true
                             } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                                matrix.controller.focusCell(matrix.groupIndex, signalRow.rowIndex + 1, 0)
+                                if (signalRow.commitMagnitude())
+                                    matrix.controller.focusCell(matrix.groupIndex, signalRow.rowIndex + 1, 0)
+                                else selectAll()
                                 event.accepted = true
                             }
                         }
@@ -369,31 +373,16 @@ Rectangle {
                             if (activeFocus) {
                                 matrix.controller.selectSignal(matrix.groupIndex, signalRow.rowIndex)
                                 text = signalRow.angle.toFixed(2)
+                                signalRow.phaseDirty = false
                                 selectAll()
-                            }
+                            } else signalRow.commitPhase()
                         }
                         onTextEdited: {
-                            var value = matrix.controller.parseOperatorNumber(text)
-                            if (matrix.controller.validPhase(value)) {
-                                invalidInput = false
-                                signalRow.pendingPhase = value
-                                phaseApplyTimer.restart()
-                            } else invalidInput = true
+                            signalRow.phaseDirty = true
+                            invalidInput = !matrix.controller.validPhase(
+                                matrix.controller.parseOperatorNumber(text))
                         }
-                        onEditingFinished: {
-                            var value = matrix.controller.parseOperatorNumber(text)
-                            if (!matrix.controller.validPhase(value)) {
-                                phaseApplyTimer.stop()
-                                text = signalRow.angle.toFixed(2)
-                                invalidInput = false
-                                matrix.controller.showMessage(signalRow.sid + " phase is outside the supported range.", true)
-                            } else {
-                                signalRow.pendingPhase = value
-                                phaseApplyTimer.stop()
-                                matrix.controller.editSignal(matrix.groupIndex, signalRow.rowIndex, "phase", value)
-                                text = value.toFixed(2)
-                            }
-                        }
+                        onEditingFinished: signalRow.commitPhase()
                         Keys.onPressed: function(event) {
                             if (event.key === Qt.Key_Menu ||
                                     (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
@@ -403,7 +392,9 @@ Rectangle {
                                 matrix.controller.navigate(matrix.groupIndex, signalRow.rowIndex, 1, event.key)
                                 event.accepted = true
                             } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                                matrix.controller.focusCell(matrix.groupIndex, signalRow.rowIndex + 1, 1)
+                                if (signalRow.commitPhase())
+                                    matrix.controller.focusCell(matrix.groupIndex, signalRow.rowIndex + 1, 1)
+                                else selectAll()
                                 event.accepted = true
                             }
                         }
