@@ -163,6 +163,7 @@ ApplicationWindow {
     property double lastOperatorNoticeMs: 0
     property bool lastPtpStartPending: false
     property string lastPtpPhyLink: "UNKNOWN"
+    property string lastSessionPresentationState: ""
     property bool phasorDockVisible: true
     property bool phasorDetached: false
     property bool waveformDockVisible: true
@@ -255,8 +256,15 @@ ApplicationWindow {
         target: workflowBar.session
         function onStateChanged() {
             const currentState = workflowBar.session.state
-            if (/ERROR|FAILED|BLOCKED/i.test(currentState))
+            // A stable terminal fault is one operator event, not a toast
+            // every time the session emits changed for unrelated telemetry.
+            if (currentState !== root.lastSessionPresentationState &&
+                /ERROR|FAILED|BLOCKED/i.test(currentState))
                 root.showMessage(workflowBar.session.statusText, true)
+            if (currentState !== root.lastSessionPresentationState &&
+                !/ERROR|FAILED|BLOCKED/i.test(currentState))
+                root.lastOperatorNoticeKey = ""
+            root.lastSessionPresentationState = currentState
         }
         function onFirmwareUpdateFinished(success) {
             if (success)
