@@ -489,6 +489,25 @@ def main() -> None:
             'ptpRuntimeRunningSeen_' in device_control_cpp and
             'if (!ptpRuntimeRoleSeen_ || !ptpRuntimeRunningSeen_' in device_control_cpp,
             "PTP errors must originate on board and two-order runtime proofs must be joined")
+    # Control-session lease is a safety authority, not a QML watchdog or
+    # clock qualification. One boot-lifetime periodic timer eliminates the
+    # old racing one-shot stop/rearm from the ESP console and timer callback.
+    life_header = (STUDIO / "src/DeviceController.hpp").read_text(encoding="utf-8")
+    life_firmware = (STUDIO.parents[1] / "embedded/esp32p4_smv_injector/main/live_control.cpp").read_text(encoding="utf-8")
+    life_qml = source("WorkflowBar.qml")
+    require("esp_timer_start_periodic(" in life_firmware
+            and "kControlWatchdogPeriodUs = 250000ULL" in life_firmware
+            and "void enforce_control_lease() noexcept" in life_firmware
+            and "g_control_lease_mux" in life_firmware
+            and "esp_timer_start_once(" not in life_firmware
+            and "SVLIFE state=%s stop_cause=%s" in life_firmware
+            and "SvStopCause::lease_expired" in life_firmware
+            and "SvStopCause::runtime_fault" in life_firmware
+            and "Q_PROPERTY(QString svStopReason READ svStopReason NOTIFY svStopReasonChanged)" in life_header
+            and "ribbon.unexpectedSvStop" in life_qml,
+            "SV output must fail-closed on measured heartbeat loss, preserve board STOP cause, "
+            "and never show misleading green READY after an unrequested stop")
+
     clipboard_header = (STUDIO / "src/StudioClipboard.hpp").read_text(encoding="utf-8")
     clipboard_cpp = (STUDIO / "src/StudioClipboard.cpp").read_text(encoding="utf-8")
     main_cpp = (STUDIO / "src/main.cpp").read_text(encoding="utf-8")
