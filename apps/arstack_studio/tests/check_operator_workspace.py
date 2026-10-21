@@ -196,12 +196,20 @@ def main() -> None:
             and 'startWatchdog' not in source("WorkflowBar.qml"),
             "SV STOP must remain actionable while the acknowledged scenario transaction is pending")
     require("function flushPendingEdits()" in matrix
-            and "magnitudeApplyTimer.stop()" in matrix
-            and "phaseApplyTimer.stop()" in matrix
+            and "function commitMagnitude()" in matrix
+            and "function commitPhase()" in matrix
+            and "onEditingFinished: signalRow.commitMagnitude()" in matrix
+            and "onEditingFinished: signalRow.commitPhase()" in matrix
+            and "onActiveFocusChanged:" in matrix
+            and "if (signalRow.commitMagnitude())" in matrix
+            and "if (signalRow.commitPhase())" in matrix
+            and "onClicked: matrix.forceActiveFocus()" in matrix
+            and "magnitudeApplyTimer" not in matrix
+            and "phaseApplyTimer" not in matrix
             and "currentMatrix.flushPendingEdits()" in main_qml
             and "voltageMatrix.flushPendingEdits()" in main_qml
             and "if (!scenario) return" in source("WorkflowBar.qml"),
-            "START must commit last visible I/V angle before ordered scenario serialization")
+            "Table edits commit ONLY on Enter/focus-loss/blank-click/START, never as 90ms partial SET")
     require("Layout.fillHeight: true" in main_qml
             and "Layout.maximumHeight: root.compactLayout ? 352 : 384" not in main_qml
             and main_qml.index("id: voltageMatrix") < main_qml.index("id: currentMatrix"),
@@ -544,8 +552,12 @@ def main() -> None:
     ribbon_layout = source("ModernRibbon.qml")
     start_flow = source("WorkflowBar.qml")
     require("width: 1150" in responsive_main
-            and "SplitView.maximumWidth: 750" in responsive_main
-            and "SplitView.preferredWidth: root.compactLayout ? 450 : 470" in responsive_main
+            and "SplitView.fillWidth: false" in responsive_main
+            and "SplitView.preferredWidth: 470" in responsive_main
+            and "SplitView.maximumWidth: 515" in responsive_main
+            and "SplitView.preferredWidth: 640" in responsive_main
+            and "SplitView.preferredHeight: 300" in responsive_main
+            and "SplitView.maximumHeight: 265" not in responsive_main
             and "electric_bolt_run.svg" in ribbon_layout
             and "electric_bolt_stop.svg" in ribbon_layout
             and "assets/material/electric_bolt_run.svg" in
@@ -564,6 +576,17 @@ def main() -> None:
             and "String(device.bootId) === requestedBoot" in start_flow
             and "smartSession.requestStartWithScenario(scenario)" in start_flow,
             "First START click must be bounded, single-device, cancelable, and use verified scenario START")
+
+    # Shared parser accepts 0.5 and 0,5 as the SAME engineering value.
+    # Reject malformed multi-separator strings rather than guessing a
+    # potentially dangerous physical voltage/current magnitude.
+    require('normalized = normalized.replace(",", ".")' in responsive_main
+            and 'return Number(normalized)' in responsive_main
+            and 'Math.abs(value - mag) < 0.000000001' in matrix
+            and 'Math.abs(value - angle) < 0.000000001' in matrix
+            and 'magnitudeDirty = false' in matrix
+            and 'phaseDirty = false' in matrix,
+            "Numeric input must normalize decimal comma, suppress duplicate SET and restore invalid drafts")
 
     toast_layout = source("Main.qml")
     toast_view = source("StatusToast.qml")
