@@ -575,9 +575,8 @@ ApplicationWindow {
         return ok
     }
     function startScenarioSnapshot() {
-        // Table editor values are committed by Enter/focus departure, not by
-        // debounce while the engineer is halfway through a number. Flush
-        // synchronously before building the atomic START scenario.usly before creating the ordered board START payload.
+        // Explicitly commit an editor still in focus BEFORE snapshotting the
+        // eight visible setpoints. Never START with a partially typed value.
         if (!currentMatrix.flushPendingEdits() || !voltageMatrix.flushPendingEdits()) {
             showMessage("Invalid signal input: correct highlighted field before Start.", true)
             return null
