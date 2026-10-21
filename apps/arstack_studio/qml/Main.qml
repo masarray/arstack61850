@@ -1025,7 +1025,8 @@ ApplicationWindow {
                     at.y >= 0 && at.y <= editor.height)
                     return // a click inside the editing cell must never commit
                 Qt.callLater(function() {
-                    if (editor.activeFocus) root.forceActiveFocus()
+                    // Window is not a QQuickItem; focus the workspace Item.
+                    if (editor.activeFocus) workbenchColumn.forceActiveFocus()
                 })
             }
         }
