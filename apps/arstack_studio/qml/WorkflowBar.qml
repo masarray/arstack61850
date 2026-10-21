@@ -129,8 +129,12 @@ SurfacePanel {
         category: "operator-ui"
         property string lastEngineeringUrl: ""
         property int lastSelectedIndex: 0
-        property bool phasorVisible: false
-        property bool waveformVisible: false
+        property bool phasorVisible: true
+        property bool waveformVisible: true
+        // Earlier builds silently started with both charts hidden. Bump the
+        // dock preference schema once so existing installations also regain
+        // the operator's essential phasor and waveform workspaces.
+        property int dockLayoutVersion: 0
         property bool telemetryVisible: true
         property bool phasorDetached: false
         property bool waveformDetached: false
@@ -145,6 +149,13 @@ SurfacePanel {
     }
 
     Component.onCompleted: {
+        if (operatorSettings.dockLayoutVersion < 2) {
+            operatorSettings.phasorVisible = true
+            operatorSettings.waveformVisible = true
+            operatorSettings.phasorDetached = false
+            operatorSettings.waveformDetached = false
+            operatorSettings.dockLayoutVersion = 2
+        }
         controller.phasorDockVisible = operatorSettings.phasorVisible
         controller.waveformDockVisible = operatorSettings.waveformVisible
         controller.telemetryDockVisible = operatorSettings.telemetryVisible
@@ -414,7 +425,7 @@ SurfacePanel {
         controller.phasorDetached = false
         controller.waveformDetached = false
         controller.phasorDockVisible = true
-        controller.waveformDockVisible = false
+        controller.waveformDockVisible = true
         controller.telemetryDockVisible = true
         controller.telemetryExpanded = false
         controller.showMessage("Dock layout reset.", false)
