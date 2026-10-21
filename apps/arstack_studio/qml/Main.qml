@@ -7,8 +7,10 @@ import ARStack.Studio 1.0
 
 ApplicationWindow {
     id: root
-    width: 1240
-    height: 760
+    // 1060px is the useful field-engineering workspace, not a stretched
+    // 1240px spreadsheet. SplitView remains user-resizable.
+    width: 1060
+    height: 780
     minimumWidth: 960
     minimumHeight: 620
     visible: true
@@ -1063,10 +1065,13 @@ ApplicationWindow {
 
                 SurfacePanel {
                     objectName: "studioInjectionSurface"
-                    SplitView.fillWidth: true
+                    // Editable 4I/4V values have a readable bounded measure.
+                    // Spare width belongs to the phasor/waveform inspector.
+                    SplitView.fillWidth: false
                     SplitView.fillHeight: true
-                    SplitView.minimumWidth: root.compactLayout ? 500 : 550
-                    SplitView.preferredWidth: root.compactLayout ? 700 : 860
+                    SplitView.minimumWidth: root.compactLayout ? 465 : 500
+                    SplitView.preferredWidth: root.compactLayout ? 540 : 620
+                    SplitView.maximumWidth: root.compactLayout ? 605 : 655
                     theme: studioTheme
 
                     ColumnLayout {
@@ -1295,9 +1300,10 @@ ApplicationWindow {
                 SplitView {
                     visible: (root.phasorDockVisible && !root.phasorDetached) ||
                              (root.waveformDockVisible && !root.waveformDetached)
-                    SplitView.preferredWidth: root.compactLayout ? 300 : 380
-                    SplitView.minimumWidth: root.compactLayout ? 270 : 300
-                    SplitView.maximumWidth: 680
+                    SplitView.fillWidth: true
+                    SplitView.preferredWidth: root.compactLayout ? 430 : 510
+                    SplitView.minimumWidth: root.compactLayout ? 320 : 340
+                    SplitView.maximumWidth: 1250
                     SplitView.fillHeight: true
                     orientation: Qt.Vertical
                     handle: Rectangle {
