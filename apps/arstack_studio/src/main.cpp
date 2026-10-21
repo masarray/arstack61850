@@ -101,6 +101,19 @@ struct UiBounds {
                               << "wave-visible=" << waveform.visible << "wave=" << waveform.area;
         return false;
     }
+    // A child can pass the viewport test while overflowing its *parent*
+    // (small controls were clipped by the neighbouring plot at 1366px).
+    for (const auto& [label, item] : std::array<std::pair<const char*, UiBounds>, 4>{{
+             {"voltage", voltage}, {"current", current},
+             {"timing", tray}, {"quality", quality}
+         }}) {
+        if (!surface.area.adjusted(-tolerance, -tolerance, tolerance, tolerance)
+                 .contains(item.area.adjusted(tolerance, tolerance, -tolerance, -tolerance))) {
+            qCritical().noquote() << "Studio injection child overflows parent" << size
+                                  << label << item.area << surface.area;
+            return false;
+        }
+    }
     // Operator layout: voltage above current. Validate the new actual
     // vertical hierarchy, not the obsolete side-by-side geometry.
     if (!(voltage.area.bottom() <= current.area.top() + tolerance
