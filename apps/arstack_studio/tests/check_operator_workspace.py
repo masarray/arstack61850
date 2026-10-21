@@ -195,6 +195,19 @@ def main() -> None:
             and 'startIntentPending || (ribbon.device && ribbon.device.scenarioApplying)' in source("WorkflowBar.qml")
             and 'startWatchdog' not in source("WorkflowBar.qml"),
             "SV STOP must remain actionable while the acknowledged scenario transaction is pending")
+    # A prior operator-ui QSettings default hid both plot docks on every new
+    # installation. This passed the geometry test because absent plots were
+    # optional. Both must now be visible on fresh installs and migrated once.
+    dock_flow = source("WorkflowBar.qml")
+    require('property bool phasorVisible: true' in dock_flow
+            and 'property bool waveformVisible: true' in dock_flow
+            and 'property int dockLayoutVersion: 0' in dock_flow
+            and 'operatorSettings.dockLayoutVersion < 2' in dock_flow
+            and 'operatorSettings.dockLayoutVersion = 2' in dock_flow
+            and 'controller.waveformDockVisible = true' in dock_flow
+            and 'objectName: "studioPhasorDock"' in main_qml
+            and 'objectName: "studioWaveformDock"' in main_qml,
+            "both chart docks must display on clean startup and migrate once from legacy hidden defaults")
     require("function flushPendingEdits()" in matrix
             and "function commitRowField(column)" in matrix
             and "magnitudeApplyTimer" not in matrix
