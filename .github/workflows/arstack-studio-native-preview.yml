@@ -263,6 +263,18 @@ jobs:
           }
           $checks | Set-Content (Join-Path $PWD 'dist\SHA256SUMS.txt') -Encoding ascii
 
+      # Publish a small single-installer artifact BEFORE long Windows upgrade
+      # acceptance. Operators can bench the exact source SHA without waiting
+      # for the full portable+firmware ZIP, while CI still validates upgrades.
+      - name: Upload standalone Windows setup EXE early
+        uses: actions/upload-artifact@v4
+        with:
+          name: arstack-studio-setup-exe-${{ github.event.pull_request.number || github.run_number }}-${{ github.sha }}
+          path: dist/ARStack-Studio-Preview-win-x64-setup.exe
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
       - name: Inno clean install, running-app upgrade and clean uninstall
         shell: pwsh
         run: |
