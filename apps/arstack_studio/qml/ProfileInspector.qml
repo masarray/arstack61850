@@ -261,7 +261,7 @@ SurfacePanel {
                         text: panel.profile.includeSampleRate
                               ? (panel.profile.sampleRate + " / "
                                  + (panel.profile.sampleMode === "SmpPerPeriod" ? "0 · per period"
-                                    : panel.profile.sampleMode === "SmpPerSecond" ? "1 · per second"
+                                    : panel.profile.sampleMode === "SmpPerSec" ? "1 · per second"
                                     : "unsupported"))
                               : "omitted · SCL SmvOpts"
                         color: panel.theme.textSoft
