@@ -41,7 +41,7 @@ public:
     static constexpr std::uint32_t kCompleteMask = (1U << 18U) - 1U;
     static constexpr std::uint32_t kTimeoutMs = 8000U;
     enum class Result : std::uint8_t {
-        accepted, inactive, wrong_token, expired, incomplete, invalid, checksum, publish_failed
+        accepted, inactive, wrong_token, expired, incomplete, invalid, checksum, publish_failed, stale_generation
     };
 
     [[nodiscard]] bool begin(const std::uint64_t token, const SvLiveSignalState& current,
@@ -50,6 +50,7 @@ public:
         if (token == 0U) return false;
         token_ = token;
         staged_ = current;
+        baseline_generation_ = current.generation;
         began_ms_ = now;
         staging_ = true;
         return true;
@@ -85,6 +86,12 @@ public:
         if (mask_ != kCompleteMask) return Result::incomplete;
         const auto actual = sv_scenario_hash(staged_);
         if (expected != actual) { reset(); return Result::checksum; }
+        // Refuse to overwrite an unrelated live SET/ENABLE/QUALITY/FREQ update
+        // while a complete scenario was staged. The single UART control task
+        // serializes all bank writes, so this check is valid before publish().
+        if (bank.snapshot().generation != baseline_generation_) {
+            reset(); return Result::stale_generation;
+        }
         if (!bank.publish(staged_)) { reset(); return Result::publish_failed; }
         staging_ = false;
         committed_ = true;
@@ -120,6 +127,7 @@ public:
     void reset() noexcept {
         staging_ = false; committed_ = false; rejected_ = false; readback_seen_ = false;
         mask_ = 0; token_ = 0; checksum_ = 0; generation_ = 0; began_ms_ = 0;
+        baseline_generation_ = 0;
     }
 
 private:
@@ -131,6 +139,7 @@ private:
     std::uint64_t token_{0};
     std::uint64_t checksum_{0};
     std::uint64_t generation_{0};
+    std::uint64_t baseline_generation_{0};
     std::uint32_t began_ms_{0};
     std::uint32_t mask_{0};
     bool staging_{false};

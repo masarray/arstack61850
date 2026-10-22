@@ -106,5 +106,36 @@ int main() {
         check(!tx.readback_matches(bank, 601, 105), "unexpected bank generation revokes ticket");
         check(!tx.can_start(bank, 601, hash, 105), "unexpected live edit refuses START");
     }
+    {
+        // PR #251 preservation: an out-of-band live update that arrives after
+        // CFG BEGIN must never be silently overwritten by a stale staged 4I4V
+        // snapshot. The rejected ticket cannot arm START or be replayed.
+        SvLiveSignalBank bank;
+        SvScenarioTransaction tx;
+        check(populate(tx, 701, bank, 100), "stale-stage fixture begins");
+        const auto stale_hash = sv_scenario_hash(tx.draft());
+        auto live_edit = bank.snapshot();
+        live_edit.channels[0].rms_counts += 123;
+        check(bank.publish(live_edit), "independent live edit committed during staging");
+        const auto changed = bank.snapshot();
+        check(tx.commit(bank, 701, stale_hash, 101) ==
+              SvScenarioTransaction::Result::stale_generation,
+              "stale staged commit rejected after live edit");
+        check(bank.snapshot() == changed, "stale staged commit does not overwrite live values");
+        check(!tx.confirm_readback(bank, 701, 101) &&
+              !tx.can_start(bank, 701, stale_hash, 101),
+              "stale staged commit cannot arm START");
+        check(tx.commit(bank, 701, stale_hash, 102) ==
+              SvScenarioTransaction::Result::inactive,
+              "stale staged transaction cannot be replayed");
+        check(populate(tx, 702, bank, 103), "fresh transaction can restart after stale rejection");
+        const auto fresh_hash = sv_scenario_hash(tx.draft());
+        check(tx.commit(bank, 702, fresh_hash, 104) ==
+              SvScenarioTransaction::Result::accepted,
+              "fresh transaction retains normal commit path");
+        check(tx.confirm_readback(bank, 702, 104) &&
+              tx.can_start(bank, 702, fresh_hash, 105),
+              "fresh transaction retains explicit START readback");
+    }
     return failures == 0 ? 0 : 1;
 }
