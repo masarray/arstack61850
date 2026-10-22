@@ -87,6 +87,16 @@ Rectangle {
             font.pixelSize: 9
             lineHeight: 1.15
         }
+        Label {
+            Layout.fillWidth: true
+            visible: !capture.capturing && (!panel.device || !panel.device.running)
+            text: "SV publisher STOPPED — Start 4I+4V before Capture. " +
+                  "PTP RUNNING or previous 4000 FPS does not mean SV packets are being sent."
+            wrapMode: Text.WordWrap
+            color: panel.theme.amber
+            font.family: panel.uiFont
+            font.pixelSize: 10
+        }
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
@@ -153,7 +163,7 @@ Rectangle {
                 text: capture.capturing ? "Capturing…" :
                       capture.processing ? "Exporting…" : "Capture SV + PTP"
                 tone: "accent"
-                enabled: !capture.capturing && !capture.processing && adapter.currentIndex >= 0
+                enabled: !capture.capturing && !capture.processing && adapter.currentIndex >= 0 && !!panel.device && panel.device.running
                 onClicked: {
                     var seconds = captureDuration.currentIndex === 2 ? 3600
                                 : captureDuration.currentIndex === 0 ? 30 : 120
