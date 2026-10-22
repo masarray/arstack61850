@@ -123,8 +123,12 @@ def main() -> None:
             and '!root.startPtpRole("SOURCE")' in main_qml,
             "default PTP start must be one-shot and deliberate OFF must cancel it")
     require("phaseLink && row < 3" in main_qml
-            and "sendLinkedGroup(group) : sendSignal(group, row)" in main_qml,
-            "edited 3-phase angles must be transmitted from the same table model")
+            and "model.setProperty(0, \"phase\"" in main_qml
+            and "model.setProperty(1, \"phase\"" in main_qml
+            and "model.setProperty(2, \"phase\"" in main_qml
+            and "const snapshot = startScenarioSnapshot()" in main_qml
+            and "requestApplyLiveScenario(snapshot)" in main_qml,
+            "edited 3-phase angles must enter the same complete atomic 4I4V snapshot, never partial SETs")
     controller = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
     require("logUpdateTimer_.setInterval(100)" in controller
             and "if (!logUpdateTimer_.isActive()) logUpdateTimer_.start();" in controller,
