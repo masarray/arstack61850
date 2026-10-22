@@ -1356,11 +1356,17 @@ QString DeviceController::ptpConfigCommand(const QVariantMap& profile) {
         announce < 100U || sync < 20U) {
         return {};
     }
-    return QStringLiteral("PTP CONFIG %1 %2 %3 %4 %5 %6 %7 %8")
+    QString command = QStringLiteral("PTP CONFIG %1 %2 %3 %4 %5 %6 %7 %8")
         .arg(domain).arg(transport)
         .arg(profile.value(QStringLiteral("vlanEnabled")).toBool() ? 1 : 0)
         .arg(vlan).arg(pcp).arg(announce).arg(sync)
         .arg(profile.value(QStringLiteral("respondToPeerDelay")).toBool() ? 1 : 0);
+    if (profile.value(QStringLiteral("benchGlobalGm")).toBool()) {
+        // Studio supplies a fresh host UTC epoch. The device then uses
+        // one EMAC IEEE1588 timebase for both PTP TX and SV sampling.
+        command += QStringLiteral(" 1 %1").arg(QDateTime::currentSecsSinceEpoch());
+    }
+    return command;
 }
 
 void DeviceController::resetPtpStartup() noexcept {
@@ -1429,6 +1435,13 @@ bool DeviceController::startPtpConfigured(const QString& requestedRole,
          role != QStringLiteral("RECEIVER") &&
          role != QStringLiteral("MONITOR"))) {
         setError(QStringLiteral("Connect a PTP-capable ESP32-P4 and stop timing before starting."));
+        return false;
+    }
+    if (profile.value(QStringLiteral("benchGlobalGm")).toBool() &&
+        (role != QStringLiteral("SOURCE") ||
+         !identity_.capabilities.contains(QStringLiteral("PTP-GM-BENCH-V1"),
+                                          Qt::CaseInsensitive))) {
+        setError(QStringLiteral("Bench GM requires SOURCE and matched PTP-GM-BENCH-V1 firmware."));
         return false;
     }
     const QString command = ptpConfigCommand(profile);
