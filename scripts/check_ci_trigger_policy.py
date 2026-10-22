@@ -101,6 +101,16 @@ def main():
             "github.event.pull_request.draft && "
             "contains(github.event.pull_request.body, '[run-phase-guard]') }}"
         )
+        # Limited testbench artifact exception: only consolidated Draft #286
+        # explicitly calling the existing firmware workflow for its exact-head
+        # Studio preview; no general Draft PR heavy-build bypass.
+        preview_gate = (
+            "    if: ${{ github.event_name != 'pull_request' || "
+            "!github.event.pull_request.draft || "
+            "(inputs.phase_sync_preview == true && "
+            "github.event.pull_request.head.ref == "
+            "'feat/ptp-source-policy-fsm-20261022') }}"
+        )
         for index, boundary in enumerate(boundaries):
             job_name = boundary.group(1)
             block_end = (
@@ -110,6 +120,11 @@ def main():
             block = jobs[boundary.end():block_end]
             if_lines = re.findall(r"(?m)^    if: .+$", block)
             if if_lines == [gate]:
+                continue
+            if name == "esp32p4-smv-injector.yml" and job_name == "build-esp32p4":
+                assert if_lines == [preview_gate], (
+                    name, job_name, "unexpected Draft firmware bypass"
+                )
                 continue
             if name == "esp32p4-ptp-lab.yml" and job_name == "phase-guard-checkpoint":
                 assert if_lines == [phase_gate], (name, job_name, "unsafe opt-in")
