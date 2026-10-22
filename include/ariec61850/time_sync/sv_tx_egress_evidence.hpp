@@ -200,7 +200,15 @@ public:
     // A small negative tolerance accommodates sub-4us sample-phase error.
     static constexpr std::int64_t kMinCanonicalTxOffsetNs = -4000LL;
     static constexpr std::int64_t kMaxCanonicalTxOffsetNs = 250000LL;
+    // SOURCE shares the ESP32-P4 EMAC PTP oscillator with the SV GPTimer.
+    // 2026-10-22 hardware capture: phase -3..+1 us plus 2..3 us PTP
+    // read-bracket uncertainty; a 4-us combined threshold repeatedly
+    // revoked smpSynch 2 despite zero dropped/reordered samples and a
+    // continuous GM. Only SOURCE gets this bounded measurement margin;
+    // EXTERNAL RECEIVER retains the original strict 4-us criterion.
+    // 12 us is <5% of one 250-us 4 kHz SV sampling period.
     static constexpr std::uint32_t kMaxSoftwarePhaseBoundUs = 4U;
+    static constexpr std::uint32_t kMaxSourceSoftwarePhaseBoundUs = 12U;
     static constexpr std::uint32_t kEvidenceStride = kSvTxEvidenceEpochStride;
     static constexpr std::uint32_t kMaxEvidenceAgeEpochs = kEvidenceStride + 1U;
     static constexpr std::uint32_t kRequiredMeasuredPairs = 2U;
@@ -267,7 +275,7 @@ public:
         const std::uint32_t software_phase_bound_us) const noexcept {
         return matched_pairs_ >= kSourceRequiredMeasuredPairs &&
             software_tracking &&
-            software_phase_bound_us <= kMaxSoftwarePhaseBoundUs &&
+            software_phase_bound_us <= kMaxSourceSoftwarePhaseBoundUs &&
             session != 0U && source_generation != 0U &&
             session == session_ &&
             fault_generation == fault_generation_ &&
