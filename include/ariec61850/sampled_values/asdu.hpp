@@ -23,10 +23,11 @@ struct SampledValueAsdu final {
     std::uint8_t sample_synchronization{0U};
     std::optional<std::uint16_t> sample_rate;
     std::optional<std::uint16_t> sample_mode;
+    std::vector<std::uint8_t> sample_payload;
     // IEC 61850-9-2 Ed.2.1: SynchSrcID/gmIdentity, eight bytes in the
     // same network order as the PTP GrandmasterIdentity in Announce.
+    // Append after payload to preserve existing aggregate initializers.
     std::optional<std::array<std::uint8_t, 8>> gm_identity;
-    std::vector<std::uint8_t> sample_payload;
 
     friend bool operator==(const SampledValueAsdu&, const SampledValueAsdu&) = default;
 };
