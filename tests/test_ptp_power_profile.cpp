@@ -131,6 +131,30 @@ void check_source_heartbeat_freshness_and_time_provenance() {
     explicit_offset.stop();
 }
 
+void check_priority_tagged_power_profile_wire() {
+    auto options = make_source();
+    options.vlan_id = 0U;
+    options.vlan_priority = 4U;
+    std::string error;
+    REQUIRE(PtpPublisherRuntime::validate_options(options, error));
+    PtpPublisherRuntime source{options};
+    REQUIRE(source.start());
+    const auto announce = source.prepare_announce(PtpTimestamp{1000U, 0U});
+    REQUIRE(announce.has_value());
+    const auto& raw = announce->ethernet_frame;
+    REQUIRE(raw.size() > 18U);
+    REQUIRE(raw[12] == 0x81U && raw[13] == 0x00U);
+    REQUIRE(raw[14] == 0x80U && raw[15] == 0x00U); // PCP4, VID0
+    REQUIRE(raw[16] == 0x88U && raw[17] == 0xF7U);
+    PtpFrame parsed{};
+    REQUIRE(PtpCodec::try_parse_ethernet_frame(raw, parsed));
+    REQUIRE(parsed.vlan_id == std::optional<std::uint16_t>{0U});
+    REQUIRE(parsed.header.message_type == PtpMessageType::announce);
+    source.stop();
+    options.vlan_id = 4095U;
+    REQUIRE(!PtpPublisherRuntime::validate_options(options, error));
+}
+
 void check_ptp_wire_sequence_and_identity() {
     auto options = make_source();
     constexpr std::uint8_t domain = 93U; // supported alternate network domain
