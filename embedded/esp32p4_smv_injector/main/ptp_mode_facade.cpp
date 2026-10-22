@@ -63,6 +63,8 @@ ar_ptp_lab_config_t g_external_source_config{};
 std::uint64_t g_external_handovers{};
 std::uint64_t g_external_returns{};
 std::uint64_t g_external_failures{};
+// Supervisor-owned backoff for a failed post-switch local clock restart.
+std::uint64_t g_external_retry_after_ms{};
 
 void stop_active_ptp_roles() noexcept;
 
@@ -476,13 +478,14 @@ void external_worker(void*) {
         vTaskDelay(pdMS_TO_TICKS(250));
         if (!g_external_enabled.load(std::memory_order_acquire)) continue;
         const bool source = ar_ptp_source_runtime_active();
+        const bool receiver_worker = ptp_receiver_runtime_active();
         const ar_ptp_lab_config_t profile = selected_config();
         // Include unexpected RECEIVER worker exit as an unlock observation:
         // fallback may not depend on the old task still being alive.
         const bool receiver = !source &&
             profile.role == AR_PTP_ROLE_TIME_RECEIVER;
         bool locked = false;
-        if (receiver && ptp_receiver_runtime_active()) {
+        if (receiver && receiver_worker) {
             ar_ptp_lab_status_t status{};
             if (ptp_receiver_get_status(status)) {
                 locked = status.is_running && status.source_selected &&
@@ -494,6 +497,16 @@ void external_worker(void*) {
         const auto now = external_now_ms();
         portENTER_CRITICAL(&g_external_mux);
         request = g_external_policy.evaluate(source, receiver, locked, now);
+        // If SOURCE rollback failed after an earlier handoff, the supervisor
+        // must not silently remain with zero PTP workers forever. Retry on a
+        // bounded 10-second schedule, never while the old receiver owns EMAC.
+        const bool stranded_local =
+            !source && !receiver_worker &&
+            profile.role == AR_PTP_ROLE_LAB_SOURCE;
+        if (stranded_local && now >= g_external_retry_after_ms) {
+            request = ar::iec61850::time_sync::PtpExternalHandover::return_source;
+            g_external_retry_after_ms = now + 10000U;
+        }
         portEXIT_CRITICAL(&g_external_mux);
         if (request == ar::iec61850::time_sync::PtpExternalHandover::none)
             continue;
@@ -503,7 +516,8 @@ void external_worker(void*) {
             request == ar::iec61850::time_sync::PtpExternalHandover::enter_receiver
                 ? AR_PTP_ROLE_TIME_RECEIVER : AR_PTP_ROLE_LAB_SOURCE;
         ESP_LOGW(kTag, "PTP AUTO physical handoff requested: %s -> %s",
-                 source ? "SOURCE" : "RECEIVER", role_name(next_role));
+                 source ? "SOURCE" : receiver_worker ? "RECEIVER" : "NO_OWNER",
+                 role_name(next_role));
         bool success = false;
         if (g_external_enabled.load(std::memory_order_acquire)) {
             // Explicitly break PTP ownership and clear SV sync claims.
@@ -526,6 +540,7 @@ void external_worker(void*) {
         }
         portENTER_CRITICAL(&g_external_mux);
         if (success) {
+            g_external_retry_after_ms = 0U;
             if (next_role == AR_PTP_ROLE_TIME_RECEIVER) {
                 ++g_external_handovers;
                 g_external_policy.switched_to_receiver(external_now_ms());
@@ -551,6 +566,11 @@ void external_worker(void*) {
             if (await_exclusive_emac() && ar_ptp_lab_configure(&original) &&
                 g_external_enabled.load(std::memory_order_acquire)) {
                 const bool restored = ar_ptp_lab_try_start(g_external_eth);
+                if (restored) {
+                    portENTER_CRITICAL(&g_external_mux);
+                    g_external_retry_after_ms = 0U;
+                    portEXIT_CRITICAL(&g_external_mux);
+                }
                 ESP_LOGW(kTag, "PTP AUTO receiver failed; restore SOURCE=%u",
                          restored ? 1U : 0U);
             } else {

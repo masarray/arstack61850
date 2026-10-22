@@ -307,7 +307,9 @@ SurfacePanel {
                                 ? "External Announce " +
                                   (panel.device.ptpExternalCandidateReady ? "qualified" : "acquiring") +
                                   " · " + panel.device.ptpExternalStableAnnounces + "/3 · real receiver LOCK required"
-                                : "Off · local PTP Source remains selected · " +
+                                : (panel.device.ptpRole === "RECEIVER"
+                                    ? "Off · Receiver stays active until Stop PTP"
+                                    : "Off · local SOURCE selected") + " · " +
                                   (panel.device.ptpExternalCandidateReady ? "external PTP Announce detected" : "detecting external GM")
                         font.family: panel.uiFont
                         color: panel.theme.textSoft
