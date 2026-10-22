@@ -340,6 +340,14 @@ bool SmartSessionController::requestStartWithScenario(const QVariantMap& scenari
     return device_->startWithScenario(scenario);
 }
 
+bool SmartSessionController::requestApplyLiveScenario(const QVariantMap& scenario) {
+    // Never silently replay a locally restored draft after reconnect. This
+    // path is entered only by the explicit operator Apply Live intent.
+    if (!liveControlReady() || device_ == nullptr || !device_->running() ||
+        device_->scenarioApplying()) return false;
+    return device_->applyLiveScenario(scenario);
+}
+
 bool SmartSessionController::requestStop() {
     if (device_ == nullptr) return false;
     // STOP is a cancellation authority even before SV RUNNING telemetry: an

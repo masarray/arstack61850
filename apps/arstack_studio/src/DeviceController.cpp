@@ -734,7 +734,18 @@ bool DeviceController::start() {
 }
 
 bool DeviceController::startWithScenario(const QVariantMap& scenario) {
-    if (!deviceVerified_ || running_ || scenarioStage_ != ScenarioStage::idle) return false;
+    return submitScenario(scenario, true);
+}
+
+bool DeviceController::applyLiveScenario(const QVariantMap& scenario) {
+    return submitScenario(scenario, false);
+}
+
+bool DeviceController::submitScenario(const QVariantMap& scenario, const bool starting) {
+    // Same exact 4I4V wire encoder, token, commit and independent readback for
+    // START and RUNNING edit. Live mode NEVER sends START or resets phase.
+    if (!deviceVerified_ || running_ == starting ||
+        scenarioStage_ != ScenarioStage::idle) return false;
     if (!identity_.capabilities.contains(QStringLiteral("SV-CONFIG-TXN-V1"), Qt::CaseInsensitive) ||
         identity_.bootId.size() != 16 || sessionGeneration_ == 0) {
         setError(QStringLiteral("Firmware does not support verified SV configuration transactions; START refused."));
@@ -826,6 +837,7 @@ bool DeviceController::startWithScenario(const QVariantMap& scenario) {
     // Only the immutable staging+COMMIT goes into the bounded exclusive FIFO.
     // START is dispatched later, after firmware ACK and independent bank readback.
     scenarioStage_ = ScenarioStage::awaiting_commit;
+    scenarioLiveUpdate_ = !starting;
     scenarioToken_ = token;
     scenarioHash_ = hash;
     scenarioBoot_ = identity_.bootId;
@@ -1823,6 +1835,7 @@ void DeviceController::resetScenarioStart() noexcept {
     const bool wasPending = scenarioStage_ != ScenarioStage::idle;
     scenarioTimer_.stop();
     scenarioStage_ = ScenarioStage::idle;
+    scenarioLiveUpdate_ = false;
     scenarioToken_ = 0;
     scenarioHash_ = 0;
     scenarioSessionGeneration_ = 0;
@@ -1840,13 +1853,18 @@ void DeviceController::failScenarioStart(const QString& message) {
     appendLog(QStringLiteral("SVTX"), QStringLiteral(
         "TXN_FAILURE session=%1 boot=%2 token=%3 reason=%4")
         .arg(sessionGeneration_).arg(scenarioBoot_).arg(scenarioToken_).arg(message));
+    // An unverified START may have armed the publisher: fail closed STOP.
+    // A live setpoint failure must not silently stop an existing healthy
+    // stream; the old wire state remains authoritative until readback proves
+    // otherwise. Surface failure, leave operator draft pending.
+    const bool wasLiveUpdate = scenarioLiveUpdate_;
     resetScenarioStart();
-    // Even if START ACK was lost after a valid commit, issue STOP. It is not
-    // safe to conclude that the physical publisher is stopped from a timeout.
-    appendLog(QStringLiteral("SVTX"), QStringLiteral(
-        "FAIL_SAFE_STOP_REQUEST session=%1 reason=unverified_start")
-        .arg(sessionGeneration_));
-    static_cast<void>(sendCommand(QStringLiteral("STOP")));
+    if (!wasLiveUpdate) {
+        appendLog(QStringLiteral("SVTX"), QStringLiteral(
+            "FAIL_SAFE_STOP_REQUEST session=%1 reason=unverified_start")
+            .arg(sessionGeneration_));
+        static_cast<void>(sendCommand(QStringLiteral("STOP")));
+    }
     setError(message);
 }
 
@@ -1992,11 +2010,19 @@ void DeviceController::processLine(const QString& rawLine) {
             scenarioReadback.captured(3).toULongLong() != scenarioSignalGeneration_) {
             failScenarioStart(QStringLiteral("SV firmware readback differs from committed scenario."));
         } else {
-            scenarioStage_ = ScenarioStage::awaiting_start_ack;
             appendLog(QStringLiteral("SVTX"), QStringLiteral(
-                "CFG_VERIFIED session=%1 boot=%2 token=%3 signal_generation=%4")
+                "CFG_VERIFIED session=%1 boot=%2 token=%3 signal_generation=%4 mode=%5")
                 .arg(sessionGeneration_).arg(scenarioBoot_).arg(scenarioToken_)
-                .arg(scenarioSignalGeneration_));
+                .arg(scenarioSignalGeneration_)
+                .arg(scenarioLiveUpdate_ ? QStringLiteral("LIVE") : QStringLiteral("START")));
+            if (scenarioLiveUpdate_) {
+                // Commit already atomically replaced one signal bank; no
+                // START, STOP, phase reset or smpCnt reset is permitted.
+                emit liveScenarioApplied();
+                resetScenarioStart();
+                return;
+            }
+            scenarioStage_ = ScenarioStage::awaiting_start_ack;
             const QString hash = QString::number(scenarioHash_, 16).toUpper()
                 .rightJustified(16, QLatin1Char('0'));
             if (!sendCommand(QStringLiteral("START %1 %2 %3")

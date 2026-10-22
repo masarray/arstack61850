@@ -236,6 +236,7 @@ public:
     virtual bool start();
     // Single validated, bounded FIFO transaction. START is always last.
     bool startWithScenario(const QVariantMap& scenario);
+    bool applyLiveScenario(const QVariantMap& scenario);
     bool stop();
     virtual bool zero();
     virtual bool setFrequency(double hz);
@@ -314,6 +315,7 @@ signals:
     void deviceMessage(const QString& message);
     void scenarioStateChanged();
     void scenarioApplicationFinished();
+    void liveScenarioApplied();
     void portReleased(quint64 generation, const QString& portName);
 
 protected:
@@ -387,6 +389,7 @@ private:
     void resetBinaryProfileTransfer();
     void failBinaryProfileDeployment(const QString& message);
     void failScenarioStart(const QString& message);
+    bool submitScenario(const QVariantMap& scenario, bool starting);
     void resetScenarioStart() noexcept;
     void resetTelemetry();
     void resetPtpState();
@@ -448,6 +451,7 @@ private:
     QTimer ptpStartTimer_;
     QTimer scenarioTimer_;
     ScenarioStage scenarioStage_{ScenarioStage::idle};
+    bool scenarioLiveUpdate_{false};
     quint64 scenarioToken_{0};
     quint64 scenarioHash_{0};
     quint64 scenarioSessionGeneration_{0};
