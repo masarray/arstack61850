@@ -973,6 +973,9 @@ bool DeviceController::deployProfile(const QVariantMap& profile) {
     if (svId.isEmpty() ||
         svId != profile.value(QStringLiteral("svId")).toString() ||
         decoded.app_id != profile.value(QStringLiteral("appId")).toUInt() ||
+        decoded.vlan_present != profile.value(QStringLiteral("vlanPresent")).toBool() ||
+        decoded.vlan_id != profile.value(QStringLiteral("vlanId")).toUInt() ||
+        decoded.vlan_priority != profile.value(QStringLiteral("vlanPriority")).toUInt() ||
         decoded.frame_rate_hz != profile.value(QStringLiteral("publisherRate")).toULongLong() ||
         decoded.sample_counter_modulus != profile.value(QStringLiteral("counterModulus")).toUInt() ||
         decoded.configuration_revision != profile.value(QStringLiteral("confRev")).toULongLong()) {
