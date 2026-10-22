@@ -1423,9 +1423,18 @@ void sv_ptp_phase_observer_task(void* argument) {
             const std::uint64_t worst_case_phase_us =
                 static_cast<std::uint64_t>(abs_phase_us) +
                 decision.observation_uncertainty_us;
+            // The external RECEIVER remains strict (4 us). Internal GM
+            // samples the very same EMAC oscillator used for PTP packets;
+            // allow bounded 2-3us read-bracket quantization without
+            // toggling smpSynch 2 -> 0 every second. This is NOT a bypass:
+            // phase tracking, consecutive epochs, MAC TX timestamps,
+            // same source/session and zero missed frames still apply.
+            const std::uint32_t phase_bound_us =
+                lease.role == PtpAuthorityRole::source
+                    ? SvLocalSyncEvidenceGate::kMaxSourceSoftwarePhaseBoundUs
+                    : SvLocalSyncEvidenceGate::kMaxSoftwarePhaseBoundUs;
             measured_phase_qualified = decision.software_tracking &&
-                worst_case_phase_us <=
-                    SvLocalSyncEvidenceGate::kMaxSoftwarePhaseBoundUs;
+                worst_case_phase_us <= phase_bound_us;
             portENTER_CRITICAL(&g_tx_egress_mux);
             const std::uint32_t bound_us = worst_case_phase_us <= UINT32_MAX
                 ? static_cast<std::uint32_t>(worst_case_phase_us) : UINT32_MAX;
