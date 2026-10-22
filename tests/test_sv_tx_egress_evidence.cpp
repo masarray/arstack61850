@@ -146,7 +146,11 @@ void check_internal_source_auto_acquires_without_ten_second_probation() {
     REQUIRE(mac.qualified_source_fast(7U, 0U, 3U, 4U, true, 4U));
     REQUIRE(!mac.qualified(7U, 0U, 3U, 4U, true, 4U));
     REQUIRE(!mac.qualified_source_fast(7U, 0U, 3U, 4U, false, 0U));
-    REQUIRE(!mac.qualified_source_fast(7U, 0U, 3U, 4U, true, 5U));
+    // Hardware PCAP 2026-10-22: a 2-3us read-span uncertainty added to
+    // a healthy -2..-3us sampled phase must NOT oscillate SOURCE sync.
+    REQUIRE(mac.qualified_source_fast(7U, 0U, 3U, 4U, true, 5U));
+    REQUIRE(!mac.qualified_source_fast(7U, 0U, 3U, 4U, true, 13U));
+    REQUIRE(!mac.qualified(7U, 0U, 3U, 4U, true, 5U));
     REQUIRE(!source.observe(true,
         mac.qualified_source_fast(7U, 0U, 3U, 4U, true, 3U),
         7U, 0U, 3U, 4U)); // still only one qualified 1-Hz phase epoch
@@ -175,6 +179,47 @@ void check_internal_source_auto_acquires_without_ten_second_probation() {
     REQUIRE(!source.observe(true, true, 7U, 1U, 4U, 13U)); // fault
     REQUIRE(!source.observe(false, true, 7U, 1U, 4U, 14U)); // phase lost
     REQUIRE(!mac.qualified_source_fast(7U, 0U, 3U, 8U, true, 3U));
+}
+
+void check_physical_capture_source_microsecond_quantization_no_flapping() {
+    // Regression for ARStack_SV_20261022_212108_316: the board had continuous
+    // 4000/s smpCnt and PTP, while +/-3us phase + 2..3us read uncertainty
+    // caused 2->0 at the next epoch under the old combined 4us limit.
+    SvTxEgressEvidence tx;
+    SvLocalSyncEvidenceGate mac;
+    SvSourceSelfClockAcquisition source;
+    const auto baseline = make_good(2U, 1700001802U, 85000U);
+    REQUIRE(tx.record(baseline) == SvTxEvidenceResult::baseline_established);
+    mac.observe(baseline, SvTxEvidenceResult::baseline_established,
+                tx.summary().last_phase_ns);
+    bool locked = false;
+    for (std::uint32_t epoch = 4U; epoch <= 20U; ++epoch) {
+        if ((epoch % 2U) == 0U) {
+            const auto sample = make_good(epoch, 1700001800U + epoch, 85000U);
+            const auto result = tx.record(sample);
+            REQUIRE(result == SvTxEvidenceResult::measured);
+            mac.observe(sample, result, tx.summary().last_phase_ns);
+        }
+        const std::uint32_t measured_plus_uncertainty =
+            (epoch % 3U) == 0U ? 6U : (epoch % 3U) == 1U ? 5U : 4U;
+        const bool valid = mac.qualified_source_fast(
+            7U, 0U, 3U, epoch, true, measured_plus_uncertainty);
+        REQUIRE(valid);
+        locked = source.observe(true, valid, 7U, 0U, 3U, epoch);
+        REQUIRE(locked == (epoch >= 5U));
+        // External-GM strictness is unchanged. The SOURCE fast route does
+        // not weaken RECEIVER's 4us phase qualification.
+        if (measured_plus_uncertainty > 4U)
+            REQUIRE(!mac.qualified(7U, 0U, 3U, epoch, true,
+                                   measured_plus_uncertainty));
+    }
+    // Actual timebase discontinuity, TX fault, MAC staleness still revoke.
+    REQUIRE(!source.observe(true,
+        mac.qualified_source_fast(7U, 0U, 4U, 21U, true, 5U),
+        7U, 0U, 4U, 21U));
+    REQUIRE(!mac.qualified_source_fast(7U, 0U, 3U, 25U, true, 5U));
+    REQUIRE(!mac.qualified_source_fast(7U, 1U, 3U, 20U, true, 5U));
+    REQUIRE(!mac.qualified_source_fast(7U, 0U, 3U, 20U, true, 13U));
 }
 
 void check_external_gm_receiver_requires_real_sv_egress_and_phase() {
@@ -463,6 +508,7 @@ int main() {
         check_auto_local_sync_gate_requires_both_clocks_and_fresh_mac();
         check_fast_source_auto_qualification_with_fresh_evidence();
         check_internal_source_auto_acquires_without_ten_second_probation();
+        check_physical_capture_source_microsecond_quantization_no_flapping();
         check_external_gm_receiver_requires_real_sv_egress_and_phase();
         check_warm_phase_preflight_cannot_fake_canonical_mac();
         check_warm_preflight_negative_session_and_clock_faults();
