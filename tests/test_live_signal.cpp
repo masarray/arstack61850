@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <thread>
 #include <cmath>
 #include <cstdint>
 #include <exception>
@@ -19,6 +21,54 @@ namespace {
                                  " at " + __FILE__ + ":" + std::to_string(__LINE__)); \
     } \
 } while (false)
+
+// Preserve PR #248: publisher and SHOW/diagnostics are separate readers.
+// Every visible generation must be internally coherent while one writer
+// publishes full 4I+4V snapshots. This also exercises the fourth bank.
+void concurrent_publisher_and_diagnostics_snapshots_are_coherent() {
+    using namespace ar::iec61850::sampled_values;
+    SvLiveSignalBank bank;
+    std::atomic<bool> done{false};
+    std::atomic<bool> inconsistent{false};
+    std::atomic<std::uint32_t> readers_ready{0U};
+    std::atomic<std::uint32_t> reads{0U};
+    const auto reader = [&] {
+        readers_ready.fetch_add(1U);
+        do {
+            const auto s = bank.snapshot();
+            if (s.generation != 0U) {
+                const auto number = static_cast<std::int32_t>(s.generation);
+                if (s.channels[0].rms_counts != number ||
+                    s.channels[1].phase_millidegrees != number ||
+                    s.channels[4].rms_counts != number * 2 ||
+                    s.channels[7].quality != static_cast<std::uint32_t>(number)) {
+                    inconsistent.store(true);
+                }
+            }
+            reads.fetch_add(1U);
+        } while (!done.load());
+    };
+    std::thread publisher(reader);
+    std::thread diagnostics(reader);
+    while (readers_ready.load() != 2U) std::this_thread::yield();
+    std::uint32_t committed = 0U;
+    for (std::uint32_t i = 0U; i < 20000U; ++i) {
+        auto s = bank.snapshot();
+        const auto next = static_cast<std::int32_t>(s.generation + 1U);
+        s.channels[0].rms_counts = next;
+        s.channels[1].phase_millidegrees = next;
+        s.channels[4].rms_counts = next * 2;
+        s.channels[7].quality = static_cast<std::uint32_t>(next);
+        if (bank.publish(s)) ++committed;
+        if ((i % 128U) == 0U) std::this_thread::yield();
+    }
+    done.store(true);
+    publisher.join();
+    diagnostics.join();
+    CHECK(committed > 100U);
+    CHECK(reads.load() >= 2U);
+    CHECK(!inconsistent.load());
+}
 
 void bank_commits_complete_generations() {
     using namespace ar::iec61850::sampled_values;
@@ -221,6 +271,7 @@ void independent_channels_change_without_stream_restart() {
 int main() {
     try {
         bank_commits_complete_generations();
+        concurrent_publisher_and_diagnostics_snapshots_are_coherent();
         fixed_point_engine_preserves_frequency_and_phase();
         dc_engine_outputs_constant_engineering_values();
         ct_saturation_shape_is_bounded_and_asymmetric();
