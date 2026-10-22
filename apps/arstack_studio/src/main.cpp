@@ -35,6 +35,7 @@
 #include <array>
 #include <cmath>
 #include <memory>
+#include <span>
 #include <string_view>
 
 #ifndef ARSTACK_STUDIO_VERSION
