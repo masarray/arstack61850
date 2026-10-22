@@ -38,6 +38,17 @@ SurfacePanel {
         panel.controller.openEngineeringFile()
     }
 
+    // Switching SCL streams or recompiling the selected one must reload the
+    // editor from that stream. Never silently apply another stream's VLAN.
+    Connections {
+        target: panel.profiles
+        function onSelectedProfileChanged() {
+            svVlanEnabled.checked = Boolean(panel.profile.vlanPresent)
+            svVlanVid.text = String(panel.profile.vlanId === undefined ? 0 : panel.profile.vlanId)
+            svVlanPcp.text = String(panel.profile.vlanPriority === undefined ? 4 : panel.profile.vlanPriority)
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: panel.compact ? 11 : 14
