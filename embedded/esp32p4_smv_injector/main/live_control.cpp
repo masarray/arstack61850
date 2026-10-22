@@ -251,7 +251,7 @@ void print_help() noexcept {
     ESP_LOGI(kTag, "  QUALITY <channel> <uint32/0xhex>");
     ESP_LOGI(kTag, "  SHAPE CT <0|1> <dc_permille> <harmonic_permille> <order> <clip_permille>");
     ESP_LOGI(kTag, "  PTP SHOW | PTP DIAG | PTP START | PTP STOP");
-    ESP_LOGI(kTag, "  PTP CONFIG <domain> <transport> <vlan> <vid> <pcp> <announce_ms> <sync_ms> <pdelay>");
+    ESP_LOGI(kTag, "  PTP CONFIG <domain> <transport> <vlan> <vid> <pcp> <announce_ms> <sync_ms> <pdelay> [bench_global_0_1 UTC_epoch_seconds]");
     ESP_LOGI(kTag, "GUI profile deployment uses bounded PROFILE subcommands while STOPPED.");
 }
 
@@ -429,6 +429,18 @@ void handle_ptp_command(char* save) noexcept {
                 return;
             }
         }
+        bool bench_global = false;
+        std::uint32_t utc_epoch = 0U;
+        char* bench_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
+        if (bench_text != nullptr) {
+            std::uint32_t bench = 0U;
+            if (!parse_u32(bench_text, bench) || bench > 1U ||
+                !parse_u32(strtok_r(nullptr, kTokenDelimiters.data(), &save), utc_epoch)) {
+                ESP_LOGE(kTag, "PTP configuration rejected: expected bench mode and UTC epoch");
+                return;
+            }
+            bench_global = bench != 0U;
+        }
         if (has_extra_token(&save) || values[0] > 255U || values[1] > 15U || values[2] > 1U ||
             values[3] > 4094U || values[4] > 7U || values[5] < 100U || values[5] > 10000U ||
             values[6] < 20U || values[6] > 5000U || values[7] > 1U) {
@@ -448,12 +460,18 @@ void handle_ptp_command(char* save) noexcept {
         config.announce_interval_ms = values[5];
         config.sync_interval_ms = values[6];
         config.respond_to_peer_delay = values[7] != 0U;
+        config.bench_global_gm = bench_global;
+        config.bench_utc_epoch_seconds = bench_global ? utc_epoch : 0U;
+        config.bench_epoch_received_mono_us = bench_global ? esp_timer_get_time() : 0LL;
         if (!ar_ptp_lab_configure(&config)) {
             ESP_LOGE(kTag, "PTP configuration rejected: reason=%s",
                      ar_ptp_lab_last_config_error());
             return;
         }
         ESP_LOGI(kTag, "PTP configuration accepted");
+        ESP_LOGI(kTag, "PTP GM emulation=%u UTC_seed=%lu",
+                 config.bench_global_gm ? 1U : 0U,
+                 static_cast<unsigned long>(config.bench_utc_epoch_seconds));
         print_ptp_state();
         return;
     }
