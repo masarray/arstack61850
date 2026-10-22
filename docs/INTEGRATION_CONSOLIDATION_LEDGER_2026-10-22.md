@@ -6,6 +6,8 @@
 > Full commit SHA **before this ledger commit**: `fecefbd21f6a8ebb9085ec72dff05fd5a1fc3a2b`. Main: `7f6b946cab8565f37c31b460463576a0bb1e3fc5`.
 > This ledger is added ONLY to existing PR #286; it is never committed to `main` until authorized acceptance.
 
+**Next-thread entrypoint:** [Detailed per-PR divergence and preservation map](./INTEGRATION_SIDE_BRANCH_TRIAGE_2026-10-22.md). It contains exact GitHub commit comparisons for all 37 PRs outside the main chain, plus the 21 high-risk side-branch audit tasks. Treat both ledgers as a linked pair.
+
 ## Verified structure (GitHub API, 2026-10-22)
 
 - Open PRs: **64**, including **12 draft / 52 ready**; open *issues excluding PRs*: **26**.
