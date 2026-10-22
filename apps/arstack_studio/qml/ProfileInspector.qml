@@ -256,6 +256,15 @@ SurfacePanel {
                         font.family: panel.monoFont
                         font.pixelSize: panel.theme.captionSize
                     }
+                    Label { text: "SV wire"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize }
+                    Label {
+                        text: panel.profile.includeSampleRate
+                              ? "smpRate " + panel.profile.wireSmpRate + " · smpMod " + panel.profile.wireSmpMod
+                              : "smpRate / smpMod omitted (optional)"
+                        color: panel.theme.textSoft
+                        font.family: panel.monoFont
+                        font.pixelSize: panel.theme.captionSize
+                    }
                     Label { text: "Frames"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize }
                     Label {
                         text: panel.profile.frameRateHz

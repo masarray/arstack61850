@@ -518,6 +518,15 @@ QVariantMap SclProfileModel::profileToVariantMap(const SvPublisherProfile& p) co
     map.insert(QStringLiteral("channelLeafCount"), static_cast<qulonglong>(p.channels.size()));
     map.insert(QStringLiteral("includeDataSet"), p.asdu_options.data_set);
     map.insert(QStringLiteral("includeSampleRate"), p.asdu_options.sample_rate);
+    map.insert(QStringLiteral("wireSmpRate"),
+        p.asdu_options.sample_rate
+            ? QVariant::fromValue(static_cast<qulonglong>(p.timing.configured_sample_rate))
+            : QVariant{});
+    map.insert(QStringLiteral("wireSmpMod"),
+        p.asdu_options.sample_rate
+            ? QVariant::fromValue(p.timing.sampling_basis == SvSampleMode::samples_per_period
+                ? 0 : p.timing.sampling_basis == SvSampleMode::samples_per_second ? 1 : -1)
+            : QVariant{});
     map.insert(QStringLiteral("sampleSynchronizedField"), p.asdu_options.sample_synchronized);
 
     map.insert(QStringLiteral("iec61869Present"), p.iec61869_9.has_value());

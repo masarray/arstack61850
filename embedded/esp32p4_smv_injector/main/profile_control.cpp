@@ -524,6 +524,9 @@ void handle_profile_command(char* arguments) noexcept {
         g_staging.no_asdu = static_cast<std::uint16_t>(no_asdu);
         g_staging.include_data_set = (flags & 0x1U) != 0U;
         g_staging.include_sample_rate = (flags & 0x2U) != 0U;
+        // ASCII PROFILE SV remains samples/second, never inherits SCL mode.
+        g_staging.wire_sample_rate = 0U;
+        g_staging.wire_sample_mode = 1U;
         return;
     }
 
