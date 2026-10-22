@@ -8,6 +8,7 @@
 #include "StudioClipboard.hpp"
 #include "StudioDeviceController.hpp"
 #include "SvCaptureController.hpp"
+#include "ariec61850/sampled_values/compiled_device_profile.hpp"
 
 #include <QClipboard>
 #include <QCloseEvent>
@@ -199,8 +200,38 @@ int checkReferenceTemplate(int argc, char* argv[]) {
         return 3;
     }
 
+    // An operator VLAN edit MUST change the binary sent to the ESP32, not
+    // only a QML label. It must survive an SCL timing recompile and reject
+    // invalid values without corrupting the active stream profile.
+    if (!profiles.configureSelectedVlan(true, 123, 5) ||
+        profiles.configureSelectedVlan(true, 4095, 5) ||
+        profiles.configureSelectedVlan(true, 123, 8) ||
+        !profiles.confirmCounterModulus(4000)) {
+        qCritical().noquote() << "SV VLAN operator edit/recompile regression";
+        return 4;
+    }
+    const auto edited = profiles.selectedProfile();
+    const auto blob = edited.value(QStringLiteral("deviceProfileBinary")).toByteArray();
+    ar::iec61850::sampled_values::CompiledSvDeviceProfile decoded{};
+    const auto bytes = std::span<const std::uint8_t>{
+        reinterpret_cast<const std::uint8_t*>(blob.constData()),
+        static_cast<std::size_t>(blob.size())};
+    if (blob.isEmpty() ||
+        !ar::iec61850::sampled_values::SvDeviceProfileBinaryCodec::decode(bytes, decoded).success() ||
+        !decoded.vlan_present || decoded.vlan_id != 123U || decoded.vlan_priority != 5U ||
+        edited.value(QStringLiteral("vlanId")).toInt() != 123 ||
+        edited.value(QStringLiteral("vlanPriority")).toInt() != 5) {
+        qCritical().noquote() << "SV VLAN binary profile mismatch" << edited;
+        return 5;
+    }
+    if (!profiles.loadReferenceTemplate() ||
+        profiles.selectedProfile().value(QStringLiteral("vlanId")).toInt() != 0 ||
+        profiles.selectedProfile().value(QStringLiteral("vlanPriority")).toInt() != 4) {
+        qCritical().noquote() << "SV VLAN override leaked across reference reload";
+        return 6;
+    }
     qInfo().noquote()
-        << "ARStack 4I+4V 9-2LE reference template: PASS · Class A · ready · 4000 fps · 64 B";
+        << "ARStack 4I+4V 9-2LE reference: PASS · 4000 fps · SV VLAN edit/binary/reload";
     return 0;
 }
 
