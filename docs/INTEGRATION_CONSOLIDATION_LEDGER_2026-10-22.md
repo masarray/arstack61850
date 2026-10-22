@@ -34,6 +34,21 @@ Observed in tip #286 `embedded/esp32p4_smv_injector/main/app_main.cpp`: `revoke_
 8. Synchronization is a safety invariant: no concurrent PTP SOURCE/RECEIVER EMAC ownership, no fake smpSynch=2, one hardware EMAC PTP timebase for SV/PTP, correct GM identity, sample-zero on proven second boundary, fail-closed STOP / lease loss. Hardware FAT must prove Pdelay, relay timing lock, subscribed currents/voltages, and 20 STOP/START cycles + extended 4kHz stream stability. Static CI does **not** qualify SIPROTEC.
 9. Reassess `main` commit, open PR count, SHA changes and CI after any concurrent modification; this is a timestamped inventory, not an automatically updated truth source.
 
+## Targeted side-branch file checks (do NOT infer semantic equivalence)
+
+Static path lookup at #286 after snapshot (not an exhaustive code audit):
+
+| Source PR | Unique source path or functionality | Observed in #286 tip | Preservation action |
+|---|---|---|---|
+| #251 | `include/ariec61850/sampled_values/live_scenario_transaction.hpp`: older token/hash scenario transaction | **File absent**; newer `live_signal_transaction.hpp` exists. The two hashing implementations have different encoding/version marker details; equivalence **unproven** | Compare staged state, wire hash, idempotent ACK, partial-error rollback, generation and tests before closing #251 |
+| #249 | `docs/STUDIO_BOARD_WIRE_RELIABILITY_AUDIT_2026-10-19.md`: historical GUI→wire audit | **File absent**; archived content remains at source PR SHA | Preserve original finding and decide whether to port audit text as historical documentation, without falsely making its old baseline current |
+| #275 / #274 | `assets/material/run-bolt.svg` / `bolt_run.svg` | **Files absent**; current lineage has `electric_bolt_run.svg` | Verify user-visible RUN/STOP SVG shape, size, alignment and click behavior on installed Windows exe |
+| #248 | `include/ariec61850/sampled_values/live_signal_state.hpp` | **Present** | Compare concurrent-snapshot guarantees and negative tests; presence alone not proof |
+| #255 | `apps/arstack_studio/qml/StudioLinkSwitch.qml` | **Present** | Verify checkbox-free 4I4V and switch behavior; presence alone not proof |
+| #230 | `apps/ied_simulator/src/BrowserReportSemanticBinding.hpp` | **Absent** | Independent Workbench/Reporting lane; never claim PR #286 contains it |
+
+**Priority:** most dangerous unresolved scope is `#251/#253/#248` atomic GUI→wire transaction and streaming safety, and `#279/#278/#277` editor/plot variants. Do a behavior+test matrix against current Studio and firmware before choosing changes. Old branches remain retained. A file not in the convergence tip is NOT necessarily an unimplemented requirement, but it cannot be marked included without independent proof.
+
 ## Convergence decision order
 
 - **Lane A — ESP32-P4, Studio and PTP/SV:** canonical `#234→...→#286`. First inspect #256 semantic fork and all 21 sibling proposals (not assumed redundant); finish device actuator for the `AUTO_FAILOVER` policy (currently pure deterministic policy core, not wired to ESP32/Studio), and test SOURCE, RECEIVER, same-EMAC lock + real SIPROTEC.
