@@ -12,6 +12,8 @@
 #include <QRegularExpression>
 #include <QStandardPaths>
 #include <QStorageInfo>
+#include <QSaveFile>
+#include <QJsonArray>
 #include <QTextStream>
 #include <QUrl>
 #include <QVariantList>
@@ -265,7 +267,46 @@ void SvCaptureController::refreshInterfaces() {
     discovery_.setArguments({QStringLiteral("-D")});
     discovery_.start();
 }
+QString SvCaptureController::captureStartBlocker(const QVariantMap& telemetry) {
+    // The requested measurement is a running-SV capture, not a PTP-only trace.
+    // Cached nonzero FPS must never override a STOPPED publisher readback.
+    if (!telemetry.contains(QStringLiteral("running")) ||
+        !telemetry.value(QStringLiteral("running")).toBool()) {
+        return QStringLiteral("SV publisher is STOPPED. Start 4I+4V before "
+                              "capturing; historical FPS/PTP RUNNING is not live SV.");
+    }
+    return {};
+}
+
+void SvCaptureController::writeInvalidCaptureReport(const QString& reason) const {
+    if (activeJson_.isEmpty()) return;
+    const QJsonObject report{
+        {QStringLiteral("schema"), QStringLiteral("arstack.sv.capture.v2")},
+        {QStringLiteral("status"), QStringLiteral("INVALID_CAPTURE")},
+        {QStringLiteral("error"), reason},
+        {QStringLiteral("sv_frames"), 0},
+        {QStringLiteral("physical_acceptance"), false},
+        {QStringLiteral("pcap"), activePcap_},
+        {QStringLiteral("interface"), activeAdapter_},
+        {QStringLiteral("requested_seconds"), activeSecondsRequested_},
+        {QStringLiteral("studio_telemetry_snapshot_UNVERIFIED"),
+         QJsonObject::fromVariantMap(activeStudioTelemetry_)},
+        {QStringLiteral("studio_telemetry_series_UNVERIFIED"),
+         QJsonArray::fromVariantList(activeStudioTelemetrySeries_)}
+    };
+    QSaveFile file(activeJson_);
+    if (file.open(QIODevice::WriteOnly) &&
+        file.write(QJsonDocument(report).toJson(QJsonDocument::Indented)) >= 0)
+        file.commit();
+}
+
 bool SvCaptureController::startCapture(int index, int seconds, const QVariantMap& studioTelemetry) {
+    const QString blocker = captureStartBlocker(studioTelemetry);
+    if (!blocker.isEmpty()) {
+        setStatus(QStringLiteral("CAPTURE BLOCKED: ") + blocker);
+        return false;
+    }
+
     if (capturing() || processing() || discovery_.state() != QProcess::NotRunning ||
         index < 0 || index >= interfaceIds_.size() ||
         (seconds != 30 && seconds != 120 && seconds != 3600)) {
