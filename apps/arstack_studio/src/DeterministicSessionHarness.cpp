@@ -59,6 +59,8 @@ public:
             {"legacy bare SV START refuses stale eight-channel state", legacyBareStartFailsClosed()},
             {"SV commit ACK/readback START chain is generation bound", svTransactionAckChain()},
             {"SV stale ACK and mismatched firmware readback fail closed", svTransactionNegativeAcks()},
+            {"RUNNING 4I4V live commit verifies ACK without START or SV stop", svLiveTransactionAckNoRestart()},
+            {"RUNNING live rejected readback retains existing SV stream", svLiveTransactionRejectKeepsRunning()},
             {"STOP cancels pending SV commit-to-START chain", svStopCancelsPendingStart()},
             {"ABC live SET encoder remains consistent and bounded", abcSetpointBatchContract()},
             {"PTP STOP full queue uses bounded priority slot", ptpSafetyStopBypassesFullQueue()},
@@ -600,6 +602,53 @@ private:
         d.processLine(QStringLiteral(
             "START accepted: profile armed token=4242 hash=ABCDEF1234567890"));
         return !d.running() && d.scenarioStage_ == DeviceController::ScenarioStage::idle;
+    }
+
+    static bool svLiveTransactionAckNoRestart() {
+        Fixture f;
+        seedScenarioAck(f);
+        auto& d = f.device;
+        d.setRunning(true);
+        d.scenarioLiveUpdate_ = true;
+        int verified = 0;
+        QObject::connect(&d, &DeviceController::liveScenarioApplied,
+                         &d, [&verified] { ++verified; });
+        d.processLine(QStringLiteral(
+            "CFG COMMITTED token=4242 hash=ABCDEF1234567890 generation=91 boot=0123456789ABCDEF"));
+        if (!d.running() ||
+            d.scenarioStage_ != DeviceController::ScenarioStage::awaiting_readback ||
+            verified != 0) return false;
+        d.processLine(QStringLiteral(
+            "CFG READBACK token=4242 hash=ABCDEF1234567890 generation=91 boot=0123456789ABCDEF"));
+        return d.running() && !d.scenarioLiveUpdate_ &&
+            d.scenarioStage_ == DeviceController::ScenarioStage::idle &&
+            verified == 1 &&
+            d.logText_.contains(QStringLiteral("mode=LIVE")) &&
+            !d.logText_.contains(QStringLiteral("START_ACK_VERIFIED")) &&
+            !d.logText_.contains(QStringLiteral("FAIL_SAFE_STOP_REQUEST"));
+    }
+
+    static bool svLiveTransactionRejectKeepsRunning() {
+        Fixture f;
+        seedScenarioAck(f);
+        auto& d = f.device;
+        d.setRunning(true);
+        d.scenarioLiveUpdate_ = true;
+        d.processLine(QStringLiteral(
+            "CFG COMMITTED token=4242 hash=ABCDEF1234567890 generation=91 boot=0123456789ABCDEF"));
+        if (d.scenarioStage_ != DeviceController::ScenarioStage::awaiting_readback)
+            return false;
+        d.processLine(QStringLiteral(
+            "CFG READBACK token=4242 hash=ABCDEF1234567890 generation=92 boot=0123456789ABCDEF"));
+        if (!d.running() ||
+            d.scenarioStage_ != DeviceController::ScenarioStage::idle ||
+            !d.lastError_.contains(QStringLiteral("differs")) ||
+            d.logText_.contains(QStringLiteral("FAIL_SAFE_STOP_REQUEST")))
+            return false;
+        // A stale subsequent START/CFG ACK cannot mutate a live stream.
+        d.processLine(QStringLiteral(
+            "START accepted: profile armed token=4242 hash=ABCDEF1234567890"));
+        return d.running() && d.scenarioStage_ == DeviceController::ScenarioStage::idle;
     }
 
     static bool svTransactionNegativeAcks() {
