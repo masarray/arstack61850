@@ -1,5 +1,8 @@
 # ARStack61850 — START HERE: safe merge and zero-progress-loss
 
+> **CURRENT CODE CHECKPOINT (2026-10-22, supersedes old #253 missing-code notes below):** Running 4I4V atomic CFG and Studio "Apply live" code is now implemented in PR #286 through `dde8ed90fabff359fc7cf76cfbdcf854508df227`, with subsequent deterministic ACK/no-restart and negative-readback tests `27e7ca87982ae60d20835e9c70067ac83434dcb3`, staged-frequency fix `3eac7da54f847f2d7f5b979f96e7bbdcc9b762eb`, structural guard `1de2bbaecf14c967bbb0614a9494e5c3ec644f1d`. **Latest code SHA: `b4a11c60833d6ad3a2ab514715344917f188f440`** also repairs malformed Native Preview Inno YAML. Firmware ESP32-P4 SMV Injector CI SUCCESS; remaining exact-SHA CI queued/in progress. **Code ported does NOT mean original #253 closed/equivalent, user relay FAT accepted, or direct .exe published.** PR #286 stays Draft against main, main unchanged.
+
+
 **Checkpoint: 2026-10-22.** This is an engineering handoff, not a release note, physical FAT result, or permission to merge.
 
 ## What is safe NOW
