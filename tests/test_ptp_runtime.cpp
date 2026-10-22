@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ariec61850/time_sync/ptp_runtime.hpp"
+#include "ariec61850/time_sync/ptp_source_policy.hpp"
 
 #include <array>
 #include <chrono>
@@ -256,6 +257,94 @@ void one_step_policy_suppresses_follow_up() {
         PtpTimestamp{std::uint64_t{1U}, std::uint32_t{3U}}).has_value());
 }
 
+
+void explicit_ptp_source_authority_failover_is_exclusive_and_second_rearmed() {
+    using namespace ar::iec61850::time_sync;
+    PtpSourcePolicyMachine internal;
+    PtpSourcePolicyOptions internal_opts{};
+    CHECK(internal.configure(internal_opts));
+    PtpSourceEvidence event{};
+    event.link_up = true;
+    CHECK(internal.tick(0U, event).action == PtpSourceAction::start_internal);
+    event.source_worker_active = true;
+    event.internal_gm_tx_ready = true;
+    CHECK(internal.tick(1000U, event).state == PtpSourceState::internal_ready);
+
+    PtpSourcePolicyMachine external_only;
+    PtpSourcePolicyOptions external_opts{};
+    external_opts.intent = PtpSourceIntent::external_follower;
+    external_opts.external_target_selected = true;
+    CHECK(external_only.configure(external_opts));
+    event = {};
+    event.link_up = true;
+    CHECK(external_only.tick(0U, event).action == PtpSourceAction::start_external);
+    event.receiver_worker_active = true;
+    CHECK(external_only.tick(6000U, event).action == PtpSourceAction::none);
+    CHECK(external_only.state() == PtpSourceState::acquiring_external);
+    event.selected_external_servo_locked = true;
+    CHECK(external_only.tick(7000U, event).state == PtpSourceState::external_locked);
+    event.selected_external_servo_locked = false;
+    CHECK(external_only.tick(7100U, event).action ==
+          PtpSourceAction::revoke_sv_and_pause);
+    CHECK(external_only.tick(20000U, event).action == PtpSourceAction::none);
+    CHECK(external_only.state() == PtpSourceState::external_loss);
+
+    PtpSourcePolicyMachine auto_source;
+    PtpSourcePolicyOptions auto_options{};
+    auto_options.intent = PtpSourceIntent::auto_failover;
+    auto_options.external_target_selected = true;
+    auto_options.fallback_authorized = true;
+    CHECK(auto_source.configure(auto_options));
+    event = {};
+    event.link_up = true;
+    CHECK(auto_source.tick(0U, event).action == PtpSourceAction::start_external);
+    event.receiver_worker_active = true;
+    CHECK(auto_source.tick(5000U, event).action ==
+          PtpSourceAction::revoke_sv_and_pause);
+    CHECK(auto_source.generation() == 1U);
+    CHECK(auto_source.tick(5100U, event).action == PtpSourceAction::none);
+    event.sv_transmission_paused = true;
+    CHECK(auto_source.tick(5200U, event).action ==
+          PtpSourceAction::stop_current_ptp);
+    CHECK(auto_source.tick(5300U, event).action == PtpSourceAction::none);
+    event.receiver_worker_active = false;
+    event.receiver_cleanup_pending = true;
+    CHECK(auto_source.tick(5400U, event).action == PtpSourceAction::none);
+    event.receiver_cleanup_pending = false;
+    CHECK(auto_source.tick(5500U, event).action == PtpSourceAction::none);
+    event.other_grandmaster_present = true;
+    CHECK(auto_source.tick(5600U, event).action ==
+          PtpSourceAction::refuse_competing_gm);
+    event.other_grandmaster_present = false;
+    CHECK(auto_source.tick(5700U, event).action ==
+          PtpSourceAction::start_internal);
+    CHECK(auto_source.generation() == 2U);
+    event.source_worker_active = true;
+    event.internal_gm_tx_ready = true;
+    CHECK(auto_source.tick(5800U, event).state ==
+          PtpSourceState::waiting_second_boundary);
+    event.at_ptp_second_boundary = true;
+    event.sv_gm_identity_matches_active_ptp = false;
+    CHECK(auto_source.tick(6000U, event).action == PtpSourceAction::none);
+    event.sv_gm_identity_matches_active_ptp = true;
+    CHECK(auto_source.tick(7000U, event).action ==
+          PtpSourceAction::rearm_sv_at_second);
+    CHECK(auto_source.state() == PtpSourceState::internal_ready);
+
+    PtpSourcePolicyMachine auto_no_external;
+    auto_options.external_target_selected = false;
+    CHECK(auto_no_external.configure(auto_options));
+    event = {};
+    event.link_up = true;
+    CHECK(auto_no_external.tick(0U, event).action ==
+          PtpSourceAction::start_internal); // zero artificial network wait
+
+    PtpSourcePolicyMachine reject;
+    auto_options.intent = PtpSourceIntent::external_follower;
+    auto_options.fallback_authorized = false;
+    CHECK(!reject.configure(auto_options)); // no external target is illegal
+}
+
 } // namespace
 
 int main() {
@@ -266,6 +355,7 @@ int main() {
         {"PTP deterministic cadence under delayed polling", fixed_deadline_cadence_survives_scheduler_latency},
         {"PTP runtime hardware Pdelay preparation", peer_delay_runtime_preserves_request_identity_and_hw_timestamps},
         {"PTP runtime one-step policy", one_step_policy_suppresses_follow_up},
+        {"PTP source policy exclusive failover", explicit_ptp_source_authority_failover_is_exclusive_and_second_rearmed},
     };
 
     std::size_t passed = 0U;
