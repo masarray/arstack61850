@@ -283,12 +283,13 @@ void fill_kconfig_defaults(ar_ptp_lab_config_t& config) noexcept {
     std::string& error) {
     // LAB_SOURCE has no external clock input or traceability evidence.
     // Reject source-quality advertising that would mislead an IED BMCA.
+    // A SOURCE role handoff may reuse a staged profile temporarily.
+    // Enforce the 30-second freshness lease at the actual EMAC START
+    // (seed_hardware_clock), not during a prior PTPROLE change.
     if (config.role == AR_PTP_ROLE_LAB_SOURCE && config.bench_global_gm &&
         (config.bench_utc_epoch_seconds < 1577836800U ||
-         config.bench_epoch_received_mono_us <= 0LL ||
-         esp_timer_get_time() < config.bench_epoch_received_mono_us ||
-         esp_timer_get_time() - config.bench_epoch_received_mono_us > 30000000LL)) {
-        error = "BENCH GM requires a fresh UTC epoch from Studio (30-second lease)";
+         config.bench_epoch_received_mono_us <= 0LL)) {
+        error = "BENCH GM requires a Studio UTC epoch";
         return false;
     }
     if (config.role == AR_PTP_ROLE_LAB_SOURCE &&
