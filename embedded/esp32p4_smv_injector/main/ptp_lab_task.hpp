@@ -46,6 +46,11 @@ typedef struct ar_ptp_lab_config_t {
     uint16_t offset_scaled_log_variance;
     uint8_t time_source;
     int16_t current_utc_offset;
+    // Isolated test-set mode: GNSS-like Grandmaster on the local EMAC clock.
+    // The PC supplies an approximate UTC epoch, not a physical GPS input.
+    bool bench_global_gm;
+    uint32_t bench_utc_epoch_seconds;
+    int64_t bench_epoch_received_mono_us;
 
     // P2 measured discipline thresholds. These are used only in TIME_RECEIVER.
     int64_t maximum_path_delay_ns;
@@ -139,6 +144,10 @@ bool ar_ptp_lab_is_running(void);
 /** Nonzero only for a currently ready SOURCE. Increments when PTP SOURCE
  * becomes ready after START or after a clock/TX failure; not traceability. */
 uint32_t ar_ptp_lab_source_generation(void);
+
+/** True only for a fresh, active, bench-emulated GM with hardware PTP TX.
+ * The SV phase/MAC qualification is checked separately for smpSynch=2. */
+bool ar_ptp_lab_bench_global_ready(void);
 
 /** Read-only SOURCE startup result. Persists after failed task teardown and
  * never changes clock authority, SV lock gating or transmission scheduling. */
