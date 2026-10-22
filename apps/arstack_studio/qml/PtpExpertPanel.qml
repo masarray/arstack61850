@@ -86,6 +86,17 @@ SurfacePanel {
         : panel.device.smpSynchMeasured
             ? "MEASURED SYNC FLAG · verify sample-phase evidence independently"
             : "FREE-RUN / UNQUALIFIED · PTP packets do not prove SV sample lock"
+    readonly property string gmTxEvidence: panel.sourceRole && panel.device.ptpRunning
+        ? (panel.sourceEvidence ? "TX OBSERVED" : "TX ACQUIRING")
+        : "NOT TRANSMITTING"
+    readonly property string svPhaseEvidence: panel.device.smpSynchSimulated
+        ? "MANUAL FLAG ONLY"
+        : panel.device.smpSynchMeasured
+            ? "MEASURED · smpSynch " + panel.device.smpSynchValue
+            : "NOT QUALIFIED"
+    // Firmware cannot observe another device's PTP servo or SV acceptance.
+    // Do not manufacture a relay LOCKED state from local Announce counters.
+    readonly property string relayLockEvidence: "NOT OBSERVED · CHECK RELAY"
     readonly property bool receiverRole: activeRole === "RECEIVER"
     readonly property bool sourceEvidence: Number(panel.device.ptpAnnounceSent) > 0
         && Number(panel.device.ptpSyncSent) > 0
@@ -282,6 +293,41 @@ SurfacePanel {
                             font.family: panel.uiFont
                             font.pixelSize: 8
                         }
+                    }
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: 52
+                radius: 7
+                color: panel.theme.panelAlt
+                border.width: 1
+                border.color: panel.theme.lineSoft
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 10
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Label { text: "PTP GM TX"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
+                        Label { text: panel.gmTxEvidence; color: panel.sourceEvidence && panel.sourceRole ? panel.theme.green : panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: 10 }
+                    }
+                    Rectangle { width: 1; Layout.fillHeight: true; color: panel.theme.lineSoft }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Label { text: "SV phase / MAC"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
+                        Label { text: panel.svPhaseEvidence; color: panel.device.smpSynchMeasured && !panel.device.smpSynchSimulated ? panel.theme.green : panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: 10 }
+                    }
+                    Rectangle { width: 1; Layout.fillHeight: true; color: panel.theme.lineSoft }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Label { text: "Relay follower"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
+                        Label { text: panel.relayLockEvidence; color: panel.theme.muted; font.family: panel.monoFont; font.pixelSize: 10 }
                     }
                 }
             }
