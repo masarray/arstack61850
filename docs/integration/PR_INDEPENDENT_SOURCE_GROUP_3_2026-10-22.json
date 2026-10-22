@@ -1,0 +1,199 @@
+{
+  "schema": "arstack61850.independent-pr-retention.v1",
+  "date": "2026-10-22",
+  "group": 3,
+  "tip_sha": "c5c82562b9173822cbd8e939300371a64e646cbd",
+  "repo": "masarray/arstack61850",
+  "method": "PR changed-file paths retained with source SHA; existence in PTP tip is NOT content or semantic equivalence. Independent PRs require distinct convergence lane.",
+  "records": [
+    {
+      "number": 92,
+      "title": "Release blocker: eliminate ESP32-P4 START timing misses",
+      "head_sha": "acd81524d59bd670f1ea2805ac755f5c1f34d6d5",
+      "base_sha": "7028c2dafdee5f9a4fc9469062d78a0b04c8f77e",
+      "changed_file_count": 3,
+      "source_paths_not_in_ptp_tip": [],
+      "changed_paths": [
+        {
+          "path": ".github/workflows/esp32p4-smv-injector.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/arstack_studio/release/freeze-manifest.json",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/app_main.cpp",
+          "currently_exists_in_ptp_tip": true
+        }
+      ],
+      "status": "INDEPENDENT_LANE_UNMERGED_DO_NOT_CLOSE"
+    },
+    {
+      "number": 75,
+      "title": "IED Simulator P0–P4: full SCL model, live state, reporting, guarded controls, and third-party interop",
+      "head_sha": "3f0d97a8e99e520d27664bbc5478ff13484dc9b5",
+      "base_sha": "75df1edbf631c7e3f67318bfc56cdcaf1c504c05",
+      "changed_file_count": 35,
+      "source_paths_not_in_ptp_tip": [
+        ".github/workflows/ied-simulator-p4-control-hard-profile.yml",
+        ".github/workflows/ied-simulator-p4-discovery-repair.yml",
+        ".github/workflows/ied-simulator-p4-stateful-runtime.yml",
+        ".github/workflows/ied-simulator-p4-thirdparty.yml",
+        "apps/ied_simulator/src/SclMmsMaterializer.hpp",
+        "apps/ied_simulator/test_control_live.py",
+        "scripts/validate-p4-thirdparty-evidence.py",
+        "tests/fixtures/scl/iedsim-full-model.scd",
+        "tests/interop/libiec61850_p4_client.c",
+        "tests/interop/p4_libiec61850_control_oper_decode.cpp",
+        "tests/interop/p4_libiec61850_server_session.cpp",
+        "tests/interop/p4_libiec61850_stateful_runtime.cpp",
+        "tests/interop/p4_libiec61850_wire_decode.cpp",
+        "tools/iedsim_rcb_composite.hpp"
+      ],
+      "changed_paths": [
+        {
+          "path": ".github/workflows/ied-simulator-p4-control-hard-profile.yml",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": ".github/workflows/ied-simulator-p4-discovery-repair.yml",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": ".github/workflows/ied-simulator-p4-stateful-runtime.yml",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": ".github/workflows/ied-simulator-p4-thirdparty.yml",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": ".github/workflows/ied-simulator-qt.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "CMakeLists.txt",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/CMakeLists.txt",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/IedSimulatorController.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/IedSimulatorController.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/SclMmsMaterializer.hpp",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": "apps/ied_simulator/src/main.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/test_control_live.py",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": "apps/ied_simulator/test_gui_live_value.py",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "include/ariec61850/mms/static_object_table.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "include/ariec61850/scl/model.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "scripts/validate-p4-thirdparty-evidence.py",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": "src/mms/association_runtime.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "src/mms/reporting.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "src/mms/static_direct_control.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "src/mms/static_dispatcher.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "src/mms/static_object_table.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "src/scl/parser_part_05_03.inc",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tests/fixtures/scl/iedsim-full-model.scd",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": "tests/interop/libiec61850_p4_client.c",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": "tests/interop/p4_libiec61850_control_oper_decode.cpp",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": "tests/interop/p4_libiec61850_server_session.cpp",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": "tests/interop/p4_libiec61850_stateful_runtime.cpp",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": "tests/interop/p4_libiec61850_wire_decode.cpp",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": "tests/test_mms_runtime.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tests/test_reporting.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tools/iedsim_rcb_composite.hpp",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": "tools/mms_read_probe.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tools/static_ied_server.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tools/static_ied_server_iedsim/CMakeLists.txt",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tools/static_rcb_trial.cpp",
+          "currently_exists_in_ptp_tip": true
+        }
+      ],
+      "status": "INDEPENDENT_LANE_UNMERGED_DO_NOT_CLOSE"
+    }
+  ]
+}
