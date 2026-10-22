@@ -990,7 +990,11 @@ QString SmartSessionController::diagnosticsText() const {
         add(QStringLiteral("Current SV stop condition (board readback)"), device_->svStopReason());
         add(QStringLiteral("Last SV stop cause (same board, persists across restart)"),
             device_->svLastStopCause());
-        add(QStringLiteral("SMV FPS reported"), device_->fps());
+        // A STOPPED publisher may retain the last 3999/4000 FPS sample.
+        // Make stale telemetry explicit in copied field diagnostics.
+        add(QStringLiteral("SMV FPS reported"), device_->running()
+            ? device_->fps()
+            : QStringLiteral("STALE / NOT RUNNING (last observed %1)").arg(device_->fps()));
         add(QStringLiteral("SMV missed reported"), device_->missed());
         add(QStringLiteral("SMV TX failures reported"), device_->txFailures());
         add(QStringLiteral("PTP status reported"), device_->ptpStatus());
