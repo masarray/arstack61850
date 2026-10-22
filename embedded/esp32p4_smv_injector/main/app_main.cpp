@@ -1585,6 +1585,7 @@ void sv_ptp_phase_observer_task(void* argument) {
         if (!committed) {
             static_cast<void>(controller.invalidate());
             local_acquisition.reset();
+            source_fast_acquisition.reset();
             continue;
         }
         ++accepted_epochs;
@@ -1607,7 +1608,8 @@ void sv_ptp_phase_observer_task(void* argument) {
             ESP_LOGI(kTag,
                 "SV/PTP AUTO phase=%ldus uncertainty=%luus "
                 "slew=%ldus/s tracking=%u MACpairs=%lu "
-                "live_clean=%lu/%lu warm_phase=%lu/%lu live_age=%lu epoch=%llu LOCAL=%u",
+                "live_clean=%lu/%lu source_fast=%lu/%lu warm_phase=%lu/%lu "
+                "live_age=%lu epoch=%llu LOCAL=%u",
                 static_cast<long>(decision.phase_error_us),
                 static_cast<unsigned long>(decision.observation_uncertainty_us),
                 static_cast<long>(decision.slew_ticks_next_epoch),
@@ -1615,6 +1617,9 @@ void sv_ptp_phase_observer_task(void* argument) {
                 static_cast<unsigned long>(mac_pairs),
                 static_cast<unsigned long>(local_acquisition.clean_epochs()),
                 static_cast<unsigned long>(SvLocalRefAcquisition::kRequiredCleanEpochs),
+                static_cast<unsigned long>(source_fast_acquisition.clean_epochs()),
+                static_cast<unsigned long>(
+                    SvSourceSelfClockAcquisition::kRequiredQualifiedLiveEpochs),
                 static_cast<unsigned long>(local_acquisition.preflight_epochs()),
                 static_cast<unsigned long>(SvLocalRefAcquisition::kRequiredCleanEpochs),
                 static_cast<unsigned long>(local_acquisition.live_age_epochs()),
