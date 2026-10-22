@@ -413,7 +413,7 @@ bool SmartSessionController::requestProfileSync() {
 }
 
 bool SmartSessionController::requestSetFrequency(const double hz) {
-    return liveControlReady() && device_ != nullptr && device_->setFrequency(hz);
+    return liveControlReady() && device_ != nullptr && !device_->running() && device_->setFrequency(hz);
 }
 
 bool SmartSessionController::requestSetSignal(
@@ -423,7 +423,7 @@ bool SmartSessionController::requestSetSignal(
     const quint32 quality,
     const double currentCountsPerAmp,
     const double voltageCountsPerVolt) {
-    return liveControlReady() && device_ != nullptr &&
+    return liveControlReady() && device_ != nullptr && !device_->running() &&
         device_->setSignal(
             signalId,
             magnitude,
@@ -434,7 +434,7 @@ bool SmartSessionController::requestSetSignal(
 }
 
 bool SmartSessionController::requestSetQuality(const QString& signalId, const quint32 quality) {
-    return liveControlReady() && device_ != nullptr && device_->setQuality(signalId, quality);
+    return liveControlReady() && device_ != nullptr && !device_->running() && device_->setQuality(signalId, quality);
 }
 
 bool SmartSessionController::requestSetCtSaturation(
@@ -443,7 +443,7 @@ bool SmartSessionController::requestSetCtSaturation(
     const double harmonicPercent,
     const int harmonicOrder,
     const double clipPercent) {
-    return liveControlReady() && device_ != nullptr &&
+    return liveControlReady() && device_ != nullptr && !device_->running() &&
         device_->setCtSaturation(
             enabled,
             dcOffsetPercent,
@@ -453,7 +453,7 @@ bool SmartSessionController::requestSetCtSaturation(
 }
 
 bool SmartSessionController::requestZero() {
-    return liveControlReady() && device_ != nullptr && device_->zero();
+    return liveControlReady() && device_ != nullptr && !device_->running() && device_->zero();
 }
 
 bool SmartSessionController::requestPtpRefresh() {
