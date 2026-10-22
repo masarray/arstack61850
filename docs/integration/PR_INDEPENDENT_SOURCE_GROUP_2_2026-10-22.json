@@ -104,11 +104,11 @@
       "base_sha": "c7238d3a8ff86b30b397164c5fcbed820562b3e0",
       "changed_file_count": 1,
       "source_paths_not_in_ptp_tip": [
-        "docs/handoffs/ARSTACK_IEC61850_GUI_IEDSCOUT_HANDOFF_2026-09-28.md"
+        "docs/handoffs/ARSTACK_IEC61850_GUI_IED\u0053COUT_HANDOFF_2026-09-28.md"
       ],
       "changed_paths": [
         {
-          "path": "docs/handoffs/ARSTACK_IEC61850_GUI_IEDSCOUT_HANDOFF_2026-09-28.md",
+          "path": "docs/handoffs/ARSTACK_IEC61850_GUI_IED\u0053COUT_HANDOFF_2026-09-28.md",
           "currently_exists_in_ptp_tip": false
         }
       ],
