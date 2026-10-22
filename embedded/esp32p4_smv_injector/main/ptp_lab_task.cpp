@@ -197,6 +197,7 @@ void fill_kconfig_defaults(ar_ptp_lab_config_t& config) noexcept {
     config.current_utc_offset = static_cast<std::int16_t>(CONFIG_AR_PTP_CURRENT_UTC_OFFSET);
     config.bench_global_gm = false;
     config.bench_utc_epoch_seconds = 0U;
+    config.bench_utc_epoch_millisecond = 0U;
     config.bench_epoch_received_mono_us = 0LL;
 
     const std::string configured_identity{CONFIG_AR_PTP_CLOCK_IDENTITY};
@@ -288,6 +289,7 @@ void fill_kconfig_defaults(ar_ptp_lab_config_t& config) noexcept {
     // (seed_hardware_clock), not during a prior PTPROLE change.
     if (config.role == AR_PTP_ROLE_LAB_SOURCE && config.bench_global_gm &&
         (config.bench_utc_epoch_seconds < 1577836800U ||
+         config.bench_utc_epoch_millisecond >= 1000U ||
          config.bench_epoch_received_mono_us <= 0LL)) {
         error = "BENCH GM requires a Studio UTC epoch";
         return false;
@@ -421,16 +423,19 @@ void disable_hardware_ptp(const esp_eth_handle_t eth_handle) noexcept {
         ? static_cast<std::uint64_t>(
               now_mono_us - config.bench_epoch_received_mono_us)
         : 0ULL;
+    const std::uint64_t relative_epoch_us = elapsed_us +
+        (bench ? static_cast<std::uint64_t>(
+            config.bench_utc_epoch_millisecond) * 1000ULL : 0ULL);
     const std::int64_t utc_seconds = bench
         ? static_cast<std::int64_t>(config.bench_utc_epoch_seconds) +
-              static_cast<std::int64_t>(elapsed_us / 1000000ULL)
+              static_cast<std::int64_t>(relative_epoch_us / 1000000ULL)
         : static_cast<std::int64_t>(std::time(nullptr));
     const auto tai_seconds = ar::iec61850::time_sync::try_seed_ptp_tai_seconds(
         utc_seconds, config.current_utc_offset);
     if (tai_seconds.has_value()) {
         initial_time.seconds = *tai_seconds;
         initial_time.nanoseconds = bench
-            ? static_cast<std::uint32_t>((elapsed_us % 1000000ULL) * 1000ULL)
+            ? static_cast<std::uint32_t>((relative_epoch_us % 1000000ULL) * 1000ULL)
             : 0U;
     }
     const auto result = esp_eth_ioctl(
