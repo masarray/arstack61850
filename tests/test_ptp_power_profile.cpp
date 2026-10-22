@@ -133,7 +133,7 @@ void check_source_heartbeat_freshness_and_time_provenance() {
 
 void check_priority_tagged_power_profile_wire() {
     auto options = make_source();
-    options.vlan_id = 0U;
+    options.vlan_id = std::uint16_t{0U};
     options.vlan_priority = 4U;
     std::string error;
     REQUIRE(PtpPublisherRuntime::validate_options(options, error));
@@ -151,7 +151,7 @@ void check_priority_tagged_power_profile_wire() {
     REQUIRE(parsed.vlan_id == std::optional<std::uint16_t>{0U});
     REQUIRE(parsed.header.message_type == PtpMessageType::announce);
     source.stop();
-    options.vlan_id = 4095U;
+    options.vlan_id = std::uint16_t{4095U};
     REQUIRE(!PtpPublisherRuntime::validate_options(options, error));
 }
 
