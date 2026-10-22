@@ -125,6 +125,10 @@ constexpr std::uint8_t context_constructed_base = 0xA0U;
         !add_tlv(context_unsigned_size(*asdu.sample_mode))) {
         return std::nullopt;
     }
+    if (asdu.gm_identity.has_value() &&
+        !add_tlv(context_bytes_size(asdu.gm_identity->size()))) {
+        return std::nullopt;
+    }
     return total;
 }
 
@@ -287,6 +291,13 @@ void write_unsigned(
             destination, offset, 8U, *asdu.sample_mode,
             layout != nullptr ? &layout->sample_mode : nullptr);
     }
+    if (asdu.gm_identity.has_value()) {
+        write_tlv_header(
+            destination, offset,
+            static_cast<std::uint8_t>(context_primitive_base | 9U),
+            asdu.gm_identity->size());
+        write_bytes(destination, offset, *asdu.gm_identity);
+    }
     return true;
 }
 
@@ -357,6 +368,11 @@ bool read_asdu(
                 return false;
             }
             asdu.sample_mode = static_cast<std::uint16_t>(integer);
+            break;
+        case 9:
+            if (field.value.size() != 8U) return false;
+            asdu.gm_identity.emplace();
+            std::copy(field.value.begin(), field.value.end(), asdu.gm_identity->begin());
             break;
         default:
             break;
