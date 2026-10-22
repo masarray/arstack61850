@@ -106,6 +106,7 @@ using ar::iec61850::time_sync::SvBoundedSlewCursor;
 using ar::iec61850::time_sync::SvPtpPhaseAuthority;
 using ar::iec61850::time_sync::SvAutoPreflightPolicy;
 using ar::iec61850::time_sync::SvLocalRefAcquisition;
+using ar::iec61850::time_sync::SvSourceSelfClockAcquisition;
 using ar::iec61850::time_sync::SvPtpPhaseObservation;
 using ar::iec61850::time_sync::SvPtpPublisherContinuityGate;
 #endif
@@ -1288,6 +1289,7 @@ void sv_ptp_phase_observer_task(void* argument) {
     SvPtpPhaseAuthority controller;
     SvPtpPublisherContinuityGate continuity;
     SvLocalRefAcquisition local_acquisition;
+    SvSourceSelfClockAcquisition source_fast_acquisition;
     std::uint32_t accepted_epochs = 0U;
     std::uint32_t controller_session = 0U;
     bool previous_auto_local = false;
@@ -1300,6 +1302,7 @@ void sv_ptp_phase_observer_task(void* argument) {
             controller.reset();
             continuity.reset();
             local_acquisition.reset();
+            source_fast_acquisition.reset();
             accepted_epochs = 0U;
             previous_auto_local = false;
             controller_session = notified_session;
@@ -1329,6 +1332,7 @@ void sv_ptp_phase_observer_task(void* argument) {
             }
             static_cast<void>(controller.invalidate());
             local_acquisition.reset();
+            source_fast_acquisition.reset();
             revoke_sv_phase_session(notified_session);
             previous_auto_local = false;
         };
@@ -1402,6 +1406,7 @@ void sv_ptp_phase_observer_task(void* argument) {
         // the GPTimer mutex. Source identity and fault/session generations
         // must match the exact phase observation before any AUTO promotion.
         bool source_local_qualified = false;
+        bool source_fast_mac_qualified = false;
         bool measured_phase_qualified = false;
         std::uint32_t mac_pairs = 0U;
 #if AR_SV_TX_EGRESS_SUPPORTED
@@ -1418,13 +1423,21 @@ void sv_ptp_phase_observer_task(void* argument) {
                 worst_case_phase_us <=
                     SvLocalSyncEvidenceGate::kMaxSoftwarePhaseBoundUs;
             portENTER_CRITICAL(&g_tx_egress_mux);
+            const std::uint32_t bound_us = worst_case_phase_us <= UINT32_MAX
+                ? static_cast<std::uint32_t>(worst_case_phase_us) : UINT32_MAX;
             source_local_qualified = g_local_sync_evidence.qualified(
                 notified_session, current_faults, lease.generation,
                 observation.last_sv_epoch_generation,
-                decision.software_tracking,
-                worst_case_phase_us <= UINT32_MAX
-                    ? static_cast<std::uint32_t>(worst_case_phase_us)
-                    : UINT32_MAX);
+                decision.software_tracking, bound_us);
+            // Faster admission is exclusively for the ESP32's *own*
+            // PTP SOURCE (shared EMAC clock). No receiver/external-GM bypass.
+            if (lease.role == PtpAuthorityRole::source) {
+                source_fast_mac_qualified =
+                    g_local_sync_evidence.qualified_source_fast(
+                        notified_session, current_faults, lease.generation,
+                        observation.last_sv_epoch_generation,
+                        decision.software_tracking, bound_us);
+            }
             mac_pairs = g_local_sync_evidence.measured_pairs();
             portEXIT_CRITICAL(&g_tx_egress_mux);
         }
@@ -1472,13 +1485,26 @@ void sv_ptp_phase_observer_task(void* argument) {
                 // canonical MAC descriptor evidence is measured AFTER START,
                 // and three consecutive live epochs are still mandatory.
                 // COLD retains the full ten live phase+MAC epochs.
-                const bool stable_local = local_acquisition.observe_live(
-                    measured_phase_qualified &&
-                        decision.epoch_second_continuous,
+                const bool valid_live_phase = measured_phase_qualified &&
+                    decision.epoch_second_continuous;
+                const bool stable_conservative = local_acquisition.observe_live(
+                    valid_live_phase,
                     SvAutoPreflightPolicy::can_advertise_local(
                         injecting, source_local_qualified),
                     notified_session, current_faults, lease.generation,
                     observation.last_sv_epoch_generation);
+                const bool stable_source_fast =
+                    lease.role == PtpAuthorityRole::source &&
+                    source_fast_acquisition.observe(
+                        valid_live_phase,
+                        SvAutoPreflightPolicy::can_advertise_local(
+                            injecting, source_fast_mac_qualified),
+                        notified_session, current_faults, lease.generation,
+                        observation.last_sv_epoch_generation);
+                if (lease.role != PtpAuthorityRole::source)
+                    source_fast_acquisition.reset();
+                const bool stable_local =
+                    stable_conservative || stable_source_fast;
                 if (!stable_local &&
                     (smp_synch_source_local_qualified() ||
                      smp_synch_receiver_timeline_qualified())) {
@@ -1505,7 +1531,10 @@ void sv_ptp_phase_observer_task(void* argument) {
                 // observation rather than last second's cached values.
                 smp_synch_diag_observe(
                     decision.phase_error_us, decision.observation_uncertainty_us,
-                    mac_pairs, local_acquisition.clean_epochs(),
+                    mac_pairs,
+                    lease.role == PtpAuthorityRole::source
+                        ? source_fast_acquisition.clean_epochs()
+                        : local_acquisition.clean_epochs(),
                     observation.last_sv_epoch_generation,
                     decision.accepted && decision.epoch_second_continuous,
                     decision.software_tracking);
@@ -1528,6 +1557,7 @@ void sv_ptp_phase_observer_task(void* argument) {
                         observation.last_sv_epoch_generation);
                 } else {
                     local_acquisition.reset();
+                    source_fast_acquisition.reset();
                 }
                 revoke_sv_auto_claims(SvSyncLossReason::publisher_stop);
             }
@@ -1548,6 +1578,7 @@ void sv_ptp_phase_observer_task(void* argument) {
             g_sample_clock_context.requested_slew_ticks.store(
                 0, std::memory_order_relaxed);
             local_acquisition.reset();
+            source_fast_acquisition.reset();
             revoke_sv_auto_claims(SvSyncLossReason::phase_handoff);
         }
         xSemaphoreGive(g_phase_timer_mutex);
