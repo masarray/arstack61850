@@ -12,12 +12,11 @@
 
 #include <QCoreApplication>
 #include <QDateTime>
-#include <QDesktopServices>
+#include <QProcess>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QStandardPaths>
-#include <QUrl>
 #include <QDebug>
 #include <QMetaObject>
 #include <QRegularExpression>
@@ -2003,7 +2002,14 @@ void DeviceController::appendLog(const QString& direction, const QString& line) 
 bool DeviceController::openDiagnosticLogFolder() const {
     const QFileInfo info(diagnosticLogPath_);
     if (!info.absoluteDir().exists()) return false;
-    return QDesktopServices::openUrl(QUrl::fromLocalFile(info.absolutePath()));
+#ifdef Q_OS_WIN
+    // DeviceController is also linked by the QtCore-only session harness.
+    // Start Explorer with an argument vector, not shell interpolation.
+    return QProcess::startDetached(QStringLiteral("explorer.exe"),
+                                   {QDir::toNativeSeparators(info.absolutePath())});
+#else
+    return QProcess::startDetached(QStringLiteral("xdg-open"), {info.absolutePath()});
+#endif
 }
 
 void DeviceController::recordUiDiagnostic(const QString& message) {
