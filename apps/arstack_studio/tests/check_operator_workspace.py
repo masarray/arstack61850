@@ -62,7 +62,9 @@ def main() -> None:
             and "local_acquisition.observe_preflight(" in firmware_source
             and "local_acquisition.observe_live(" in firmware_source
             and "local_acquisition.reset();" in firmware_source
-            and "live_clean=%lu/%lu warm_phase=%lu/%lu live_age=%lu" in firmware_source
+            and "live_clean=%lu/%lu source_fast=%lu/%lu warm_phase=%lu/%lu " in firmware_source
+            and "SvSourceSelfClockAcquisition" in sv_gate
+            and "source_fast" in firmware_source
             and "kRequiredCleanEpochs = 10U" in sv_gate
             and "kWarmRequiredLiveEpochs = 3U" in sv_gate
             and "kMaxWarmMacAcquisitionEpochs = 8U" in sv_gate
@@ -70,8 +72,8 @@ def main() -> None:
             and "check_no_intermitttent_local_at_start()" in sv_tests
             and "check_warm_phase_preflight_cannot_fake_canonical_mac()" in sv_tests
             and "check_warm_preflight_negative_session_and_clock_faults()" in sv_tests,
-            "LOCAL REF: ten LIVE epochs for COLD, ten stable phase-only PREFLIGHT epochs "
-            "plus three verified LIVE MAC epochs for WARM; invalidate on loss of evidence")
+            "RECEIVER conservative warm/cold gates and SOURCE_FAST measured two-epoch "
+            "phase/MAC gate must coexist; revoke on evidence loss")
     phase_header = (project_root / "include/ariec61850/time_sync/sv_ptp_phase_authority.hpp").read_text(encoding="utf-8")
     phase_tests = (project_root / "tests/test_sv_ptp_phase_authority.cpp").read_text(encoding="utf-8")
     require("g_preflight_phase_clock_active" in firmware_source
