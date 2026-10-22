@@ -20,6 +20,9 @@ struct RuntimePublisherProfile final {
     std::uint16_t no_asdu{1U};
     bool include_data_set{false};
     bool include_sample_rate{false};
+    // Ed2.1 optional wire values (zero is legacy ASCII auto-rate).
+    std::uint16_t wire_sample_rate{0U};
+    std::uint16_t wire_sample_mode{1U};
     std::array<char, 96> sv_id{};
     std::array<char, 160> data_set_reference{};
     // Zero for factory/default or legacy ASCII commits. A valid value is set

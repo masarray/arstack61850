@@ -470,6 +470,50 @@ void compiled_binary_profile_activates_only_supported_4i4v_device_layout() {
     CHECK(runtime.app_id == 0x4001U);
     CHECK(runtime.sv_id[0] == 'S' && runtime.sv_id[2] == '2');
     CHECK(runtime.include_data_set && runtime.include_sample_rate);
+    CHECK(runtime.wire_sample_rate == 4800U);
+    CHECK(runtime.wire_sample_mode == 1U);
+    for (const auto nominal_hz : {50U, 60U}) {
+        auto per_period = device;
+        per_period.sampling_basis = SvSampleMode::samples_per_period;
+        per_period.configured_sample_rate = 80U;
+        per_period.frame_rate_hz = 80U * nominal_hz;
+        per_period.sample_counter_modulus = static_cast<std::uint16_t>(80U * nominal_hz);
+        const auto bytes_needed = SvDeviceProfileBinaryCodec::encoded_size(per_period);
+        CHECK(bytes_needed.has_value());
+        std::vector<std::uint8_t> rate_bytes(*bytes_needed);
+        CHECK(SvDeviceProfileBinaryCodec::encode_into(per_period, rate_bytes).success());
+        RuntimePublisherProfile period_runtime{};
+        CHECK(decode_binary_runtime_profile(rate_bytes, period_runtime) ==
+              BinaryRuntimeProfileStatus::ok);
+        CHECK(period_runtime.wire_sample_rate == 80U);
+        CHECK(period_runtime.wire_sample_mode == 0U);
+        CHECK(period_runtime.publisher_rate_hz == 80U * nominal_hz);
+        SampledValueAsdu asdu;
+        asdu.sv_id = "ARSTACK_SV01";
+        asdu.sample_rate = period_runtime.wire_sample_rate;
+        asdu.sample_mode = period_runtime.wire_sample_mode;
+        asdu.sample_payload.resize(64U);
+        const auto wire = SampledValuesPduCodec::encode(SampledValuesPdu{{asdu}});
+        SampledValuesPdu decoded_wire{};
+        CHECK(SampledValuesPduCodec::try_decode(wire, decoded_wire));
+        CHECK(decoded_wire.asdus[0].sample_rate == 80U);
+        CHECK(decoded_wire.asdus[0].sample_mode == 0U);
+        per_period.frame_rate_hz += 10U;
+        CHECK(SvDeviceProfileBinaryCodec::encode_into(per_period, rate_bytes).success());
+        CHECK(decode_binary_runtime_profile(rate_bytes, period_runtime) ==
+              BinaryRuntimeProfileStatus::unsupported_device_capability);
+    }
+    auto legacy = device;
+    legacy.profile_family = SvProfileFamily::legacy_9_2le;
+    legacy.asdu_options.sample_rate = false;
+    const auto legacy_len = SvDeviceProfileBinaryCodec::encoded_size(legacy);
+    CHECK(legacy_len.has_value());
+    std::vector<std::uint8_t> legacy_bytes(*legacy_len);
+    CHECK(SvDeviceProfileBinaryCodec::encode_into(legacy, legacy_bytes).success());
+    RuntimePublisherProfile legacy_runtime{};
+    CHECK(decode_binary_runtime_profile(legacy_bytes, legacy_runtime) ==
+          BinaryRuntimeProfileStatus::ok);
+    CHECK(!legacy_runtime.include_sample_rate);
     CHECK(runtime.data_set_reference[0] == 'D');
     const auto previous_generation = runtime.generation;
     chunks.abort();

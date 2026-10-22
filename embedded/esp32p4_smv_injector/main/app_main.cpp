@@ -308,8 +308,12 @@ SampledValuesFrame make_runtime_frame(
     asdu.sample_synchronization = 0U;
 
     if (diagnostic_mirror || profile.include_sample_rate) {
-        asdu.sample_rate = static_cast<std::uint16_t>(profile.publisher_rate_hz);
-        asdu.sample_mode = kSampleModeSamplesPerSecond;
+        // Wire units follow the selected SCL profile, never FPS by assumption.
+        asdu.sample_rate = diagnostic_mirror || profile.wire_sample_rate == 0U
+            ? static_cast<std::uint16_t>(profile.publisher_rate_hz)
+            : profile.wire_sample_rate;
+        asdu.sample_mode = diagnostic_mirror
+            ? kSampleModeSamplesPerSecond : profile.wire_sample_mode;
     } else {
         asdu.sample_rate.reset();
         asdu.sample_mode.reset();
