@@ -1364,7 +1364,7 @@ QString DeviceController::ptpConfigCommand(const QVariantMap& profile) {
     if (profile.value(QStringLiteral("benchGlobalGm")).toBool()) {
         // Studio supplies a fresh host UTC epoch. The device then uses
         // one EMAC IEEE1588 timebase for both PTP TX and SV sampling.
-        command += QStringLiteral(" 1 %1").arg(QDateTime::currentSecsSinceEpoch());
+        command += QStringLiteral(" 1 %1").arg(QDateTime::currentMSecsSinceEpoch());
     }
     return command;
 }
