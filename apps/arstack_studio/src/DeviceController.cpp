@@ -1351,7 +1351,7 @@ QString DeviceController::ptpConfigCommand(const QVariantMap& profile) {
         !parse("announceIntervalMs", 10000U, announce) ||
         !parse("syncIntervalMs", 5000U, sync) ||
         announce < 100U || sync < 20U ||
-        (profile.value(QStringLiteral("vlanEnabled")).toBool() && vlan == 0U)) {
+        false) {
         return {};
     }
     return QStringLiteral("PTP CONFIG %1 %2 %3 %4 %5 %6 %7 %8")
