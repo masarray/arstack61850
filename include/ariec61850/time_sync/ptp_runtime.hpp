@@ -190,9 +190,10 @@ public:
             error = "VLAN priority must be 0..7";
             return false;
         }
-        if (options.vlan_id.has_value() &&
-            (*options.vlan_id == 0U || *options.vlan_id > 4094U)) {
-            error = "VLAN ID must be 1..4094";
+        // IEEE 802.1Q priority-tagged VLAN 0 / PCP 4 is the Power
+        // Utility Profile default. 4095 is reserved; VID 0 is valid.
+        if (options.vlan_id.has_value() && *options.vlan_id > 4094U) {
+            error = "VLAN ID must be 0..4094";
             return false;
         }
         if (options.port_number == 0U) {
