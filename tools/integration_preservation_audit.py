@@ -23,6 +23,7 @@ from typing import Any
 
 DEFAULT_SNAPSHOT = "docs/integration/PR_PRESERVATION_SNAPSHOT_2026-10-22.json"
 SIDE_GLOB = "PR_SIDE_BLOB_AUDIT_GROUP_*_2026-10-22.json"
+INDEPENDENT_GLOB = "PR_INDEPENDENT_SOURCE_GROUP_*_2026-10-22.json"
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -33,7 +34,9 @@ def read_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def load_and_validate(root: Path) -> tuple[dict[str, Any], dict[int, dict[str, Any]]]:
+def load_and_validate(
+    root: Path,
+) -> tuple[dict[str, Any], dict[int, dict[str, Any]], dict[int, dict[str, Any]]]:
     manifest = read_json(root / DEFAULT_SNAPSHOT)
     if manifest.get("schema") != "arstack61850.pr-preservation-snapshot.v1":
         raise ValueError("Unsupported preservation manifest schema")
@@ -102,7 +105,31 @@ def load_and_validate(root: Path) -> tuple[dict[str, Any], dict[int, dict[str, A
             audits[number] = record
     if set(audits) != categories["SIDE_BRANCH"]:
         raise ValueError("Some side PRs have no frozen source blob audit")
-    return manifest, audits
+
+    independent: dict[int, dict[str, Any]] = {}
+    independent_files = sorted((root / "docs/integration").glob(INDEPENDENT_GLOB))
+    if len(independent_files) != 3:
+        raise ValueError(
+            f"Expected three independent source groups; got {len(independent_files)}"
+        )
+    for file in independent_files:
+        group = read_json(file)
+        if group.get("schema") != "arstack61850.independent-pr-retention.v1":
+            raise ValueError(f"{file}: invalid independent schema")
+        for record in group["records"]:
+            number = record["number"]
+            if number in independent or number not in categories["INDEPENDENT_LANE"]:
+                raise ValueError(f"Duplicate or unexpected independent PR #{number}")
+            if record.get("error"):
+                raise ValueError(f"PR #{number} source inventory error: {record['error']}")
+            if record["head_sha"] != by_number[number]["head_sha"]:
+                raise ValueError(f"PR #{number} source SHA drift in independent inventory")
+            if record["changed_file_count"] != len(record["changed_paths"]):
+                raise ValueError(f"PR #{number} independent path count mismatch")
+            independent[number] = record
+    if set(independent) != categories["INDEPENDENT_LANE"]:
+        raise ValueError("Independent-lane coverage is incomplete")
+    return manifest, audits, independent
 
 
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -124,7 +151,7 @@ def blob_at(repo: Path, sha: str, path: str) -> str | None:
 
 def audit_git(
     root: Path, manifest: dict[str, Any], audits: dict[int, dict[str, Any]],
-    target_ref: str,
+    independent: dict[int, dict[str, Any]], target_ref: str,
 ) -> dict[str, Any]:
     resolved = git(root, "rev-parse", "--verify", f"{target_ref}^{{commit}}")
     if resolved.returncode != 0:
@@ -184,6 +211,30 @@ def audit_git(
                     "target_blob": new_blob,
                 })
             status["side_changed_paths"] = results
+        if number in independent:
+            independent_results = []
+            for item in independent[number]["changed_paths"]:
+                path = item["path"]
+                if not status["head_available"]:
+                    independent_results.append({
+                        "path": path, "status": "NOT_FETCHED_NO_CONCLUSION"
+                    })
+                    continue
+                old_blob = blob_at(root, head, path)
+                new_blob = blob_at(root, target, path)
+                if old_blob is None:
+                    verdict = "SOURCE_DELETED_OR_RENAMED"
+                elif new_blob is None:
+                    verdict = "INDEPENDENT_SOURCE_FILE_ABSENT_FROM_PTP"
+                elif old_blob == new_blob:
+                    verdict = "EXACT_BLOB_ONLY"
+                else:
+                    verdict = "INDEPENDENT_DIFFERENT_BLOB_REVIEW_IN_OWN_LANE"
+                independent_results.append({
+                    "path": path, "status": verdict,
+                    "source_blob": old_blob, "target_blob": new_blob,
+                })
+            status["independent_changed_paths"] = independent_results
         records.append(status)
     return {
         "schema": "arstack61850.pr-git-preservation-result.v1",
@@ -217,15 +268,16 @@ def main() -> int:
         parser.error("Choose --verify-only or --scan-git, not both")
     root = Path(args.repo).resolve()
     try:
-        manifest, audits = load_and_validate(root)
+        manifest, audits, independent = load_and_validate(root)
         print(
             f"PRESERVATION SNAPSHOT OK: {len(manifest['pull_requests'])} PRs, "
-            f"{len(manifest['issues'])} issues, {len(audits)} side PR blob audits"
+            f"{len(manifest['issues'])} issues, {len(audits)} side PR blob audits, "
+            f"{len(independent)} independent PR source inventories"
         )
         if not args.scan_git:
             print("Ancestry and functional equivalence NOT assessed (manifest validation only).")
             return 0
-        result = audit_git(root, manifest, audits, args.target)
+        result = audit_git(root, manifest, audits, independent, args.target)
         missing = result["source_commits_missing_from_local_checkout"]
         divergent = [
             p["number"] for p in result["records"]
