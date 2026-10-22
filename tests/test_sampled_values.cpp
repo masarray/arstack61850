@@ -638,11 +638,42 @@ void quality_and_generic_payload_diagnostics_preserve_wire_evidence() {
     CHECK(trailing.trailing_bytes == ByteVector({0xAAU, 0xBBU}));
 }
 
+// Ed.2.1 gmIdentity is exactly context-specific primitive tag 9 (0x89),
+// eight octets in PTP GrandmasterIdentity network byte order.
+void sampled_values_gm_identity_matches_ptp_and_rejects_truncation() {
+    using namespace ar::iec61850::sampled_values;
+    auto asdu = make_reference_asdu();
+    constexpr std::array<std::uint8_t, 8> gm{
+        0xE8U, 0xF6U, 0x0AU, 0xFFU, 0xFEU, 0xE0U, 0xC5U, 0x3FU};
+    asdu.gm_identity = gm;
+    const auto encoded = SampledValuesPduCodec::encode(SampledValuesPdu{{asdu}});
+    const std::array<std::uint8_t, 10> expected{
+        0x89U, 0x08U, 0xE8U, 0xF6U, 0x0AU,
+        0xFFU, 0xFEU, 0xE0U, 0xC5U, 0x3FU};
+    const auto tag = std::search(
+        encoded.begin(), encoded.end(), expected.begin(), expected.end());
+    CHECK(tag != encoded.end());
+    SampledValuesPdu decoded{};
+    CHECK(SampledValuesPduCodec::try_decode(encoded, decoded));
+    CHECK(decoded.asdus.size() == 1U);
+    CHECK(decoded.asdus[0].gm_identity.has_value());
+    CHECK(*decoded.asdus[0].gm_identity == gm);
+    auto truncated_identity = encoded;
+    const auto tag_offset = static_cast<std::size_t>(tag - encoded.begin());
+    truncated_identity[tag_offset + 1U] = 7U;
+    CHECK(!SampledValuesPduCodec::try_decode(truncated_identity, decoded));
+    asdu.gm_identity.reset();
+    const auto legacy = SampledValuesPduCodec::encode(SampledValuesPdu{{asdu}});
+    CHECK(std::search(legacy.begin(), legacy.end(),
+                      expected.begin(), expected.end()) == legacy.end());
+}
+
 } // namespace
 
 int main() {
     const std::vector<std::pair<std::string, std::function<void()>>> tests{
         {"SV PDU golden vector", sampled_values_pdu_matches_csharp_golden_vector},
+        {"SV Ed2.1 GM source identity", sampled_values_gm_identity_matches_ptp_and_rejects_truncation},
         {"SV Ethernet frame", sampled_values_frame_round_trips_vlan_process_bus_header},
         {"SV malformed input", sampled_values_codec_handles_multiple_asdus_and_rejects_malformed_input},
         {"SV compiled device profile binary", compiled_device_profile_binary_is_canonical_and_integrity_checked},
