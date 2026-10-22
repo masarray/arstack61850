@@ -58,6 +58,7 @@ std::atomic_bool g_external_enabled{false};
 std::atomic_bool g_external_switching{false};
 std::atomic_bool g_external_worker_created{false};
 TaskHandle_t g_external_worker_task{};
+esp_eth_handle_t g_external_eth{};
 ar_ptp_lab_config_t g_external_source_config{};
 std::uint64_t g_external_handovers{};
 std::uint64_t g_external_returns{};
@@ -463,9 +464,7 @@ void handoff_stop() noexcept {
     return false;
 }
 
-// The Ethernet handle is deliberately saved only on successful opt-in
-// against an already running physical PTP SOURCE.
-esp_eth_handle_t g_external_eth{};
+// Physical Ethernet handle is captured when the operator starts PTP SOURCE.
 
 void external_worker(void*) {
     for (;;) {
