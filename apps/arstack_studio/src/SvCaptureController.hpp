@@ -50,6 +50,8 @@ private:
     void setStatus(const QString& text);
     void onCaptureFinished(int exitCode, QProcess::ExitStatus exitStatus);
     void decodeCapturedFile();
+    [[nodiscard]] static QString captureStartBlocker(const QVariantMap& telemetry);
+    void writeInvalidCaptureReport(const QString& reason) const;
     static QVariantMap decodePcap(const QString& pcapFile, const QString& csvFile,
                                  const QString& secondsFile, const QString& eventsFile, const QString& jsonFile,
                                  int requestedSeconds, const QString& adapter,
@@ -76,4 +78,5 @@ private:
     QString dumpcap_;
     int activeSecondsRequested_{0};
     bool abortRequested_{false};
+    QString captureInterruptionReason_;
 };
