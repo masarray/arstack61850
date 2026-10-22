@@ -132,6 +132,7 @@ std::atomic<PtpConfigFailure> g_ptp_config_failure{PtpConfigFailure::none};
     return "UNKNOWN";
 }
 std::atomic_bool g_ptp_started{false};
+std::atomic_bool g_bench_global_active{false};
 std::atomic_bool g_ptp_ready{false};
 std::atomic<std::int64_t> g_ptp_last_announce_us{0LL};
 std::atomic<std::int64_t> g_ptp_last_sync_pair_us{0LL};
@@ -194,6 +195,9 @@ void fill_kconfig_defaults(ar_ptp_lab_config_t& config) noexcept {
         static_cast<std::uint16_t>(CONFIG_AR_PTP_OFFSET_SCALED_LOG_VARIANCE);
     config.time_source = static_cast<std::uint8_t>(CONFIG_AR_PTP_TIME_SOURCE);
     config.current_utc_offset = static_cast<std::int16_t>(CONFIG_AR_PTP_CURRENT_UTC_OFFSET);
+    config.bench_global_gm = false;
+    config.bench_utc_epoch_seconds = 0U;
+    config.bench_epoch_received_mono_us = 0LL;
 
     const std::string configured_identity{CONFIG_AR_PTP_CLOCK_IDENTITY};
     if (!configured_identity.empty()) {
@@ -251,10 +255,18 @@ void fill_kconfig_defaults(ar_ptp_lab_config_t& config) noexcept {
     options.respond_to_peer_delay = config.respond_to_peer_delay;
     options.priority1 = config.priority1;
     options.priority2 = config.priority2;
-    options.clock_class = config.clock_class;
-    options.clock_accuracy = static_cast<PtpClockAccuracy>(config.clock_accuracy);
-    options.offset_scaled_log_variance = config.offset_scaled_log_variance;
-    options.time_source = static_cast<PtpTimeSource>(config.time_source);
+    // An isolated simulator is explicitly configured to *emit* the same
+    // clock-quality fields a GNSS GM would emit. Timing still comes from
+    // this ESP32-P4's own IEEE1588 MAC clock; it is never an external source.
+    options.clock_class = config.bench_global_gm && config.role == AR_PTP_ROLE_LAB_SOURCE
+        ? 6U : config.clock_class;
+    options.clock_accuracy = config.bench_global_gm && config.role == AR_PTP_ROLE_LAB_SOURCE
+        ? PtpClockAccuracy::within_1_us
+        : static_cast<PtpClockAccuracy>(config.clock_accuracy);
+    options.offset_scaled_log_variance = config.bench_global_gm &&
+        config.role == AR_PTP_ROLE_LAB_SOURCE ? 0x4E5DU : config.offset_scaled_log_variance;
+    options.time_source = config.bench_global_gm && config.role == AR_PTP_ROLE_LAB_SOURCE
+        ? PtpTimeSource::gps : static_cast<PtpTimeSource>(config.time_source);
     options.current_utc_offset = config.current_utc_offset;
 
     std::string error;
@@ -271,6 +283,14 @@ void fill_kconfig_defaults(ar_ptp_lab_config_t& config) noexcept {
     std::string& error) {
     // LAB_SOURCE has no external clock input or traceability evidence.
     // Reject source-quality advertising that would mislead an IED BMCA.
+    if (config.role == AR_PTP_ROLE_LAB_SOURCE && config.bench_global_gm &&
+        (config.bench_utc_epoch_seconds < 1577836800U ||
+         config.bench_epoch_received_mono_us <= 0LL ||
+         esp_timer_get_time() < config.bench_epoch_received_mono_us ||
+         esp_timer_get_time() - config.bench_epoch_received_mono_us > 30000000LL)) {
+        error = "BENCH GM requires a fresh UTC epoch from Studio (30-second lease)";
+        return false;
+    }
     if (config.role == AR_PTP_ROLE_LAB_SOURCE &&
         (config.clock_class != 248U ||
          config.clock_accuracy !=
@@ -609,6 +629,7 @@ esp_err_t ptp_input_info(
 void finish_runtime(PtpLabContext& context) {
     g_ptp_accept_rx.store(false, std::memory_order_release);
     g_ptp_ready.store(false, std::memory_order_release);
+    g_bench_global_active.store(false, std::memory_order_release);
     g_ptp_last_announce_us.store(0LL, std::memory_order_release);
     g_ptp_last_sync_pair_us.store(0LL, std::memory_order_release);
     if (context.runtime.has_value()) {
@@ -643,7 +664,15 @@ void ptp_lab_task(void* argument) {
     }
     const auto selected_ptp_config = selected_config();
     const bool ptp_tai_epoch_seeded = seed_hardware_clock(
-        context.eth_handle, selected_ptp_config.current_utc_offset);
+        context.eth_handle, selected_ptp_config);
+    if (selected_ptp_config.bench_global_gm && !ptp_tai_epoch_seeded) {
+        g_source_start_reason.store(
+            PtpSourceStartReason::ieee1588_clock_unavailable, std::memory_order_release);
+        ESP_LOGE(kTag, "BENCH GM rejected: EMAC PTP/TAI seed not established");
+        finish_runtime(context);
+        vTaskDelete(nullptr);
+        return;
+    }
 
     const auto mac_result = esp_eth_ioctl(
         context.eth_handle,
@@ -675,8 +704,10 @@ void ptp_lab_task(void* argument) {
 #else
     constexpr bool kOperatorVerifiedTaiUtcOffset = false;
 #endif
-    profile->time_properties = conservative_lab_time_properties(
-        ptp_tai_epoch_seeded, kOperatorVerifiedTaiUtcOffset);
+    profile->time_properties = selected_ptp_config.bench_global_gm
+        ? ar::iec61850::time_sync::PtpTimeProperties{true, true, true, true}
+        : conservative_lab_time_properties(
+              ptp_tai_epoch_seeded, kOperatorVerifiedTaiUtcOffset);
     if (!profile->time_properties.ptp_timescale) {
         ESP_LOGW(kTag, "PTP timescale/UTC offset UNKNOWN: local RTC or "
                  "TAI-UTC offset not independently verified; no traceability claim");
@@ -693,6 +724,9 @@ void ptp_lab_task(void* argument) {
         return;
     }
 
+    g_bench_global_active.store(
+        selected_ptp_config.bench_global_gm && ptp_tai_epoch_seeded,
+        std::memory_order_release);
     const auto options = context.runtime->options();
     // Nonstandard bench cadences are explicitly opt-in, so expiry tracks the
     // larger validated interval. Default power-profile TTL = 3 seconds.
@@ -879,6 +913,7 @@ void start_ptp_lab(const esp_eth_handle_t eth_handle) {
     portEXIT_CRITICAL(&g_control_mux);
 
     reset_live_status();
+    g_bench_global_active.store(false, std::memory_order_release);
     g_ptp_ready.store(false, std::memory_order_release);
     g_ptp_last_announce_us.store(0LL, std::memory_order_release);
     g_ptp_last_sync_pair_us.store(0LL, std::memory_order_release);
@@ -1036,6 +1071,12 @@ extern "C" bool ar_ptp_source_runtime_active(void) {
 extern "C" const char* ar_ptp_source_last_start_reason(void) {
     return ar::esp32p4::smv::source_start_reason_name(
         ar::esp32p4::smv::g_source_start_reason.load(std::memory_order_acquire));
+}
+
+extern "C" bool ar_ptp_lab_bench_global_ready(void) {
+    return ar::esp32p4::smv::g_bench_global_active.load(
+               std::memory_order_acquire) &&
+           ar::esp32p4::smv::source_has_fresh_evidence();
 }
 
 extern "C" std::uint32_t ar_ptp_source_generation(void) {
