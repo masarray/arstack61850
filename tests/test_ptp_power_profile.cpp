@@ -333,6 +333,7 @@ int main() {
         check_source_readiness_requires_fresh_wire_proof();
         check_source_heartbeat_freshness_and_time_provenance();
         check_ptp_wire_sequence_and_identity();
+        check_priority_tagged_power_profile_wire();
         check_vlan_encoding_remains_configurable();
         check_tai_seed_and_truthful_time_properties();
         std::cout << "PTP Power Profile wire and configuration checks passed\n";
