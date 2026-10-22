@@ -101,7 +101,10 @@ SurfacePanel {
     readonly property bool firmwareGateActive:
         smartSession.firmwareInstallRequired || smartSession.firmwareUpdateRequired ||
         smartSession.updatingFirmware || smartSession.updateNeedsBootloaderHelp
-    readonly property bool injectionRunning: smartSession.state === "RUNNING"
+    // Board readback (not high-level session presentation state) owns the
+    // injection control. SETUP ERROR, update advisory or profile recovery must
+    // never visually unlatch STOP while actual SV remains RUNNING on wire.
+    readonly property bool injectionRunning: Boolean(ribbon.device && ribbon.device.running)
     readonly property int firmwareStageIndex: {
         switch (smartSession.firmwareUpdateStage) {
         case "prepare":
@@ -272,6 +275,8 @@ SurfacePanel {
         !ribbon.device.running && ribbon.device.svStopReason.length > 0 &&
         !ribbon.startQueued)
     readonly property string displayState: {
+        if (ribbon.injectionRunning && smartSession.state !== "RUNNING")
+            return "SV still running · Studio session warning"
         if (ribbon.unexpectedSvStop) {
             if (ribbon.device.svStopReason === "LEASE_EXPIRED") return "SV stopped · USB control lease expired"
             if (ribbon.device.svStopReason === "RUNTIME_FAULT") return "SV stopped · board runtime fault"
@@ -296,7 +301,9 @@ SurfacePanel {
 
     readonly property color smartStateColor: {
         if (ribbon.unexpectedSvStop) return theme.red
-        if (smartSession.state === "RUNNING" || smartSession.state === "READY") return theme.green
+        if (ribbon.injectionRunning)
+            return smartSession.state === "RUNNING" ? theme.green : theme.amber
+        if (smartSession.state === "READY") return theme.green
         if (smartSession.state === "CONNECTING" || smartSession.state === "CHECKING DEVICE" ||
             smartSession.state === "FIRMWARE RECOVERY" || smartSession.state === "PREPARING 4I+4V" ||
             smartSession.state === "RECOVERING PROFILE" ||
