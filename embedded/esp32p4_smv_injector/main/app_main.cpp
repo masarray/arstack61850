@@ -7,7 +7,7 @@
 #include "ariec61850/sampled_values/live_signal_state.hpp"
 #include "ariec61850/time_sync/sv_ptp_epoch.hpp"
 #include "ariec61850/time_sync/sv_ptp_clock_lease.hpp"
-#include "ariec61850/time_sync/ptp.hpp"
+#include "ariec61850/time_sync/ptp_runtime.hpp"
 
 #include "driver/gptimer.h"
 #include "ethernet_port.h"
