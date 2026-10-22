@@ -291,6 +291,11 @@ extern "C" bool ar_ptp_lab_get_config(ar_ptp_lab_config_t* config) {
 
 extern "C" bool ar_ptp_lab_try_start(const esp_eth_handle_t eth_handle) {
     if (eth_handle == nullptr) return false;
+    // During automatic handoff, START belongs exclusively to the physical
+    // supervisor; concurrent serial commands cannot steal the EMAC window.
+    if (ar::esp32p4::smv::g_external_enabled.load(std::memory_order_acquire) &&
+        xTaskGetCurrentTaskHandle() != ar::esp32p4::smv::g_external_worker_task)
+        return false;
     ar::esp32p4::smv::RoleControlClaim transaction{};
     if (!transaction.held || !ar::esp32p4::smv::emac_role_free()) return false;
 
