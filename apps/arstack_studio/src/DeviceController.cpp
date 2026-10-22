@@ -1691,6 +1691,13 @@ bool DeviceController::configurePtp(const QVariantMap& profile) {
         setError(QStringLiteral("Stop PTP and finish pending operations before changing settings."));
         return false;
     }
+    if (profile.value(QStringLiteral("benchGlobalGm")).toBool() &&
+        (ptpRole_ != QStringLiteral("SOURCE") ||
+         !identity_.capabilities.contains(QStringLiteral("PTP-GM-BENCH-V1"),
+                                          Qt::CaseInsensitive))) {
+        setError(QStringLiteral("BENCH GM requires SOURCE role and PTP-GM-BENCH-V1 firmware."));
+        return false;
+    }
     const QString command = ptpConfigCommand(profile);
     if (command.isEmpty()) {
         setError(QStringLiteral("PTP expert profile is outside firmware safety bounds."));
