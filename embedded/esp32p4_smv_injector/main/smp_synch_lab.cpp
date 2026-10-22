@@ -2,6 +2,12 @@
 
 #include "smp_synch_lab.hpp"
 #include "ariec61850/time_sync/sv_ptp_epoch.hpp"
+#if defined(ESP_PLATFORM)
+#include "sdkconfig.h"
+#if CONFIG_AR_PTP_LAB_TX
+#include "ptp_lab_task.hpp"
+#endif
+#endif
 
 #include <algorithm>
 #include <array>
@@ -103,8 +109,15 @@ void record_transition(const SvSyncLossReason reason,
     // SOURCE has no receiver discipline object. Its local-sync claim
     // originates exclusively from the sample phase + canonical TX gate.
     // Global sync is reserved for measured external time traceability.
-    if (g_source_local_qualified.load(std::memory_order_acquire))
+    if (g_source_local_qualified.load(std::memory_order_acquire)) {
+#if defined(ESP_PLATFORM) && CONFIG_AR_PTP_LAB_TX
+        // The same measured phase/MAC gate qualifies both local and bench
+        // global simulation. A UI flag alone can never promote AUTO to 2.
+        if (ar_ptp_lab_bench_global_ready())
+            return SmpSynchValue::global_synchronized;
+#endif
         return SmpSynchValue::local_synchronized;
+    }
     return ar::iec61850::time_sync::qualified_sv_sync_value(
         measured_value(), g_sv_timeline_phase_qualified.load(
             std::memory_order_acquire));
