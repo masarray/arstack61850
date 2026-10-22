@@ -45,12 +45,13 @@ public:
     };
 
     [[nodiscard]] bool begin(const std::uint64_t token, const SvLiveSignalState& current,
-                             const std::uint32_t now) noexcept {
+                             const std::uint32_t now, const bool running = false) noexcept {
         reset();
         if (token == 0U) return false;
         token_ = token;
         staged_ = current;
         baseline_generation_ = current.generation;
+        began_running_ = running;
         began_ms_ = now;
         staging_ = true;
         return true;
@@ -58,6 +59,7 @@ public:
 
     [[nodiscard]] SvLiveSignalState& draft() noexcept { return staged_; }
     [[nodiscard]] bool staging() const noexcept { return staging_; }
+    [[nodiscard]] bool began_running() const noexcept { return began_running_; }
     [[nodiscard]] std::uint64_t token() const noexcept { return token_; }
     [[nodiscard]] std::uint64_t checksum() const noexcept { return checksum_; }
     [[nodiscard]] std::uint64_t applied_generation() const noexcept { return generation_; }
@@ -120,12 +122,14 @@ public:
                                  const std::uint64_t token,
                                  const std::uint64_t hash,
                                  const std::uint32_t now) const noexcept {
-        return readback_seen_ && checksum_ == hash && readback_matches(bank, token, now);
+        return !began_running_ && readback_seen_ && checksum_ == hash &&
+            readback_matches(bank, token, now);
     }
 
     void consume_start() noexcept { reset(); }
     void reset() noexcept {
         staging_ = false; committed_ = false; rejected_ = false; readback_seen_ = false;
+        began_running_ = false;
         mask_ = 0; token_ = 0; checksum_ = 0; generation_ = 0; began_ms_ = 0;
         baseline_generation_ = 0;
     }
@@ -143,6 +147,7 @@ private:
     std::uint32_t began_ms_{0};
     std::uint32_t mask_{0};
     bool staging_{false};
+    bool began_running_{false};
     bool committed_{false};
     bool rejected_{false};
     bool readback_seen_{false};

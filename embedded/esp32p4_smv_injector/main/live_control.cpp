@@ -580,8 +580,8 @@ void handle_line(char* line) noexcept {
             const bool valid = parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), token, 10) &&
                 parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), boot, 16) &&
                 !has_extra_token(&save) && boot == g_boot_id &&
-                !g_running.load(std::memory_order_acquire) &&
-                g_scenario_txn.begin(token, g_signal_bank.snapshot(), monotonic_ms());
+                g_scenario_txn.begin(token, g_signal_bank.snapshot(), monotonic_ms(),
+                                     g_running.load(std::memory_order_acquire));
             if (!valid) { g_scenario_txn.reset(); ESP_LOGE(kTag, "CFG BEGIN rejected"); return; }
             ESP_LOGI(kTag, "CFG BEGIN token=%llu accepted boot=%016llX",
                      static_cast<unsigned long long>(token), static_cast<unsigned long long>(g_boot_id));
@@ -591,9 +591,11 @@ void handle_line(char* line) noexcept {
             std::uint64_t token{}, hash{};
             if (!parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), token, 10) ||
                 !parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), hash, 16) ||
-                has_extra_token(&save) || g_running.load(std::memory_order_acquire)) {
+                has_extra_token(&save) ||
+                g_scenario_txn.began_running() !=
+                    g_running.load(std::memory_order_acquire)) {
                 g_scenario_txn.reject();
-                ESP_LOGE(kTag, "CFG COMMIT rejected: malformed or running"); return;
+                ESP_LOGE(kTag, "CFG COMMIT rejected: malformed or changed RUN state"); return;
             }
             const auto result = g_scenario_txn.commit(g_signal_bank, token, hash, monotonic_ms());
             if (result != SvScenarioTransaction::Result::accepted) {
@@ -611,6 +613,8 @@ void handle_line(char* line) noexcept {
             std::uint64_t token{};
             if (!parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), token, 10) ||
                 has_extra_token(&save) ||
+                g_scenario_txn.began_running() !=
+                    g_running.load(std::memory_order_acquire) ||
                 !g_scenario_txn.confirm_readback(g_signal_bank, token, monotonic_ms())) {
                 ESP_LOGE(kTag, "CFG READBACK rejected"); return;
             }
@@ -630,11 +634,26 @@ void handle_line(char* line) noexcept {
                  std::strcmp(command, "ENABLE") == 0 || std::strcmp(command, "QUALITY") == 0 ||
                  std::strcmp(command, "SHAPE") == 0;
         if (!staged || !g_scenario_txn.staging() ||
-            g_running.load(std::memory_order_acquire)) {
+            g_scenario_txn.began_running() !=
+                g_running.load(std::memory_order_acquire)) {
             g_scenario_txn.reject();
             ESP_LOGE(kTag, "CFG rejected: no staging or invalid command");
             return;
         }
+    }
+
+    // Running 4I4V setpoints must change as ONE committed bank generation.
+    // A legacy single-channel SET would otherwise put mixed old/new rows on
+    // real SV frames. Staged CFG remains allowed while RUNNING.
+    if (!staged && g_running.load(std::memory_order_acquire) &&
+        (std::strcmp(command, "FREQ") == 0 ||
+         std::strcmp(command, "SET") == 0 ||
+         std::strcmp(command, "ENABLE") == 0 ||
+         std::strcmp(command, "QUALITY") == 0 ||
+         std::strcmp(command, "SHAPE") == 0 ||
+         std::strcmp(command, "ZERO") == 0)) {
+        ESP_LOGE(kTag, "Live edit rejected: use atomic CFG transaction while RUNNING");
+        return;
     }
 
     if (std::strcmp(command, "HEARTBEAT") == 0) {

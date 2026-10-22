@@ -137,5 +137,38 @@ int main() {
               tx.can_start(bank, 702, fresh_hash, 105),
               "fresh transaction retains explicit START readback");
     }
+    {
+        SvLiveSignalBank bank;
+        SvScenarioTransaction tx;
+        check(populate(tx, 801, bank, 100), "stopped scenario retained");
+        check(!tx.began_running(), "stopped scenario has START authority");
+        const auto hash = sv_scenario_hash(tx.draft());
+        check(tx.commit(bank, 801, hash, 105) == SvScenarioTransaction::Result::accepted &&
+              tx.confirm_readback(bank, 801, 105) && tx.can_start(bank, 801, hash, 105),
+              "stopped transaction still arms START");
+        check(populate(tx, 802, bank, 200), "running fixture scenario");
+        // Re-arm as a RUNNING live transaction; must publish atomically
+        // without yielding a second START ticket.
+        const auto before = bank.snapshot();
+        check(tx.begin(803, before, 210, true), "begin while RUNNING");
+        auto& running = tx.draft();
+        running.channels[0].rms_counts += 800;
+        running.channels[7].quality ^= 1U;
+        tx.mark_frequency();
+        tx.mark_shape();
+        for (std::size_t i = 0; i < 8; ++i) {
+            tx.mark_set(i);
+            tx.mark_enabled(i);
+        }
+        const auto live_hash = sv_scenario_hash(running);
+        check(tx.commit(bank, 803, live_hash, 220) == SvScenarioTransaction::Result::accepted,
+              "atomic running transaction commits one generation");
+        check(bank.snapshot().generation == before.generation + 1U,
+              "live update advances one bank generation only");
+        check(tx.confirm_readback(bank, 803, 220),
+              "running transaction requires exact independent readback");
+        check(!tx.can_start(bank, 803, live_hash, 221),
+              "live commit cannot rearm START and reset smpCnt/phase");
+    }
     return failures == 0 ? 0 : 1;
 }
