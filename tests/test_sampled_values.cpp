@@ -501,8 +501,8 @@ void compiled_binary_profile_activates_only_supported_4i4v_device_layout() {
     SampledValuesPdu decodedPdu{};
     CHECK(SampledValuesPduCodec::try_decode(periodPdu, decodedPdu));
     CHECK(decodedPdu.asdus.size() == 1U);
-    CHECK(decodedPdu.asdus[0].sample_rate == std::optional<std::uint16_t>{80U});
-    CHECK(decodedPdu.asdus[0].sample_mode == std::optional<std::uint16_t>{0U});
+    CHECK(decodedPdu.asdus[0].sample_rate == std::optional<std::uint16_t>{std::uint16_t{80U}});
+    CHECK(decodedPdu.asdus[0].sample_mode == std::optional<std::uint16_t>{std::uint16_t{0U}});
 
     // 60 Hz uses the same 80 samples/period but exactly 4800 fps/wrap.
     auto period60 = period50;
