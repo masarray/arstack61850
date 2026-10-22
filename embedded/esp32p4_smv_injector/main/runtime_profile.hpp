@@ -20,6 +20,10 @@ struct RuntimePublisherProfile final {
     std::uint16_t no_asdu{1U};
     bool include_data_set{false};
     bool include_sample_rate{false};
+    // 0 means inherit publisher_rate_hz for legacy ASCII profiles.
+    // Binary SCL deploys preserve exact configured smpRate and smpMod.
+    std::uint16_t wire_sample_rate{0U};
+    std::uint8_t wire_sample_mode{1U}; // IEC 61850-9-2: 0=per period; 1=per second.
     std::array<char, 96> sv_id{};
     std::array<char, 160> data_set_reference{};
     // Zero for factory/default or legacy ASCII commits. A valid value is set

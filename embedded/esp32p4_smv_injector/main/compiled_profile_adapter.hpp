@@ -27,11 +27,25 @@ enum class BinaryRuntimeProfileStatus : std::uint8_t {
     if (!SvDeviceProfileBinaryCodec::decode(bytes, decoded).success()) {
         return BinaryRuntimeProfileStatus::invalid_envelope;
     }
+    // SCL smpMod=0 means samples per *nominal period*, not per second.
+    // Both binary modes are accepted only when their configured rate exactly
+    // matches the 50/60-Hz 4I4V publisher cadence; never silently recode.
+    const bool per_second =
+        decoded.sampling_basis == SvSampleMode::samples_per_second &&
+        decoded.frame_rate_hz == decoded.configured_sample_rate;
+    const bool per_period =
+        decoded.sampling_basis == SvSampleMode::samples_per_period &&
+        decoded.configured_sample_rate > 0U &&
+        decoded.configured_sample_rate <= 65535U &&
+        (static_cast<std::uint64_t>(decoded.configured_sample_rate) * 50U ==
+             decoded.frame_rate_hz ||
+         static_cast<std::uint64_t>(decoded.configured_sample_rate) * 60U ==
+             decoded.frame_rate_hz) &&
+        decoded.sample_counter_modulus == decoded.frame_rate_hz;
     if ((decoded.profile_family != SvProfileFamily::iec61850_9_2 &&
          decoded.profile_family != SvProfileFamily::legacy_9_2le) ||
-        decoded.sampling_basis != SvSampleMode::samples_per_second ||
+        (!per_second && !per_period) ||
         decoded.no_asdu != 1U ||
-        decoded.frame_rate_hz != decoded.configured_sample_rate ||
         decoded.frame_rate_hz == 0U || decoded.frame_rate_hz > 65535U ||
         decoded.leaf_count != 16U || decoded.payload_size_bytes != 64U ||
         !decoded.asdu_options.sample_synchronized ||
@@ -68,6 +82,8 @@ enum class BinaryRuntimeProfileStatus : std::uint8_t {
     candidate.no_asdu = decoded.no_asdu;
     candidate.include_data_set = decoded.asdu_options.data_set;
     candidate.include_sample_rate = decoded.asdu_options.sample_rate;
+    candidate.wire_sample_rate = static_cast<std::uint16_t>(decoded.configured_sample_rate);
+    candidate.wire_sample_mode = per_period ? 0U : 1U;
     std::copy_n(decoded.sv_id.begin(), decoded.sv_id_length,
                 candidate.sv_id.begin());
     std::copy_n(decoded.data_set_reference.begin(),

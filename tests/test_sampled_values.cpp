@@ -7,6 +7,7 @@
 #include "ariec61850/sampled_values/compiled_device_profile.hpp"
 #include "../embedded/esp32p4_smv_injector/main/binary_profile_staging.hpp"
 #include "../embedded/esp32p4_smv_injector/main/compiled_profile_adapter.hpp"
+#include "../embedded/esp32p4_smv_injector/main/sv_wire_metadata.hpp"
 #include "ariec61850/sampled_values/frame.hpp"
 #include "ariec61850/sampled_values/frame_codec.hpp"
 #include "ariec61850/sampled_values/payload_inspector.hpp"
@@ -470,6 +471,73 @@ void compiled_binary_profile_activates_only_supported_4i4v_device_layout() {
     CHECK(runtime.app_id == 0x4001U);
     CHECK(runtime.sv_id[0] == 'S' && runtime.sv_id[2] == '2');
     CHECK(runtime.include_data_set && runtime.include_sample_rate);
+    const auto secondFields = sv_wire_sample_rate(runtime);
+    CHECK(secondFields.has_value());
+    CHECK(secondFields->sample_rate == 4800U && secondFields->sample_mode == 1U);
+
+    // Real SCL smpMod=0: 50 Hz x 80 samples/period = 4000 fps, 4000 wrap.
+    auto period50 = device;
+    period50.sampling_basis = SvSampleMode::samples_per_period;
+    period50.configured_sample_rate = 80U;
+    period50.frame_rate_hz = 4000U;
+    period50.sample_counter_modulus = 4000U;
+    const auto periodSize = SvDeviceProfileBinaryCodec::encoded_size(period50);
+    CHECK(periodSize.has_value());
+    ByteVector periodEncoded(*periodSize);
+    CHECK(SvDeviceProfileBinaryCodec::encode_into(period50, periodEncoded).success());
+    RuntimePublisherProfile runtime50{};
+    CHECK(decode_binary_runtime_profile(periodEncoded, runtime50) ==
+          BinaryRuntimeProfileStatus::ok);
+    const auto periodFields = sv_wire_sample_rate(runtime50);
+    CHECK(periodFields.has_value());
+    CHECK(periodFields->sample_rate == 80U && periodFields->sample_mode == 0U);
+    CHECK(runtime50.publisher_rate_hz == 4000U && runtime50.sample_counter_modulus == 4000U);
+
+    // Verify actual BER encoding/decoding semantics, not just struct fields.
+    auto wireAsdu = make_reference_asdu();
+    wireAsdu.sample_rate = periodFields->sample_rate;
+    wireAsdu.sample_mode = periodFields->sample_mode;
+    const auto periodPdu = SampledValuesPduCodec::encode(SampledValuesPdu{{wireAsdu}});
+    SampledValuesPdu decodedPdu{};
+    CHECK(SampledValuesPduCodec::try_decode(periodPdu, decodedPdu));
+    CHECK(decodedPdu.asdus.size() == 1U);
+    CHECK(decodedPdu.asdus[0].sample_rate == std::optional<std::uint16_t>{80U});
+    CHECK(decodedPdu.asdus[0].sample_mode == std::optional<std::uint16_t>{0U});
+
+    // 60 Hz uses the same 80 samples/period but exactly 4800 fps/wrap.
+    auto period60 = period50;
+    period60.frame_rate_hz = 4800U;
+    period60.sample_counter_modulus = 4800U;
+    CHECK(SvDeviceProfileBinaryCodec::encode_into(period60, periodEncoded).success());
+    RuntimePublisherProfile runtime60{};
+    CHECK(decode_binary_runtime_profile(periodEncoded, runtime60) ==
+          BinaryRuntimeProfileStatus::ok);
+    const auto period60Fields = sv_wire_sample_rate(runtime60);
+    CHECK(period60Fields.has_value());
+    CHECK(period60Fields->sample_rate == 80U && period60Fields->sample_mode == 0U);
+    CHECK(runtime60.publisher_rate_hz == 4800U);
+
+    // Legacy 9-2LE: omit both optional fields; do not fabricate metadata.
+    auto legacy = period50;
+    legacy.profile_family = SvProfileFamily::legacy_9_2le;
+    legacy.asdu_options.sample_rate = false;
+    CHECK(SvDeviceProfileBinaryCodec::encode_into(legacy, periodEncoded).success());
+    RuntimePublisherProfile legacyRuntime{};
+    CHECK(decode_binary_runtime_profile(periodEncoded, legacyRuntime) ==
+          BinaryRuntimeProfileStatus::ok);
+    CHECK(!sv_wire_sample_rate(legacyRuntime).has_value());
+
+    // Fail closed: impossible 4300 fps for 80/period, or wrong second wrap.
+    auto impossible = period50;
+    impossible.frame_rate_hz = 4300U;
+    CHECK(SvDeviceProfileBinaryCodec::encode_into(impossible, periodEncoded).success());
+    CHECK(decode_binary_runtime_profile(periodEncoded, runtime50) ==
+          BinaryRuntimeProfileStatus::unsupported_device_capability);
+    impossible = period50;
+    impossible.sample_counter_modulus = 80U;
+    CHECK(SvDeviceProfileBinaryCodec::encode_into(impossible, periodEncoded).success());
+    CHECK(decode_binary_runtime_profile(periodEncoded, runtime50) ==
+          BinaryRuntimeProfileStatus::unsupported_device_capability);
     CHECK(runtime.data_set_reference[0] == 'D');
     const auto previous_generation = runtime.generation;
     chunks.abort();

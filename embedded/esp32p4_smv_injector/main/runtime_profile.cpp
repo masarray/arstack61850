@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "runtime_profile.hpp"
+#include "sv_wire_metadata.hpp"
 
 #include "ariec61850/ethernet/ethernet.hpp"
 
@@ -54,6 +55,9 @@ bool runtime_profile_validate(const RuntimePublisherProfile& profile) noexcept {
         return false;
     }
     if (profile.include_data_set && profile.data_set_reference[0] == '\0') {
+        return false;
+    }
+    if (profile.include_sample_rate && !sv_wire_sample_rate(profile).has_value()) {
         return false;
     }
     return true;

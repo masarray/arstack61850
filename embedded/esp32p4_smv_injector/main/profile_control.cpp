@@ -6,6 +6,7 @@
 
 #include "live_control.hpp"
 #include "runtime_profile.hpp"
+#include "sv_wire_metadata.hpp"
 #include "smp_synch_lab.hpp"
 
 #include "ariec61850/ethernet/ethernet.hpp"
@@ -203,7 +204,7 @@ void print_ptp_role() noexcept {
 
 void print_profile(const RuntimePublisherProfile& profile) noexcept {
     ESP_LOGI(kTag,
-             "PROFILE generation=%llu svID=%s APPID=0x%04X rate=%lu wrap=%u confRev=%lu VLAN=%u/%u/%u dataSetField=%u sampleRateField=%u",
+             "PROFILE generation=%llu svID=%s APPID=0x%04X rate=%lu wrap=%u confRev=%lu VLAN=%u/%u/%u dataSetField=%u sampleRateField=%u wireSmpRate=%u wireSmpMod=%u",
              static_cast<unsigned long long>(profile.generation),
              profile.sv_id.data(),
              static_cast<unsigned>(profile.app_id),
@@ -214,7 +215,11 @@ void print_profile(const RuntimePublisherProfile& profile) noexcept {
              static_cast<unsigned>(profile.vlan_id),
              static_cast<unsigned>(profile.vlan_priority),
              profile.include_data_set ? 1U : 0U,
-             profile.include_sample_rate ? 1U : 0U);
+             profile.include_sample_rate ? 1U : 0U,
+             static_cast<unsigned>(profile.include_sample_rate
+                 ? sv_wire_sample_rate(profile)->sample_rate : 0U),
+             static_cast<unsigned>(profile.include_sample_rate
+                 ? sv_wire_sample_rate(profile)->sample_mode : 0U));
 }
 
 
@@ -524,6 +529,9 @@ void handle_profile_command(char* arguments) noexcept {
         g_staging.no_asdu = static_cast<std::uint16_t>(no_asdu);
         g_staging.include_data_set = (flags & 0x1U) != 0U;
         g_staging.include_sample_rate = (flags & 0x2U) != 0U;
+        // Legacy ASCII PROFILE SV syntax always supplies frames/second.
+        g_staging.wire_sample_rate = 0U;
+        g_staging.wire_sample_mode = 1U;
         return;
     }
 

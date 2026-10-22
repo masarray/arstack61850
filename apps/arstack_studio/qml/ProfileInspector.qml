@@ -256,6 +256,18 @@ SurfacePanel {
                         font.family: panel.monoFont
                         font.pixelSize: panel.theme.captionSize
                     }
+                    Label { text: "ASDU smpRate/smpMod"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize }
+                    Label {
+                        text: panel.profile.includeSampleRate
+                              ? (panel.profile.sampleRate + " / "
+                                 + (panel.profile.sampleMode === "SmpPerPeriod" ? "0 · per period"
+                                    : panel.profile.sampleMode === "SmpPerSecond" ? "1 · per second"
+                                    : "unsupported"))
+                              : "omitted · SCL SmvOpts"
+                        color: panel.theme.textSoft
+                        font.family: panel.monoFont
+                        font.pixelSize: panel.theme.captionSize
+                    }
                     Label { text: "Frames"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: panel.theme.captionSize }
                     Label {
                         text: panel.profile.frameRateHz

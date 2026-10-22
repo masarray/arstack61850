@@ -13,6 +13,7 @@
 #include "ethernet_port.h"
 #include "live_control.hpp"
 #include "runtime_profile.hpp"
+#include "sv_wire_metadata.hpp"
 #include "sdkconfig.h"
 #if CONFIG_AR_PTP_LAB_TX
 #include "ptp_lab_task.hpp"
@@ -121,7 +122,6 @@ constexpr char kTag[] = "ar_smv_p3";
 constexpr EventBits_t kLinkUpBit = BIT0;
 constexpr std::uint16_t kMirrorAppId = 0x4F01U;
 constexpr char kMirrorSvId[] = "AR_DIAG_SV1";
-constexpr std::uint16_t kSampleModeSamplesPerSecond = 1U;
 constexpr std::uint16_t kDiagnosticEtherType = 0x88B5U;
 constexpr std::uint32_t kStatsMergeEvery = 400U;
 constexpr std::uint32_t kTransportFailureStopThreshold = 400U; // 100 ms at 4 kHz
@@ -307,9 +307,14 @@ SampledValuesFrame make_runtime_frame(
     // No disciplined PTP clock exists yet, so never claim synchronization.
     asdu.sample_synchronization = 0U;
 
-    if (diagnostic_mirror || profile.include_sample_rate) {
+    // The BER ASDU must use the exact SCL sampling basis. A 50-Hz 4kfps
+    // SmpPerPeriod profile writes smpRate=80, smpMod=0 (not 4000/0).
+    if (diagnostic_mirror) {
         asdu.sample_rate = static_cast<std::uint16_t>(profile.publisher_rate_hz);
-        asdu.sample_mode = kSampleModeSamplesPerSecond;
+        asdu.sample_mode = 1U;
+    } else if (const auto wire = ar::esp32p4::smv::sv_wire_sample_rate(profile)) {
+        asdu.sample_rate = wire->sample_rate;
+        asdu.sample_mode = wire->sample_mode;
     } else {
         asdu.sample_rate.reset();
         asdu.sample_mode.reset();
