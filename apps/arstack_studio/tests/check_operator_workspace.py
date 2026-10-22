@@ -413,6 +413,23 @@ def main() -> None:
             and 'sendCommand(QStringLiteral("START %1 %2 %3")' in device_src
             and "requestStartWithScenario(const QVariantMap& scenario)" in session_src,
             "physical START must follow exclusive staged SETs, commit ACK, and verified readback")
+    firmware_live = (ROOT / "embedded/esp32p4_smv_injector/main/live_control.cpp").read_text(encoding="utf-8")
+    require("function applyLiveScenario()" in main_qml
+            and "requestApplyLiveScenario(snapshot)" in main_qml
+            and "function onLiveScenarioApplied()" in main_qml
+            and "liveSubmissionRevision === root.scenarioRevision" in main_qml
+            and "text: device.scenarioApplying ? \"Verifying...\" : \"Apply live\"" in main_qml
+            and "return submitScenario(scenario, false);" in device_src
+            and "scenarioLiveUpdate_ = !starting" in device_src
+            and "emit liveScenarioApplied();" in device_src
+            and "signalFrequencyHz_ = scenarioPendingFrequencyHz_" in device_src
+            and "requestApplyLiveScenario(const QVariantMap& scenario)" in session_src,
+            "RUNNING 4I4V updates must use an explicit one-shot atomic CFG with verified ACK")
+    require("g_scenario_txn.began_running()" in firmware_live
+            and "Live edit rejected: use atomic CFG transaction while RUNNING" in firmware_live
+            and "if (scenarioLiveUpdate_)" in device_src
+            and "const bool wasLiveUpdate = scenarioLiveUpdate_" in device_src,
+            "RUNNING CFG must not accept partial setpoints, rearm START or STOP on failed readback")
     require("assets/material_dark/play_arrow.svg" in cmake,
             "light-hover Material icons must have bundled dark variants")
     require(matrix.count("StudioActionMenu {") == 2
