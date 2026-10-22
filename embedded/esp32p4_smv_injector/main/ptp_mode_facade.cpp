@@ -565,8 +565,7 @@ extern "C" void ar_ptp_lab_observe_external_announce(
     const uint8_t source_clock[8], const uint8_t grandmaster_clock[8],
     const uint16_t source_port, const uint8_t clock_class,
     const uint16_t steps_removed, const uint64_t received_ms) {
-    if (source_clock == nullptr || grandmaster_clock == nullptr ||
-        !ar::esp32p4::smv::g_external_enabled.load(std::memory_order_acquire))
+    if (source_clock == nullptr || grandmaster_clock == nullptr)
         return;
     ar::iec61850::time_sync::PtpExternalCandidate candidate{};
     std::copy_n(source_clock, 8U, candidate.port_clock.begin());
@@ -621,8 +620,9 @@ extern "C" bool ar_ptp_lab_get_external_failover_status(
     portENTER_CRITICAL(&ar::esp32p4::smv::g_external_mux);
     const auto& policy = ar::esp32p4::smv::g_external_policy;
     status->enabled = policy.enabled();
-    status->candidate_fresh = policy.qualified_candidate(
-        static_cast<std::uint64_t>(esp_timer_get_time() / 1000LL));
+    status->candidate_fresh = policy.candidate_fresh(
+        static_cast<std::uint64_t>(esp_timer_get_time() / 1000LL)) &&
+        policy.stable_announces() >= ar::iec61850::time_sync::PtpExternalFailoverPolicy::required_announces;
     status->stable_announces = policy.stable_announces();
     status->handovers = ar::esp32p4::smv::g_external_handovers;
     status->returns_to_source = ar::esp32p4::smv::g_external_returns;
