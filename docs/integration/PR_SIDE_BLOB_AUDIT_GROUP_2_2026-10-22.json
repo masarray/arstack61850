@@ -1,0 +1,339 @@
+{
+  "schema": "arstack61850.side-file-blob-audit.v1",
+  "date": "2026-10-22",
+  "group": 2,
+  "repo": "masarray/arstack61850",
+  "tip_sha": "3dff7a1596a1ad753b38ceae173537520cc57b11",
+  "method": "Source changed paths versus tip blob SHA, not semantic verification. Equal is file identity only, absence requires review.",
+  "records": [
+    {
+      "number": 279,
+      "title": "fix(studio): truly compact 4I+4V, equal phasor/wave area and atomic input commits",
+      "source_sha": "bc999d3d01014f0eeb6df2b30be7071cd7070dc1",
+      "base_sha": "b628f2a22ad887d878f84774ce2f2bcbb661fc27",
+      "source_changed_files_count": 3,
+      "exact_blob_count": 0,
+      "source_unique_paths": [],
+      "files": [
+        {
+          "path": "apps/arstack_studio/qml/Main.qml",
+          "source_blob_sha": "09b38d2fa186edb4c1fb3f7d4c47d7ba54fd63fd",
+          "tip_blob_sha": "d4846724403275c0e553086bc8b55d2b6eb0193a",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/SignalMatrix.qml",
+          "source_blob_sha": "27db340f39e8c557c51371c04ed887a5bf2b0d18",
+          "tip_blob_sha": "b7bc89a41a644149385774764a6f3a32de30a2fd",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/tests/check_operator_workspace.py",
+          "source_blob_sha": "dfdb82332e177420cf687f0d990daa8351de2614",
+          "tip_blob_sha": "0ad7e54db0d1d575cff95ba7e0efe201f0bf2587",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        }
+      ]
+    },
+    {
+      "number": 278,
+      "title": "fix(studio): truly narrow setpoint table, balanced phasor/wave, commit-on-confirm decimal editors",
+      "source_sha": "6c42fbdb6fe7e726088fac21f6f2a65c761fb23b",
+      "base_sha": "b628f2a22ad887d878f84774ce2f2bcbb661fc27",
+      "source_changed_files_count": 3,
+      "exact_blob_count": 0,
+      "source_unique_paths": [],
+      "files": [
+        {
+          "path": "apps/arstack_studio/qml/Main.qml",
+          "source_blob_sha": "07de4f92db236d0a11170a25d70597ad396f8a53",
+          "tip_blob_sha": "d4846724403275c0e553086bc8b55d2b6eb0193a",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/SignalMatrix.qml",
+          "source_blob_sha": "9a37c106a756f2b2d7bc7b7c4fe28483b140360b",
+          "tip_blob_sha": "b7bc89a41a644149385774764a6f3a32de30a2fd",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/tests/check_operator_workspace.py",
+          "source_blob_sha": "5ed90736128bce3744ddcde82c157006169e893f",
+          "tip_blob_sha": "0ad7e54db0d1d575cff95ba7e0efe201f0bf2587",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        }
+      ]
+    },
+    {
+      "number": 277,
+      "title": "fix(studio): proportional 41/59 setpoint layout, equal phasor/wave, commit-only numeric editing",
+      "source_sha": "506846834bc4110594b60e7bfd45576d36f449c5",
+      "base_sha": "b628f2a22ad887d878f84774ce2f2bcbb661fc27",
+      "source_changed_files_count": 4,
+      "exact_blob_count": 0,
+      "source_unique_paths": [],
+      "files": [
+        {
+          "path": ".github/workflows/arstack-studio-native-preview.yml",
+          "source_blob_sha": "d6888665ff26f75efa55b1497319bacdde2c954a",
+          "tip_blob_sha": "8bc213d89b6551d2f2714d45980ed713461aae5f",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/Main.qml",
+          "source_blob_sha": "8afc0892783e779860c10a50a6f6c513e9ce8d60",
+          "tip_blob_sha": "d4846724403275c0e553086bc8b55d2b6eb0193a",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/SignalMatrix.qml",
+          "source_blob_sha": "9de7bd8993b1a6ae89db7af825f06d8de29ddfe0",
+          "tip_blob_sha": "b7bc89a41a644149385774764a6f3a32de30a2fd",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/tests/check_operator_workspace.py",
+          "source_blob_sha": "b6145ab863db73d3f4f8b0ed09c56e5abfc98700",
+          "tip_blob_sha": "0ad7e54db0d1d575cff95ba7e0efe201f0bf2587",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        }
+      ]
+    },
+    {
+      "number": 275,
+      "title": "fix(studio): proportional injection/plot workspace, verified bolt RUN/STOP, first-click START handoff",
+      "source_sha": "bb4b02f1fa3580e30297d9bbb4e049d3b23b5073",
+      "base_sha": "9bbe201c955f29979086f42c449836198d91c9f4",
+      "source_changed_files_count": 7,
+      "exact_blob_count": 0,
+      "source_unique_paths": [
+        "apps/arstack_studio/assets/material/run-bolt.svg",
+        "apps/arstack_studio/assets/material/stop-bolt.svg"
+      ],
+      "files": [
+        {
+          "path": "apps/arstack_studio/CMakeLists.txt",
+          "source_blob_sha": "47bb3f65921f71c042ed11e24fc27f3090f74667",
+          "tip_blob_sha": "79db977ea80e8dd8c90a404d661a6f37051746fe",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/assets/material/run-bolt.svg",
+          "source_blob_sha": "6df727593d68189cd5c6f86beb5e4a7ca130d1c9",
+          "tip_blob_sha": null,
+          "status": "MISSING_IN_TIP_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/assets/material/stop-bolt.svg",
+          "source_blob_sha": "71035e2908852b4d95861d132b0d7c6d3efa64d4",
+          "tip_blob_sha": null,
+          "status": "MISSING_IN_TIP_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/Main.qml",
+          "source_blob_sha": "126652474ef6ee6413135bb11d22d3e74b4e79d2",
+          "tip_blob_sha": "d4846724403275c0e553086bc8b55d2b6eb0193a",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/ModernRibbon.qml",
+          "source_blob_sha": "1f913ab45f9e64d9199da852ce01988151794aaa",
+          "tip_blob_sha": "bce90ffec6ecdebd24482a43c34bbcc483fa6497",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/WorkflowBar.qml",
+          "source_blob_sha": "f28210e89d9587a65fc3feaec125f9a61b8d48fd",
+          "tip_blob_sha": "91eb993331ce7c94e2de0e6519997f7bad53535c",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/tests/check_operator_workspace.py",
+          "source_blob_sha": "a80c31b31ab52a2d03b6a5eec22357bf980c74f4",
+          "tip_blob_sha": "0ad7e54db0d1d575cff95ba7e0efe201f0bf2587",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        }
+      ]
+    },
+    {
+      "number": 274,
+      "title": "fix(p0): responsive compact 4I4V workspace, bolt RUN/STOP, reliable first-click START",
+      "source_sha": "1efcfe2aa7ab70d75ec933176df0484c22d88b70",
+      "base_sha": "9bbe201c955f29979086f42c449836198d91c9f4",
+      "source_changed_files_count": 9,
+      "exact_blob_count": 0,
+      "source_unique_paths": [
+        "apps/arstack_studio/assets/material/bolt_run.svg",
+        "apps/arstack_studio/assets/material/bolt_stop.svg"
+      ],
+      "files": [
+        {
+          "path": "apps/arstack_studio/assets/material/bolt_run.svg",
+          "source_blob_sha": "be943de4bf02d59e5810edd61dfeb3f23face28d",
+          "tip_blob_sha": null,
+          "status": "MISSING_IN_TIP_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/assets/material/bolt_stop.svg",
+          "source_blob_sha": "4a23d89678fba238a5550926760b31da3d2935d7",
+          "tip_blob_sha": null,
+          "status": "MISSING_IN_TIP_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/Main.qml",
+          "source_blob_sha": "575900233fbb05a6a183d886317e6e5ec1b2cd59",
+          "tip_blob_sha": "d4846724403275c0e553086bc8b55d2b6eb0193a",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/ModernRibbon.qml",
+          "source_blob_sha": "28b3d5db05af57f66a9672f525893d23cbca02c8",
+          "tip_blob_sha": "bce90ffec6ecdebd24482a43c34bbcc483fa6497",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/WorkflowBar.qml",
+          "source_blob_sha": "fc605dbe774d47ba2aef8cfa4e65c81977e6b70e",
+          "tip_blob_sha": "91eb993331ce7c94e2de0e6519997f7bad53535c",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeterministicSessionHarness.cpp",
+          "source_blob_sha": "0338994fa5da84656d512885e36a661235ae2daa",
+          "tip_blob_sha": "71056ebff315327cfa8d4fed3f7d125e74c652e4",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/SmartSessionController.cpp",
+          "source_blob_sha": "7a561c606aed3d06866860c04a38b0b6a8c572e3",
+          "tip_blob_sha": "96c83c6866f7e6c80242be1aa9402219ab290379",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/SmartSessionController.hpp",
+          "source_blob_sha": "0335c02f6a6300e1b210984031f7abb6e3f4d70a",
+          "tip_blob_sha": "6cd1b5a22b8d87e1b237da0e85f0cfbf13b0c9b4",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/tests/check_operator_workspace.py",
+          "source_blob_sha": "7862f4e43dd6b79be31e39c3acb401686019d044",
+          "tip_blob_sha": "0ad7e54db0d1d575cff95ba7e0efe201f0bf2587",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        }
+      ]
+    },
+    {
+      "number": 272,
+      "title": "feat(p0): center-screen actionable Studio toast for board faults, PTP Ethernet and operator attention",
+      "source_sha": "a03da5e5a1de13daa9aa30bf23ed08419b4178d4",
+      "base_sha": "e44cf25099841e22268e394209767742b9499179",
+      "source_changed_files_count": 3,
+      "exact_blob_count": 0,
+      "source_unique_paths": [],
+      "files": [
+        {
+          "path": "apps/arstack_studio/qml/Main.qml",
+          "source_blob_sha": "3ee451d17c727cec6faf9fafae0af7804a98aff9",
+          "tip_blob_sha": "d4846724403275c0e553086bc8b55d2b6eb0193a",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/StatusToast.qml",
+          "source_blob_sha": "5c2fe3626bfac7f8b8d134a8eaf21751ccd1b179",
+          "tip_blob_sha": "dce3df27df574e2ad037a850fce964aac1a55d28",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/tests/check_operator_workspace.py",
+          "source_blob_sha": "e24f219606c95b3082a52ca92382c04b7995a6c2",
+          "tip_blob_sha": "0ad7e54db0d1d575cff95ba7e0efe201f0bf2587",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        }
+      ]
+    },
+    {
+      "number": 266,
+      "title": "P0 physical PTP stale-role recovery + verified Time Sync clipboard",
+      "source_sha": "799b66481f77abdcbdb50a6f1cab5fe165ade006",
+      "base_sha": "df73fea0b68e7f4766c63d7a83be1b8b9792a297",
+      "source_changed_files_count": 12,
+      "exact_blob_count": 2,
+      "source_unique_paths": [],
+      "files": [
+        {
+          "path": ".github/workflows/arstack-studio-native-preview.yml",
+          "source_blob_sha": "63345e5a7e491e2100f57babe96612149c0648ae",
+          "tip_blob_sha": "8bc213d89b6551d2f2714d45980ed713461aae5f",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": ".github/workflows/arstack-studio-qt.yml",
+          "source_blob_sha": "97cbf821dbb99fac213f427e8302e7c513122cdb",
+          "tip_blob_sha": "97cbf821dbb99fac213f427e8302e7c513122cdb",
+          "status": "EXACT_BLOB_MATCH"
+        },
+        {
+          "path": "apps/arstack_studio/CMakeLists.txt",
+          "source_blob_sha": "993df310efc7a02c5a2c8f951c58fa5e061fd56d",
+          "tip_blob_sha": "79db977ea80e8dd8c90a404d661a6f37051746fe",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/FirmwarePanel.qml",
+          "source_blob_sha": "1fb9741fc3c22bbdb893e79d52a8549685f58a70",
+          "tip_blob_sha": "552ba4f11df58335a81bed459615c800ee051eba",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/PtpExpertPanel.qml",
+          "source_blob_sha": "0e325a96eb91c1ffea92e3cfa9f6f007a84b05ea",
+          "tip_blob_sha": "0003b85e46dc51ef8492fe72ef74dec28f7a008b",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/ClipboardHarness.cpp",
+          "source_blob_sha": "b5107e620a02f69a4f9b11ffc2dd64c699987de0",
+          "tip_blob_sha": "b5107e620a02f69a4f9b11ffc2dd64c699987de0",
+          "status": "EXACT_BLOB_MATCH"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeterministicSessionHarness.cpp",
+          "source_blob_sha": "0ee5cb050112b5768978b25fb5669cea8642330b",
+          "tip_blob_sha": "71056ebff315327cfa8d4fed3f7d125e74c652e4",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeviceController.cpp",
+          "source_blob_sha": "2549234a93ea81a8082229518e369b4cfc23a62f",
+          "tip_blob_sha": "9f65485564b0dd1f0497fda6b49e593db70b9592",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeviceController.hpp",
+          "source_blob_sha": "c2c6723f872ce24e9c79d4f6bea178cdb0e80f9c",
+          "tip_blob_sha": "c0244f32b056c318552fc87c9fd3e1b7db614cf6",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/StudioClipboard.cpp",
+          "source_blob_sha": "05bc2e40b9c3e8f4632306fc5993154a52c64308",
+          "tip_blob_sha": "dbb728df673ac2b0379a05931f37cbfc17526510",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/StudioClipboard.hpp",
+          "source_blob_sha": "a4645edf6c22ba6e1cded468d2cf9e42245c59e8",
+          "tip_blob_sha": "2fa4941ebdf5490cf1fd6f8149d356a6313e89f4",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/tests/check_operator_workspace.py",
+          "source_blob_sha": "b6887ee15c5ca4fd4ae0cd0613d6d0d1ae9033b2",
+          "tip_blob_sha": "0ad7e54db0d1d575cff95ba7e0efe201f0bf2587",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        }
+      ]
+    }
+  ]
+}
