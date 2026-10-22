@@ -196,6 +196,7 @@ public:
         double clipPercent);
     Q_INVOKABLE bool requestZero();
     Q_INVOKABLE bool requestPtpRefresh();
+    Q_INVOKABLE bool requestPtpExternalAuto(bool enabled);
     Q_INVOKABLE bool requestSyncDiagnostics();
     Q_INVOKABLE bool requestPtpRole(const QString& role);
     Q_INVOKABLE bool requestSmpSynch(const QString& mode);

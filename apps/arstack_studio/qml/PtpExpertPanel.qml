@@ -286,6 +286,60 @@ SurfacePanel {
                 }
             }
 
+            RowLayout {
+                visible: panel.device && panel.device.ptpExternalAutoAvailable
+                Layout.fillWidth: true
+                spacing: 8
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 3
+                    Label {
+                        text: "External GM · opt-in AUTO failover"
+                        font.family: panel.uiFont
+                        color: panel.theme.text
+                        font.pixelSize: panel.theme.captionSize
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: panel.device.ptpExternalSwitching
+                            ? "Switching EMAC authority · SV synchronization temporarily revoked"
+                            : panel.device.ptpExternalAutoEnabled
+                                ? "External Announce " +
+                                  (panel.device.ptpExternalCandidateReady ? "qualified" : "acquiring") +
+                                  " · " + panel.device.ptpExternalStableAnnounces + "/3 · real receiver LOCK required"
+                                : "Off · local PTP Source remains selected"
+                        font.family: panel.uiFont
+                        color: panel.theme.textSoft
+                        font.pixelSize: panel.theme.captionSize
+                        wrapMode: Text.WordWrap
+                    }
+                }
+                CalmButton {
+                    theme: panel.theme
+                    uiFont: panel.uiFont
+                    text: panel.device.ptpExternalAutoEnabled ? "Disable AUTO" : "Enable AUTO"
+                    enabled: panel.session && !panel.startPending &&
+                        !panel.device.ptpExternalSwitching &&
+                        !panel.session.updatingFirmware &&
+                        (panel.device.ptpExternalAutoEnabled ||
+                         (panel.device.ptpRunning && panel.device.ptpRole === "SOURCE"))
+                    onClicked: {
+                        if (!panel.session.requestPtpExternalAuto(!panel.device.ptpExternalAutoEnabled)
+                                && panel.controller)
+                            panel.controller.showMessage(
+                                "External PTP AUTO requires running SOURCE, matching VLAN/domain and verified firmware.", true)
+                    }
+                }
+                Label {
+                    text: "to RX " + panel.device.ptpExternalHandovers +
+                          " · local " + panel.device.ptpExternalReturns +
+                          " · fail " + panel.device.ptpExternalFailures
+                    font.family: panel.monoFont
+                    color: panel.theme.muted
+                    font.pixelSize: panel.theme.captionSize
+                }
+            }
+
             StudioDarkCheckBox {
                 id: benchGmCheck
                 Layout.fillWidth: true

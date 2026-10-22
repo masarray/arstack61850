@@ -83,6 +83,14 @@ class DeviceController : public QObject {
     Q_PROPERTY(QString ptpFollowUpSent READ ptpFollowUpSent NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpPdelayFrames READ ptpPdelayFrames NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpTxFailures READ ptpTxFailures NOTIFY ptpStateChanged)
+    Q_PROPERTY(bool ptpExternalAutoAvailable READ ptpExternalAutoAvailable NOTIFY ptpStateChanged)
+    Q_PROPERTY(bool ptpExternalAutoEnabled READ ptpExternalAutoEnabled NOTIFY ptpStateChanged)
+    Q_PROPERTY(bool ptpExternalCandidateReady READ ptpExternalCandidateReady NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpExternalStableAnnounces READ ptpExternalStableAnnounces NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpExternalHandovers READ ptpExternalHandovers NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpExternalReturns READ ptpExternalReturns NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpExternalFailures READ ptpExternalFailures NOTIFY ptpStateChanged)
+    Q_PROPERTY(bool ptpExternalSwitching READ ptpExternalSwitching NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpRole READ ptpRole NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpDiscipline READ ptpDiscipline NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpSource READ ptpSource NOTIFY ptpStateChanged)
@@ -177,6 +185,17 @@ public:
     [[nodiscard]] QString ptpFollowUpSent() const { return ptpFollowUpSent_; }
     [[nodiscard]] QString ptpPdelayFrames() const { return ptpPdelayFrames_; }
     [[nodiscard]] QString ptpTxFailures() const;
+    [[nodiscard]] bool ptpExternalAutoAvailable() const noexcept {
+        return deviceVerified_ && identity_.capabilities.contains(
+            QStringLiteral("PTP-EXTERNAL-AUTO-V1"), Qt::CaseInsensitive);
+    }
+    [[nodiscard]] bool ptpExternalAutoEnabled() const noexcept { return ptpExternalAutoEnabled_; }
+    [[nodiscard]] bool ptpExternalCandidateReady() const noexcept { return ptpExternalCandidateReady_; }
+    [[nodiscard]] QString ptpExternalStableAnnounces() const { return ptpExternalStableAnnounces_; }
+    [[nodiscard]] QString ptpExternalHandovers() const { return ptpExternalHandovers_; }
+    [[nodiscard]] QString ptpExternalReturns() const { return ptpExternalReturns_; }
+    [[nodiscard]] QString ptpExternalFailures() const { return ptpExternalFailures_; }
+    [[nodiscard]] bool ptpExternalSwitching() const noexcept { return ptpExternalSwitching_; }
     [[nodiscard]] QString ptpRole() const { return ptpRole_; }
     [[nodiscard]] QString ptpDiscipline() const { return ptpDiscipline_; }
     [[nodiscard]] QString ptpSource() const { return ptpSource_; }
@@ -254,6 +273,8 @@ public:
     void abandonProfileDeployment();
 
     bool sendPtpShow();
+    bool sendPtpExternalAutoShow();
+    bool setPtpExternalAuto(bool enabled);
     bool startPtp();
     bool startPtpConfigured(const QString& role, const QVariantMap& profile);
     bool stopPtp();
@@ -479,6 +500,13 @@ private:
     QString ptpFollowUpSent_{QStringLiteral("-")};
     QString ptpPdelayFrames_{QStringLiteral("-")};
     QString ptpTxFailures_{QStringLiteral("-")};
+    bool ptpExternalAutoEnabled_{false};
+    bool ptpExternalCandidateReady_{false};
+    bool ptpExternalSwitching_{false};
+    QString ptpExternalStableAnnounces_{QStringLiteral("0")};
+    QString ptpExternalHandovers_{QStringLiteral("0")};
+    QString ptpExternalReturns_{QStringLiteral("0")};
+    QString ptpExternalFailures_{QStringLiteral("0")};
     QString ptpRole_{QStringLiteral("SOURCE")};
     QString ptpDiscipline_{QStringLiteral("UNLOCKED")};
     QString ptpSource_{QStringLiteral("NONE")};

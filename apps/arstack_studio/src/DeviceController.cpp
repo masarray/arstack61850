@@ -80,6 +80,9 @@ const QRegularExpression kPtpEthernetExpression{
 const QRegularExpression kPtpConfigExpression{
     QStringLiteral("PTP config domain=(\\d+) transportSpecific=0x([0-9A-Fa-f]+) VLAN=(\\S+) Announce=(\\d+) ms Sync=(\\d+) ms Pdelay=(ON|OFF)"),
     QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kPtpExternalAutoExpression{
+    QStringLiteral("PTP AUTOSWITCH enabled=([01]) candidateFresh=([01]) stableAnnounces=(\\d+) switching=([01]) handovers=(\\d+) returns=(\\d+) failures=(\\d+)"),
+    QRegularExpression::CaseInsensitiveOption};
 const QRegularExpression kPtpRoleExpression{
     QStringLiteral("PTPROLE role=(SOURCE|RECEIVER|MONITOR) value=(\\d+) running=([01])"),
     QRegularExpression::CaseInsensitiveOption};
@@ -1320,6 +1323,23 @@ bool DeviceController::setCtSaturation(
 }
 
 bool DeviceController::sendPtpShow() { return sendCommand(QStringLiteral("PTP SHOW")); }
+bool DeviceController::sendPtpExternalAutoShow() {
+    return ptpExternalAutoAvailable() &&
+        sendQuietCommand(QStringLiteral("PTP AUTOSWITCH SHOW"));
+}
+bool DeviceController::setPtpExternalAuto(const bool enabled) {
+    if (!deviceVerified_ || !connected_ || !ioWorkerReady_ ||
+        !ptpExternalAutoAvailable() || ptpStarting() || profileDeploying_) {
+        setError(QStringLiteral("PTP external AUTO is not available in this verified firmware/session."));
+        return false;
+    }
+    if (enabled && (!ptpRunning_ || ptpRole_ != QStringLiteral("SOURCE"))) {
+        setError(QStringLiteral("Start and verify PTP SOURCE before enabling external AUTO switchover."));
+        return false;
+    }
+    // No optimistic GUI LOCK or switchover state. Next readback is firmware-owned.
+    return sendCommand(QStringLiteral("PTP AUTOSWITCH %1").arg(enabled ? 1 : 0));
+}
 bool DeviceController::startPtp() {
     // Legacy direct START must not bypass a guided START, in-flight STOP,
     // or an unverified cancellation. Both paths share this device authority.
@@ -2253,6 +2273,21 @@ void DeviceController::processLine(const QString& rawLine) {
         emit ptpStateChanged();
     }
 
+    match = kPtpExternalAutoExpression.match(line);
+    if (match.hasMatch()) {
+        ptpExternalAutoEnabled_ = match.captured(1) == QStringLiteral("1");
+        ptpExternalCandidateReady_ = match.captured(2) == QStringLiteral("1");
+        ptpExternalStableAnnounces_ = match.captured(3);
+        ptpExternalSwitching_ = match.captured(4) == QStringLiteral("1");
+        ptpExternalHandovers_ = match.captured(5);
+        ptpExternalReturns_ = match.captured(6);
+        ptpExternalFailures_ = match.captured(7);
+        emit ptpStateChanged();
+    }
+    if (line.contains(QStringLiteral("PTP AUTOSWITCH accepted"), Qt::CaseInsensitive)) {
+        static_cast<void>(sendPtpExternalAutoShow());
+    }
+
     match = kPtpRoleExpression.match(line);
     if (match.hasMatch()) {
         ptpAvailable_ = true;
@@ -2369,6 +2404,13 @@ void DeviceController::resetPtpState() {
     ptpFollowUpSent_ = QStringLiteral("-");
     ptpPdelayFrames_ = QStringLiteral("-");
     ptpTxFailures_ = QStringLiteral("-");
+    ptpExternalAutoEnabled_ = false;
+    ptpExternalCandidateReady_ = false;
+    ptpExternalSwitching_ = false;
+    ptpExternalStableAnnounces_ = QStringLiteral("0");
+    ptpExternalHandovers_ = QStringLiteral("0");
+    ptpExternalReturns_ = QStringLiteral("0");
+    ptpExternalFailures_ = QStringLiteral("0");
     ptpRole_ = QStringLiteral("SOURCE");
     ptpDiscipline_ = QStringLiteral("UNLOCKED");
     ptpSource_ = QStringLiteral("NONE");

@@ -455,7 +455,15 @@ bool SmartSessionController::requestPtpRefresh() {
         device_->scenarioApplying()) return false;
     const bool ptp = device_->sendPtpShow();
     const bool sync = device_->sendSmpSynchShow();
+    if (device_->ptpExternalAutoAvailable())
+        static_cast<void>(device_->sendPtpExternalAutoShow());
     return ptp && sync;
+}
+
+bool SmartSessionController::requestPtpExternalAuto(const bool enabled) {
+    if (!deviceControlAvailable() || device_ == nullptr || updateRequested_ ||
+        device_->ptpStarting() || device_->profileDeploying()) return false;
+    return device_->setPtpExternalAuto(enabled);
 }
 
 bool SmartSessionController::requestSyncDiagnostics() {
