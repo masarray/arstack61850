@@ -115,6 +115,20 @@ jobs:
           echo "ARSTACK_FIRMWARE_BUILD_ID=${ARSTACK_SOURCE_COMMIT:0:16}" >> "$GITHUB_ENV"
           echo "Exact firmware build identity pinned to ${ARSTACK_SOURCE_COMMIT:0:16}"
 
+      # Run the host-only SOURCE phase/MAC regression in the *same exact
+      # checkout* that produces the board image; Draft #286 otherwise skips
+      # the PTP Core workflow, making the physical 0<->2 fix untested.
+      - name: Regress internal GM microsecond sync without 0-2-0 flapping
+        if: ${{ inputs.phase_sync_preview == true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          g++ -std=c++20 -O2 -Wall -Wextra -Werror \\
+            -Iinclude tests/test_sv_tx_egress_evidence.cpp \\
+            -o /tmp/arstack_sv_egress_regression
+          /tmp/arstack_sv_egress_regression
+          echo 'PTP-SV SOURCE phase and MAC continuity regression: PASS'
+
       - name: Enable PTP-SV measured AUTO preview profile
         if: ${{ inputs.phase_sync_preview == true }}
         run: |
