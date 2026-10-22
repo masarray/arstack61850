@@ -413,7 +413,7 @@ def main() -> None:
             and 'sendCommand(QStringLiteral("START %1 %2 %3")' in device_src
             and "requestStartWithScenario(const QVariantMap& scenario)" in session_src,
             "physical START must follow exclusive staged SETs, commit ACK, and verified readback")
-    firmware_live = (ROOT / "embedded/esp32p4_smv_injector/main/live_control.cpp").read_text(encoding="utf-8")
+    firmware_live = (project_root / "embedded/esp32p4_smv_injector/main/live_control.cpp").read_text(encoding="utf-8")
     require("function applyLiveScenario()" in main_qml
             and "requestApplyLiveScenario(snapshot)" in main_qml
             and "function onLiveScenarioApplied()" in main_qml
