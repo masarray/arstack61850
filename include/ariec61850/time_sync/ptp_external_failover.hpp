@@ -42,6 +42,7 @@ public:
         last_announce_ms_ = 0U;
         // Fail closed on a fresh enable and after explicit operator disable.
         last_switch_ms_ = now_ms;
+        has_switched_ = false;
         receiver_locked_once_ = false;
         receiver_lost_since_ms_ = 0U;
     }
@@ -98,7 +99,8 @@ public:
             now_ms < last_switch_ms_) return PtpExternalHandover::none;
         if (source_worker_active) {
             if (qualified_candidate(now_ms) &&
-                now_ms - last_switch_ms_ >= retry_cooldown_ms) {
+                (!has_switched_ ||
+                 now_ms - last_switch_ms_ >= retry_cooldown_ms)) {
                 return PtpExternalHandover::enter_receiver;
             }
             return PtpExternalHandover::none;
@@ -125,11 +127,13 @@ public:
     // Only call after the new physical worker actually started.
     void switched_to_receiver(const std::uint64_t now_ms) noexcept {
         last_switch_ms_ = now_ms;
+        has_switched_ = true;
         receiver_lost_since_ms_ = 0U;
         receiver_locked_once_ = false;
     }
     void switched_to_source(const std::uint64_t now_ms) noexcept {
         last_switch_ms_ = now_ms;
+        has_switched_ = true;
         receiver_lost_since_ms_ = 0U;
         receiver_locked_once_ = false;
         stable_announces_ = 0U;
@@ -149,6 +153,7 @@ private:
     std::uint32_t stable_announces_{};
     std::uint64_t last_announce_ms_{};
     std::uint64_t last_switch_ms_{};
+    bool has_switched_{};
     std::uint64_t receiver_lost_since_ms_{};
     bool receiver_locked_once_{};
 };
