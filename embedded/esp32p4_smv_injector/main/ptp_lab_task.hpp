@@ -50,6 +50,9 @@ typedef struct ar_ptp_lab_config_t {
     // The PC supplies an approximate UTC epoch, not a physical GPS input.
     bool bench_global_gm;
     uint32_t bench_utc_epoch_seconds;
+    // Millisecond fraction of the same UTC second. Sending seconds alone
+    // previously introduced up to 999 ms of avoidable clock seed error.
+    uint16_t bench_utc_epoch_millisecond;
     int64_t bench_epoch_received_mono_us;
 
     // P2 measured discipline thresholds. These are used only in TIME_RECEIVER.
