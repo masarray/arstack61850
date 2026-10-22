@@ -175,6 +175,7 @@ Item {
                 theme: hub.theme
                 controller: hub.controller
                 device: hub.device
+                profiles: hub.profiles
                 session: hub.session
                 uiFont: hub.uiFont
                 monoFont: hub.monoFont
