@@ -838,6 +838,7 @@ bool DeviceController::submitScenario(const QVariantMap& scenario, const bool st
     // START is dispatched later, after firmware ACK and independent bank readback.
     scenarioStage_ = ScenarioStage::awaiting_commit;
     scenarioLiveUpdate_ = !starting;
+    scenarioPendingFrequencyHz_ = hz;
     scenarioToken_ = token;
     scenarioHash_ = hash;
     scenarioBoot_ = identity_.bootId;
@@ -851,7 +852,6 @@ bool DeviceController::submitScenario(const QVariantMap& scenario, const bool st
         .arg(sessionGeneration_).arg(scenarioBoot_).arg(scenarioToken_)
         .arg(scenarioProfileGeneration_));
     emit scenarioStateChanged();
-    signalFrequencyHz_ = hz;
     return true;
 }
 bool DeviceController::stop() {
@@ -1836,6 +1836,7 @@ void DeviceController::resetScenarioStart() noexcept {
     scenarioTimer_.stop();
     scenarioStage_ = ScenarioStage::idle;
     scenarioLiveUpdate_ = false;
+    scenarioPendingFrequencyHz_ = 0.0;
     scenarioToken_ = 0;
     scenarioHash_ = 0;
     scenarioSessionGeneration_ = 0;
@@ -2016,6 +2017,7 @@ void DeviceController::processLine(const QString& rawLine) {
                 .arg(scenarioSignalGeneration_)
                 .arg(scenarioLiveUpdate_ ? QStringLiteral("LIVE") : QStringLiteral("START")));
             if (scenarioLiveUpdate_) {
+                signalFrequencyHz_ = scenarioPendingFrequencyHz_;
                 // Commit already atomically replaced one signal bank; no
                 // START, STOP, phase reset or smpCnt reset is permitted.
                 emit liveScenarioApplied();
@@ -2056,6 +2058,7 @@ void DeviceController::processLine(const QString& rawLine) {
             svStopReason_.clear();
             emit svStopReasonChanged();
         }
+        signalFrequencyHz_ = scenarioPendingFrequencyHz_;
         // Publish verified RUNNING before clearing the pending START phase.
         // Otherwise QML can briefly see neither RUNNING nor STARTING and
         // bounce the button back to START during a successful ACK handoff.
