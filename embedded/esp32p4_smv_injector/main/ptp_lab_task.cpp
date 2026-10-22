@@ -402,12 +402,36 @@ void disable_hardware_ptp(const esp_eth_handle_t eth_handle) noexcept {
 // PTP/TAI seconds. A plausible RTC is not an accuracy/traceability guarantee.
 [[nodiscard]] bool seed_hardware_clock(
     const esp_eth_handle_t eth_handle,
-    const std::int16_t configured_tai_utc_offset) noexcept {
+    const ar_ptp_lab_config_t& config) noexcept {
     eth_mac_time_t initial_time{};
-    const std::time_t system_time = std::time(nullptr);
+    const std::int64_t now_mono_us = esp_timer_get_time();
+    const bool bench = config.bench_global_gm;
+    if (bench && (config.bench_utc_epoch_seconds < 1577836800U ||
+                  config.bench_epoch_received_mono_us <= 0LL ||
+                  now_mono_us < config.bench_epoch_received_mono_us ||
+                  now_mono_us - config.bench_epoch_received_mono_us > 30000000LL)) {
+        ESP_LOGE(kTag, "BENCH GM epoch missing or expired before EMAC clock start");
+        return false;
+    }
+    // The serial CONFIG event is the timebase seed: interpolate elapsed
+    // monotonic time before switching on the MAC. Every subsequent PTP
+    // and SV sample uses the SAME hardware PTP epoch, not the PC clock.
+    const std::uint64_t elapsed_us = bench
+        ? static_cast<std::uint64_t>(
+              now_mono_us - config.bench_epoch_received_mono_us)
+        : 0ULL;
+    const std::int64_t utc_seconds = bench
+        ? static_cast<std::int64_t>(config.bench_utc_epoch_seconds) +
+              static_cast<std::int64_t>(elapsed_us / 1000000ULL)
+        : static_cast<std::int64_t>(std::time(nullptr));
     const auto tai_seconds = ar::iec61850::time_sync::try_seed_ptp_tai_seconds(
-        static_cast<std::int64_t>(system_time), configured_tai_utc_offset);
-    if (tai_seconds.has_value()) initial_time.seconds = *tai_seconds;
+        utc_seconds, config.current_utc_offset);
+    if (tai_seconds.has_value()) {
+        initial_time.seconds = *tai_seconds;
+        initial_time.nanoseconds = bench
+            ? static_cast<std::uint32_t>((elapsed_us % 1000000ULL) * 1000ULL)
+            : 0U;
+    }
     const auto result = esp_eth_ioctl(
         eth_handle, static_cast<esp_eth_io_cmd_t>(ETH_MAC_ESP_CMD_S_PTP_TIME),
         &initial_time);
