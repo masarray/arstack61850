@@ -526,7 +526,8 @@ void print_state() noexcept {
     const auto stop_reason = g_last_sv_stop_cause.load(std::memory_order_acquire);
     ESP_LOGI(kTag,
              "SVLIFE state=%s stop_cause=%s stop_seq=%lu stop_uptime_ms=%lu "
-             "stop_hb_age_ms=%lu hb_age_ms=%lu hb_seen=%u lease_ms=%lu watchdog=%u",
+             "stop_hb_age_ms=%lu hb_age_ms=%lu hb_seen=%u lease_ms=%lu watchdog=%u "
+             "hb_max_gap_ms=%lu hb_slow_events=%lu",
              g_running.load(std::memory_order_acquire) ? "RUNNING" : "STOPPED",
              sv_stop_cause_name(stop_reason),
              static_cast<unsigned long>(g_sv_stop_seq.load(std::memory_order_acquire)),
@@ -535,7 +536,11 @@ void print_state() noexcept {
              static_cast<unsigned long>(hb_seen ? now_ms - hb_last : 0U),
              hb_seen ? 1U : 0U,
              static_cast<unsigned long>(kControlLeaseTimeoutMs),
-             g_control_watchdog_ready.load(std::memory_order_acquire) ? 1U : 0U);
+             g_control_watchdog_ready.load(std::memory_order_acquire) ? 1U : 0U,
+             static_cast<unsigned long>(
+                 g_max_heartbeat_gap_ms.load(std::memory_order_acquire)),
+             static_cast<unsigned long>(
+                 g_slow_heartbeat_events.load(std::memory_order_acquire)));
     for (std::size_t index = 0U; index < state.channels.size(); ++index) {
         const auto& channel = state.channels[index];
         ESP_LOGI(kTag,
