@@ -156,6 +156,27 @@ void check_priority_tagged_power_profile_wire() {
     REQUIRE(!PtpPublisherRuntime::validate_options(options, error));
 }
 
+void check_simulated_global_gm_ptp_wire_properties() {
+    auto options = make_source();
+    options.clock_class = 6U;
+    options.clock_accuracy = PtpClockAccuracy::within_1_us;
+    options.time_source = PtpTimeSource::gps;
+    options.time_properties = PtpTimeProperties{true, true, true, true};
+    PtpPublisherRuntime gm{options};
+    REQUIRE(gm.start());
+    const auto packet = gm.prepare_announce(PtpTimestamp{1780000037U, 0U});
+    REQUIRE(packet.has_value());
+    PtpFrame frame;
+    REQUIRE(PtpCodec::try_parse_ethernet_frame(packet->ethernet_frame, frame));
+    REQUIRE(frame.announce.has_value());
+    REQUIRE(frame.announce->clock_class == 6U);
+    REQUIRE(frame.announce->clock_accuracy == PtpClockAccuracy::within_1_us);
+    REQUIRE(frame.announce->time_source == PtpTimeSource::gps);
+    REQUIRE(frame.announce->grandmaster_identity == options.clock_identity);
+    REQUIRE((frame.header.flags & 0x003CU) == 0x003CU);
+    gm.stop();
+}
+
 void check_ptp_wire_sequence_and_identity() {
     auto options = make_source();
     constexpr std::uint8_t domain = 93U; // supported alternate network domain
@@ -334,6 +355,7 @@ int main() {
         check_source_readiness_requires_fresh_wire_proof();
         check_source_heartbeat_freshness_and_time_provenance();
         check_ptp_wire_sequence_and_identity();
+        check_simulated_global_gm_ptp_wire_properties();
         check_priority_tagged_power_profile_wire();
         check_vlan_encoding_remains_configurable();
         check_tai_seed_and_truthful_time_properties();
