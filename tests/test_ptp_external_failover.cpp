@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ariec61850/time_sync/ptp_external_failover.hpp"
+#include "ariec61850/time_sync/ptp_external_detection.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
@@ -14,7 +15,61 @@ static PtpExternalCandidate candidate(const std::uint8_t suffix=1U) {
     result.steps_removed=0U;
     return result;
 }
+static void inspect_frame_admission() {
+    PtpExternalListenProfile expected{};
+    expected.domain=0U;
+    expected.transport_specific=1U;
+    expected.vlan_present=true;
+    expected.vlan_id=100U;
+    expected.local_clock={2U,0U,0U,255U,254U,0U,0U,9U};
+    PtpFrame frame{};
+    frame.header.message_type=PtpMessageType::announce;
+    frame.header.domain_number=0U;
+    frame.header.transport_specific=1U;
+    frame.header.source_port_identity={candidate().port_clock,1U};
+    frame.vlan_id=100U;
+    frame.announce.emplace();
+    frame.announce->clock_class=6U;
+    frame.announce->grandmaster_identity=candidate().grandmaster_clock;
+    CHECK(ptp_external_candidate_from_frame(frame,expected).has_value());
+    auto mismatch=frame;
+    mismatch.header.domain_number=1U;
+    CHECK(!ptp_external_candidate_from_frame(mismatch,expected).has_value());
+    mismatch=frame;
+    mismatch.header.transport_specific=0U;
+    CHECK(!ptp_external_candidate_from_frame(mismatch,expected).has_value());
+    mismatch=frame;
+    mismatch.vlan_id=200U;
+    CHECK(!ptp_external_candidate_from_frame(mismatch,expected).has_value());
+    mismatch=frame;
+    mismatch.vlan_id.reset();
+    CHECK(!ptp_external_candidate_from_frame(mismatch,expected).has_value());
+    mismatch=frame;
+    mismatch.outer_vlan_id=100U;
+    CHECK(!ptp_external_candidate_from_frame(mismatch,expected).has_value());
+    mismatch=frame;
+    mismatch.header.source_port_identity.clock_identity=expected.local_clock;
+    CHECK(!ptp_external_candidate_from_frame(mismatch,expected).has_value());
+    mismatch=frame;
+    mismatch.header.message_type=PtpMessageType::sync;
+    CHECK(!ptp_external_candidate_from_frame(mismatch,expected).has_value());
+    mismatch=frame;
+    mismatch.announce.reset();
+    CHECK(!ptp_external_candidate_from_frame(mismatch,expected).has_value());
+    mismatch=frame;
+    mismatch.announce->clock_class=255U;
+    CHECK(!ptp_external_candidate_from_frame(mismatch,expected).has_value());
+    mismatch=frame;
+    mismatch.header.source_port_identity.port_number=0U;
+    CHECK(!ptp_external_candidate_from_frame(mismatch,expected).has_value());
+    expected.vlan_present=false;
+    CHECK(!ptp_external_candidate_from_frame(frame,expected).has_value());
+    frame.vlan_id.reset();
+    CHECK(ptp_external_candidate_from_frame(frame,expected).has_value());
+}
+
 int main() {
+    inspect_frame_admission();
     using H=PtpExternalHandover;
     PtpExternalFailoverPolicy g;
     CHECK(g.evaluate(true,false,false,1000U)==H::none);

@@ -3,6 +3,7 @@
 #include "ptp_lab_task.hpp"
 
 #include "ariec61850/time_sync/ptp.hpp"
+#include "ariec61850/time_sync/ptp_external_detection.hpp"
 #include "ariec61850/time_sync/ptp_power_profile.hpp"
 #include "ariec61850/time_sync/ptp_runtime.hpp"
 #include "ariec61850/time_sync/ptp_tai_source.hpp"
@@ -638,19 +639,18 @@ esp_err_t ptp_input_info(
                 ? frame.vlan_id.has_value() &&
                   *frame.vlan_id == context->rx_vlan_id
                 : !frame.vlan_id.has_value())) {
-            if (frame.header.message_type == PtpMessageType::announce &&
-                frame.announce.has_value() &&
-                frame.header.source_port_identity.clock_identity !=
-                    context->rx_own_clock) {
-                // Observation is only candidate selection. Actual receiver
-                // Pdelay, hardware timestamps and discipline LOCK are
-                // required AFTER the exclusive EMAC break-before-make.
+            const ar::iec61850::time_sync::PtpExternalListenProfile listener{
+                context->rx_domain, context->rx_transport_specific,
+                context->rx_vlan_enabled, context->rx_vlan_id,
+                context->rx_own_clock};
+            if (const auto observed =
+                    ar::iec61850::time_sync::ptp_external_candidate_from_frame(
+                        frame, listener)) {
                 ar_ptp_lab_observe_external_announce(
-                    frame.header.source_port_identity.clock_identity.data(),
-                    frame.announce->grandmaster_identity.data(),
-                    frame.header.source_port_identity.port_number,
-                    frame.announce->clock_class,
-                    frame.announce->steps_removed,
+                    observed->port_clock.data(),
+                    observed->grandmaster_clock.data(),
+                    observed->port_number, observed->clock_class,
+                    observed->steps_removed,
                     static_cast<std::uint64_t>(esp_timer_get_time() / 1000LL));
             }
             if (context->rx_respond_to_peer_delay &&
