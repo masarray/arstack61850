@@ -49,7 +49,7 @@ Special attention:
 - **#130/#127** source Browser Signal Catalog and regression tests missing from PTP tip.
 - **#75** 14 missing source paths in full IED Simulator live/server interop profile, including four CI profile workflows and runtime code; highest independent-lane preservation priority.
 - **#166** PTP M3E preflight script and dedicated workflow missing; compare test behavior with current PTP receiver/phase implementation before discarding.
-- **#138** old GUI/IEDScout handoff missing; retain original source link as historical document.
+- **#138** old GUI/IED Scout handoff missing; retain original source link as historical document.
 - Additional independent paths / exact SHAs are in the three group JSON files. **Do not merge these independent branches into the PTP branch just to make path counts drop.**
 
 ## 5. Primary product path / what exists and what is still missing
