@@ -2,6 +2,8 @@
 
 **Do not merge main, close PRs, delete branches, or replay old commits blindly.** All GitHub comparisons use current #286 branch as head and original PR SHA as base at audit. `source-only` means commits outside integration ancestry; not necessarily absent behavior. Comparisons may become stale as #286 advances.
 
+> **2026-10-22 preservation update:** [PR #286](https://github.com/masarray/arstack61850/pull/286) is a DRAFT PR against `main`; last software-code SHA `b6c13a5e87fae89b9258834cefae2cec8be5f1c4` has 11 success CI runs. #251 precommit generation guard was restored in `49877470e34bf2883ec60e7c8dd0b758a910c51c`. #248 original multi-reader fix was restored with correct 4-bank sentinel + threaded stress regression in `b6c13a5e87fae89b9258834cefae2cec8be5f1c4`. **#253 running atomic live 4I4V remains MISSING/NEEDS_PORT**; do not confuse existing serialized live per-channel SET with one atomic transaction. #249 Main.qml after-dirty `!pendingApply` frequency path still requires review. Source branch SHA below retained for provenance; not closed. [One-page status](./ARSTACK_INTEGRATION_START_HERE.md).
+
 GitHub initial inventory: 64 open PRs, 26 real open issues, 27 direct base-chain PRs, 21 alternate PTP/SV/Studio branches, 16 independent branches. All original full commit SHAs retained below.
 
 | PR | Retention group | Original exact HEAD | Integration ahead | Source-only commits | Outcome | Verification action |

@@ -8,6 +8,14 @@
 
 **Next-thread entrypoint:** [Detailed per-PR divergence and preservation map](./INTEGRATION_SIDE_BRANCH_TRIAGE_2026-10-22.md). It contains exact GitHub commit comparisons for all 37 PRs outside the main chain, plus the 21 high-risk side-branch audit tasks. Treat both ledgers as a linked pair.
 
+> **CURRENT MERGE-READINESS UPDATE — 2026-10-22 (after initial snapshot):**
+> - [PR #286](https://github.com/masarray/arstack61850/pull/286) is now the SINGLE **Draft** integration PR targeting `main`; it is NOT MERGED and not hardware-qualified. Main unchanged at `7f6b946cab8565f37c31b460463576a0bb1e3fc5`.
+> - Exact **last software-code SHA** `b6c13a5e87fae89b9258834cefae2cec8be5f1c4`: 11 reported PR workflow runs **SUCCESS** (including C++ CI Linux gcc/clang/Windows MSVC, PTP Core, ESP32-P4 PTP and SV, Studio Qt, IED Simulator Qt, Security, Embedded Profile, Interoperability Server, Naming, Routing). CI does NOT certify board or installer. This README/docs-only commit occurs AFTER this code SHA.
+> - #251 stale-generation overwrite guard restored by `49877470e34bf2883ec60e7c8dd0b758a910c51c`; #248 4-bank multi-reader protection + concurrency stress test restored/corrected by `b6c13a5e87fae89b9258834cefae2cec8be5f1c4`. #250 STOP already has reserved fail-closed priority in current Studio source. **Only source-level progress and CI verified, not field acceptance.**
+> - **BLOCKING** #253 original atomic live 4I4V CFG while RUNNING not ported to current firmware and Studio. Current Main.qml contains post-`markScenarioDirty()` `!pendingApply` live-frequency/quality guards which cannot become true in the same edit path (source-level #249 regression risk); do not mark live setpoint contract PASS.
+> - **BLOCKING** relay SIPROTEC Pdelay/GM lock/real smpSynch and 4I4V FAT; user acceptance; true auto-failover ESP32/GUI integration; exact-SHA Smart Inno setup EXE verification and Windows native lifecycle on the integration tip; `main` GitHub protection/ruleset (currently absent). 16 independent Workbench/Simulator PRs still need their OWN integration lanes; no source branches/PRs may be discarded.
+> - **Start new thread at** [ARSTACK_INTEGRATION_START_HERE.md](./ARSTACK_INTEGRATION_START_HERE.md), then these 64-PR and 37-divergent-PR ledgers. Old SHA counts below are historical snapshot, not live recomputation.
+
 ## Verified structure (GitHub API, 2026-10-22)
 
 - Open PRs: **64**, including **12 draft / 52 ready**; open *issues excluding PRs*: **26**.
