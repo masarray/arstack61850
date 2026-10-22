@@ -1350,8 +1350,7 @@ QString DeviceController::ptpConfigCommand(const QVariantMap& profile) {
         !parse("vlanPriority", 7U, pcp) ||
         !parse("announceIntervalMs", 10000U, announce) ||
         !parse("syncIntervalMs", 5000U, sync) ||
-        announce < 100U || sync < 20U ||
-        false) {
+        announce < 100U || sync < 20U) {
         return {};
     }
     return QStringLiteral("PTP CONFIG %1 %2 %3 %4 %5 %6 %7 %8")
