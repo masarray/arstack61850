@@ -31,6 +31,8 @@ jobs:
   windows-preview:
     needs: firmware
     if: ${{ !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository }}
+    permissions:
+      contents: write  # Direct immutable engineering prerelease, never stable
     runs-on: windows-2022
     timeout-minutes: 40
     env:
@@ -379,6 +381,75 @@ jobs:
           }
           Remove-Item $note -Force
           Write-Host 'Actual v0.1.1 NSIS to Inno + owned cleanup + data preservation: PASS'
+
+      - name: Publish verified direct Smart Inno EXE (exact SHA engineering prerelease)
+        if: github.event.pull_request.head.ref == 'feat/sv-ed21-rate-metadata-20261022'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sha = $env:PREVIEW_SHA.ToLowerInvariant()
+          if ($sha -cnotmatch '^[0-9a-f]{40}
+        uses: actions/upload-artifact@v4
+        with:
+          name: arstack-studio-native-preview-win-x64-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: |
+            dist/ARStack-Studio-Preview-win-x64-setup.exe
+            dist/ARStack-Studio-Preview-win-x64-portable.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
+) { throw 'Invalid immutable preview source SHA' }
+          $checked = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($checked -cne $sha) { throw "GUI/firmware head drift $checked != $sha" }
+          $short = $sha.Substring(0,12)
+          $tag = "ptp-sv-bench-$short"
+          $installer = Join-Path $PWD 'dist\ARStack-Studio-Preview-win-x64-setup.exe'
+          $manifestFile = Join-Path $PWD 'firmware-package\firmware-manifest.json'
+          if (-not (Test-Path -LiteralPath $installer -PathType Leaf) -or
+              -not (Test-Path -LiteralPath $manifestFile -PathType Leaf)) {
+            throw 'Missing tested Inno executable or matched firmware manifest'
+          }
+          $manifest = Get-Content -Raw -LiteralPath $manifestFile | ConvertFrom-Json
+          $imageFile = Join-Path $PWD ("firmware-package\" + $manifest.image)
+          if ($manifest.sourceCommit -cne $sha -or
+              -not (Test-Path -LiteralPath $imageFile -PathType Leaf) -or
+              (Get-FileHash -LiteralPath $imageFile -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                $manifest.sha256.ToLowerInvariant()) {
+            throw 'Exact firmware source or binary digest mismatch before publication'
+          }
+          $filename = "ARStack-Studio-0.1.1-ptp-sv-bench.$short-win-x64-setup.exe"
+          $direct = Join-Path $PWD ("dist\" + $filename)
+          Copy-Item -LiteralPath $installer -Destination $direct -Force
+          $sha256 = (Get-FileHash -LiteralPath $direct -Algorithm SHA256).Hash.ToLowerInvariant()
+          $sums = Join-Path $PWD 'dist\SHA256-INNO.txt'
+          "$sha256  $filename" | Set-Content -LiteralPath $sums -Encoding ascii
+          $notes = Join-Path $PWD 'dist\ptp-sv-preview-notes.md'
+          @(
+            'ARStack ESP32-P4 PTP/SV engineering bench prerelease — NOT stable / NOT relay-FAT qualified.'
+            "Exact GUI and firmware source SHA: $sha"
+            "Firmware binary SHA256: $($manifest.sha256)"
+            "Windows Inno setup SHA256: $sha256"
+            'Built and smoke-tested together in one Windows + ESP32 CI workflow.'
+            'Physical SIPROTEC GM LOCKED, SMV ACCEPTED and 1-hour soak are not asserted.'
+            'Never install on a production substation from this bench preview.'
+          ) | Set-Content -LiteralPath $notes -Encoding utf8
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) { throw "Immutable bench tag already exists: $tag" }
+          gh release create $tag $direct $sums --repo $env:GITHUB_REPOSITORY --target $sha --title "ARStack PTP/SV bench $short" --notes-file $notes --prerelease --latest=false
+          if ($LASTEXITCODE -ne 0) { throw 'Direct Inno prerelease creation failed' }
+          $published = gh release view $tag --repo $env:GITHUB_REPOSITORY --json tagName,isPrerelease,assets | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $published.isPrerelease -or
+              $published.tagName -cne $tag -or
+              -not @($published.assets | Where-Object { $_.name -ceq $filename }).Count) {
+            throw 'Published direct .exe cannot be verified'
+          }
+          $url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag/$filename"
+          "Verified direct Smart Inno EXE: $url" | Out-File $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "Setup SHA256: $sha256" | Out-File $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          Write-Host "DIRECT_INNO_EXE=$url"
+          Write-Host "DIRECT_INNO_SHA256=$sha256"
 
       - name: Upload GUI-only Windows preview packages
         uses: actions/upload-artifact@v4
