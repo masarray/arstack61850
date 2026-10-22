@@ -134,14 +134,14 @@ config AR_PTP_PORT_NUMBER
     depends on AR_PTP_LAB_TX
 
 config AR_PTP_VLAN
-    bool "Tag PTP traffic with IEEE 802.1Q VLAN"
-    default n
+    bool "Tag PTP traffic with IEEE 802.1Q VLAN (Power Profile PCP4/VID0)"
+    default y
     depends on AR_PTP_LAB_TX
 
 config AR_PTP_VLAN_ID
-    int "PTP VLAN ID"
-    range 1 4094
-    default 100
+    int "PTP VLAN ID (0 means 802.1Q priority tag)"
+    range 0 4094
+    default 0
     depends on AR_PTP_LAB_TX && AR_PTP_VLAN
 
 config AR_PTP_VLAN_PRIORITY
