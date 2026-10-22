@@ -5,6 +5,10 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'apps/arstack_studio/**'
+      # Firmware-only timing fixes MUST create a matched ESP32 image and
+      # Windows Inno installer; do not leave users on stale embedded firmware.
+      - 'embedded/esp32p4_smv_injector/**'
+      - 'include/ariec61850/time_sync/**'
       - '.github/workflows/arstack-studio-native-preview.yml'
 
 permissions:
