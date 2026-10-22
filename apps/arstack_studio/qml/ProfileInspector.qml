@@ -261,6 +261,80 @@ SurfacePanel {
                 }
             }
 
+            // Applies to the canonical SV binary profile, not just the UI.
+            // A fresh profile deployment is required before SV START.
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 5
+                Label {
+                    text: "SV VLAN · Ethernet output"
+                    color: panel.theme.text
+                    font.family: panel.uiFont
+                    font.pixelSize: panel.theme.captionSize
+                    font.weight: Font.DemiBold
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 5
+                    StudioDarkCheckBox {
+                        id: svVlanEnabled
+                        theme: panel.theme
+                        uiFont: panel.uiFont
+                        text: "802.1Q"
+                        checked: Boolean(panel.profile.vlanPresent)
+                        enabled: panel.session && panel.session.engineeringEditable
+                    }
+                    Label { text: "VID"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 10 }
+                    NumericField {
+                        id: svVlanVid
+                        Layout.preferredWidth: 66
+                        compact: true
+                        theme: panel.theme
+                        monoFont: panel.monoFont
+                        text: String(panel.profile.vlanId === undefined ? 0 : panel.profile.vlanId)
+                        validator: IntValidator { bottom: 0; top: 4094 }
+                        enabled: svVlanEnabled.checked && panel.session && panel.session.engineeringEditable
+                    }
+                    Label { text: "PCP"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 10 }
+                    NumericField {
+                        id: svVlanPcp
+                        Layout.preferredWidth: 45
+                        compact: true
+                        theme: panel.theme
+                        monoFont: panel.monoFont
+                        text: String(panel.profile.vlanPriority === undefined ? 4 : panel.profile.vlanPriority)
+                        validator: IntValidator { bottom: 0; top: 7 }
+                        enabled: svVlanEnabled.checked && panel.session && panel.session.engineeringEditable
+                    }
+                    CalmButton {
+                        theme: panel.theme
+                        uiFont: panel.uiFont
+                        text: "Apply"
+                        enabled: panel.session && panel.session.engineeringEditable
+                        onClicked: {
+                            if (!svVlanVid.acceptableInput || !svVlanPcp.acceptableInput
+                                    || svVlanVid.text.length === 0 || svVlanPcp.text.length === 0
+                                    || !panel.profiles.configureSelectedVlan(
+                                        svVlanEnabled.checked, Number(svVlanVid.text),
+                                        Number(svVlanPcp.text))) {
+                                panel.controller.showMessage("SV VLAN must have VID 0-4094 and PCP 0-7.", true)
+                                return
+                            }
+                            panel.controller.profileDirty = true
+                            panel.controller.showMessage("SV VLAN updated in canonical profile. Deploy before START.", false)
+                        }
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: "VID 0 = priority-tagged (PCP only). A change requires Deploy Profile."
+                    color: panel.theme.muted
+                    font.family: panel.uiFont
+                    font.pixelSize: panel.theme.captionSize
+                    wrapMode: Text.WordWrap
+                }
+            }
+
             ColumnLayout {
                 visible: panel.issueItems.length > 0
                 Layout.fillWidth: true
