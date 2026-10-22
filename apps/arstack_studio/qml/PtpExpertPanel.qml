@@ -43,7 +43,8 @@ SurfacePanel {
             syncIntervalMs: role === "SOURCE" ? 1000 : Number(syncField.text),
             // IEC/IEEE 61850-9-3 SOURCE always requires Pdelay capability.
             // An optional bench-only mode must never be silently substituted.
-            respondToPeerDelay: role === "SOURCE" ? true : pdelayCheck.checked
+            respondToPeerDelay: role === "SOURCE" ? true : pdelayCheck.checked,
+            benchGlobalGm: role === "SOURCE" && benchGmCheck.checked
         }
     }
 
@@ -283,6 +284,21 @@ SurfacePanel {
                         }
                     }
                 }
+            }
+
+            StudioDarkCheckBox {
+                id: benchGmCheck
+                Layout.fillWidth: true
+                visible: modeCombo.currentIndex === 0
+                theme: panel.theme
+                uiFont: panel.uiFont
+                checked: true
+                text: "Relay test bench · Simulated GNSS PTP Grandmaster + measured SV phase lock"
+                enabled: panel.session && panel.device.ptpAvailable &&
+                         !panel.device.ptpRunning && !panel.startPending &&
+                         !panel.session.updatingFirmware
+                ToolTip.visible: hovered
+                ToolTip.text: "Isolated relay test network only. No GPS required; PTP and SV share ESP32-P4 EMAC timebase. smpSynch=2 only after real phase/MAC evidence."
             }
 
             // Simulation is intentionally simple: auto or explicit SV flag.
