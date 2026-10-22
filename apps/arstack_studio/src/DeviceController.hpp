@@ -452,6 +452,7 @@ private:
     QTimer scenarioTimer_;
     ScenarioStage scenarioStage_{ScenarioStage::idle};
     bool scenarioLiveUpdate_{false};
+    double scenarioPendingFrequencyHz_{0.0};
     quint64 scenarioToken_{0};
     quint64 scenarioHash_{0};
     quint64 scenarioSessionGeneration_{0};
