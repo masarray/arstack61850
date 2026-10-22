@@ -8,15 +8,19 @@
 #include "ariec61850/time_sync/ptp_canonical_authority.hpp"
 #include "ariec61850/time_sync/ptp_emac_role_ownership.hpp"
 #include "ariec61850/time_sync/ptp_control_cancellation.hpp"
+#include "ariec61850/time_sync/ptp_external_failover.hpp"
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
+#include "freertos/task.h"
 #include "sdkconfig.h"
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <array>
 #include <cstdint>
 #include <cstdio>
 
@@ -43,6 +47,21 @@ ar_ptp_lab_config_t g_facade_override{};
 bool g_facade_override_valid = false;
 std::atomic_bool g_receiver_stop_pending{false};
 ar::iec61850::time_sync::PtpControlCancellationGate g_role_control;
+
+// The source RX callback never changes PTP ownership. One low-priority
+// supervisor performs role transitions through the existing stop/config/start
+// cancellation gate. Its policy is deterministic and requires actual incoming
+// Ethernet Announce plus independently measured receiver LOCK.
+portMUX_TYPE g_external_mux = portMUX_INITIALIZER_UNLOCKED;
+ar::iec61850::time_sync::PtpExternalFailoverPolicy g_external_policy;
+std::atomic_bool g_external_enabled{false};
+std::atomic_bool g_external_switching{false};
+std::atomic_bool g_external_worker_created{false};
+TaskHandle_t g_external_worker_task{};
+ar_ptp_lab_config_t g_external_source_config{};
+std::uint64_t g_external_handovers{};
+std::uint64_t g_external_returns{};
+std::uint64_t g_external_failures{};
 
 void stop_active_ptp_roles() noexcept;
 
@@ -243,6 +262,11 @@ extern "C" void ar_ptp_lab_get_default_config(ar_ptp_lab_config_t* config) {
 
 extern "C" bool ar_ptp_lab_configure(const ar_ptp_lab_config_t* config) {
     if (config == nullptr) return false;
+    // While auto failover owns mode transitions, external/manual config
+    // mutations would race the worker and can splice two EMAC clocks.
+    if (ar::esp32p4::smv::g_external_enabled.load(std::memory_order_acquire) &&
+        xTaskGetCurrentTaskHandle() != ar::esp32p4::smv::g_external_worker_task)
+        return false;
     ar::esp32p4::smv::RoleControlClaim transaction{};
     if (!transaction.held || !ar::esp32p4::smv::emac_role_free() ||
         !ar::esp32p4::smv::valid_public_config(*config)) return false;
@@ -287,6 +311,10 @@ extern "C" bool ar_ptp_lab_try_start(const esp_eth_handle_t eth_handle) {
     // STOP can race with the bounded blocking START: it must win the
     // cancellation handshake before START may report READY to its caller.
     const bool uncancelled = transaction.finish();
+    if (started && uncancelled && config.role == AR_PTP_ROLE_LAB_SOURCE) {
+        ar::esp32p4::smv::g_external_source_config = config;
+        ar::esp32p4::smv::g_external_eth = eth_handle;
+    }
     return started && uncancelled;
 }
 
@@ -295,6 +323,12 @@ extern "C" void ar_ptp_lab_start(const esp_eth_handle_t eth_handle) {
 }
 
 extern "C" void ar_ptp_lab_stop(void) {
+    // Human STOP always wins over background acquisition/return.
+    ar::esp32p4::smv::g_external_enabled.store(false, std::memory_order_release);
+    portENTER_CRITICAL(&ar::esp32p4::smv::g_external_mux);
+    ar::esp32p4::smv::g_external_policy.set_enabled(
+        false, static_cast<std::uint64_t>(esp_timer_get_time() / 1000LL));
+    portEXIT_CRITICAL(&ar::esp32p4::smv::g_external_mux);
     // A PTP stop must revoke both live SV timing claims BEFORE asynchronous
     // task teardown can complete, including external-GM receiver claims.
     ar::esp32p4::smv::smp_synch_set_source_local_qualified(
@@ -396,4 +430,206 @@ extern "C" bool ar_ptp_lab_get_status(ar_ptp_lab_status_t* const status) {
     const bool result = ar::esp32p4::smv::collect_ptp_status(*status);
     if (result) ar::esp32p4::smv::log_p2_status(*status);
     return result;
+}
+
+
+// ---- Operator-opt-in external GM automatic SOURCE <-> RECEIVER handoff ----
+// Never call operator ar_ptp_lab_stop() here: it deliberately disables AUTO.
+// STOP must still use the *same* cancellation/EMAC cleanup mechanism.
+namespace ar::esp32p4::smv {
+namespace {
+
+[[nodiscard]] std::uint64_t external_now_ms() noexcept {
+    return static_cast<std::uint64_t>(esp_timer_get_time() / 1000LL);
+}
+
+void handoff_stop() noexcept {
+    smp_synch_set_source_local_qualified(false, SvSyncLossReason::ptp_stop);
+    smp_synch_set_receiver_timeline_qualified(false, SvSyncLossReason::ptp_stop);
+    if (g_role_control.request_stop_and_try_acquire()) {
+        static_cast<void>(g_role_control.finish(stop_active_ptp_roles));
+    }
+}
+
+[[nodiscard]] bool await_exclusive_emac() noexcept {
+    // SOURCE stop is bounded 500ms; receiver asynchronous cleanup must also
+    // complete before configuring/reseeding the MAC IEEE1588 hardware clock.
+    for (unsigned i = 0U; i < 200U; ++i) {
+        if (!g_external_enabled.load(std::memory_order_acquire)) return false;
+        if (emac_role_free()) return true;
+        vTaskDelay(pdMS_TO_TICKS(25));
+    }
+    ESP_LOGE(kTag, "PTP AUTO handoff aborted: previous EMAC worker did not stop");
+    return false;
+}
+
+// The Ethernet handle is deliberately saved only on successful opt-in
+// against an already running physical PTP SOURCE.
+esp_eth_handle_t g_external_eth{};
+
+void external_worker(void*) {
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(250));
+        if (!g_external_enabled.load(std::memory_order_acquire)) continue;
+        const bool source = ar_ptp_source_runtime_active();
+        const ar_ptp_lab_config_t profile = selected_config();
+        // Include unexpected RECEIVER worker exit as an unlock observation:
+        // fallback may not depend on the old task still being alive.
+        const bool receiver = !source &&
+            profile.role == AR_PTP_ROLE_TIME_RECEIVER;
+        bool locked = false;
+        if (receiver && ptp_receiver_runtime_active()) {
+            ar_ptp_lab_status_t status{};
+            if (ptp_receiver_get_status(status)) {
+                locked = status.is_running && status.source_selected &&
+                    status.timing_authority_clock_usable &&
+                    status.discipline_state == AR_PTP_DISCIPLINE_LOCKED;
+            }
+        }
+        ar::iec61850::time_sync::PtpExternalHandover request{};
+        const auto now = external_now_ms();
+        portENTER_CRITICAL(&g_external_mux);
+        request = g_external_policy.evaluate(source, receiver, locked, now);
+        portEXIT_CRITICAL(&g_external_mux);
+        if (request == ar::iec61850::time_sync::PtpExternalHandover::none)
+            continue;
+        if (g_external_switching.exchange(true, std::memory_order_acq_rel))
+            continue;
+        const auto next_role =
+            request == ar::iec61850::time_sync::PtpExternalHandover::enter_receiver
+                ? AR_PTP_ROLE_TIME_RECEIVER : AR_PTP_ROLE_LAB_SOURCE;
+        ESP_LOGW(kTag, "PTP AUTO physical handoff requested: %s -> %s",
+                 source ? "SOURCE" : "RECEIVER", role_name(next_role));
+        bool success = false;
+        if (g_external_enabled.load(std::memory_order_acquire)) {
+            // Explicitly break PTP ownership and clear SV sync claims.
+            ar_ptp_lab_config_t target{};
+            portENTER_CRITICAL(&g_external_mux);
+            target = g_external_source_config;
+            portEXIT_CRITICAL(&g_external_mux);
+            target.role = next_role;
+            if (next_role == AR_PTP_ROLE_TIME_RECEIVER) {
+                target.bench_global_gm = false;
+                target.bench_utc_epoch_seconds = 0U;
+                target.bench_utc_epoch_millisecond = 0U;
+                target.bench_epoch_received_mono_us = 0LL;
+            }
+            handoff_stop();
+            if (await_exclusive_emac() && ar_ptp_lab_configure(&target) &&
+                g_external_enabled.load(std::memory_order_acquire)) {
+                success = ar_ptp_lab_try_start(g_external_eth);
+            }
+        }
+        portENTER_CRITICAL(&g_external_mux);
+        if (success) {
+            if (next_role == AR_PTP_ROLE_TIME_RECEIVER) {
+                ++g_external_handovers;
+                g_external_policy.switched_to_receiver(external_now_ms());
+            } else {
+                ++g_external_returns;
+                g_external_policy.switched_to_source(external_now_ms());
+            }
+        } else {
+            ++g_external_failures;
+            // Failed receiver START must not strand an idling EMAC without
+            // attempting to restore its previous, operator-authorized SOURCE.
+            // This fallback is executed below after releasing the mux.
+            g_external_policy.switched_to_source(external_now_ms());
+        }
+        portEXIT_CRITICAL(&g_external_mux);
+        if (!success && next_role == AR_PTP_ROLE_TIME_RECEIVER &&
+            g_external_enabled.load(std::memory_order_acquire)) {
+            ar_ptp_lab_config_t original{};
+            portENTER_CRITICAL(&g_external_mux);
+            original = g_external_source_config;
+            portEXIT_CRITICAL(&g_external_mux);
+            handoff_stop();
+            if (await_exclusive_emac() && ar_ptp_lab_configure(&original) &&
+                g_external_enabled.load(std::memory_order_acquire)) {
+                const bool restored = ar_ptp_lab_try_start(g_external_eth);
+                ESP_LOGW(kTag, "PTP AUTO receiver failed; restore SOURCE=%u",
+                         restored ? 1U : 0U);
+            } else {
+                ESP_LOGE(kTag, "PTP AUTO rollback blocked by EMAC ownership/config");
+            }
+        }
+        ESP_LOGI(kTag, "PTP AUTO handoff result=%s success=%u (receiver LOCK independent)",
+                 role_name(next_role), success ? 1U : 0U);
+        g_external_switching.store(false, std::memory_order_release);
+    }
+}
+
+} // namespace
+} // namespace ar::esp32p4::smv
+
+extern "C" void ar_ptp_lab_observe_external_announce(
+    const uint8_t source_clock[8], const uint8_t grandmaster_clock[8],
+    const uint16_t source_port, const uint8_t clock_class,
+    const uint16_t steps_removed, const uint64_t received_ms) {
+    if (source_clock == nullptr || grandmaster_clock == nullptr ||
+        !ar::esp32p4::smv::g_external_enabled.load(std::memory_order_acquire))
+        return;
+    ar::iec61850::time_sync::PtpExternalCandidate candidate{};
+    std::copy_n(source_clock, 8U, candidate.port_clock.begin());
+    std::copy_n(grandmaster_clock, 8U, candidate.grandmaster_clock.begin());
+    candidate.port_number = source_port;
+    candidate.clock_class = clock_class;
+    candidate.steps_removed = steps_removed;
+    portENTER_CRITICAL(&ar::esp32p4::smv::g_external_mux);
+    ar::esp32p4::smv::g_external_policy.observe_announce(candidate, received_ms);
+    portEXIT_CRITICAL(&ar::esp32p4::smv::g_external_mux);
+}
+
+extern "C" bool ar_ptp_lab_set_external_failover(const bool enabled) {
+    using namespace ar::esp32p4::smv;
+    if (!enabled) {
+        g_external_enabled.store(false, std::memory_order_release);
+        portENTER_CRITICAL(&g_external_mux);
+        g_external_policy.set_enabled(false, external_now_ms());
+        portEXIT_CRITICAL(&g_external_mux);
+        return true;
+    }
+    const auto current = selected_config();
+    if (current.role != AR_PTP_ROLE_LAB_SOURCE ||
+        !ar_ptp_source_runtime_active() || !ar_ptp_source_is_running() ||
+        g_role_control.stop_requested() ||
+        g_external_switching.load(std::memory_order_acquire)) return false;
+    if (!g_external_worker_created.load(std::memory_order_acquire)) {
+        bool expected = false;
+        if (g_external_worker_created.compare_exchange_strong(
+                expected, true, std::memory_order_acq_rel)) {
+            if (xTaskCreatePinnedToCore(
+                    &external_worker, "ar_ptp_auto", 6144, nullptr, 2,
+                    &g_external_worker_task, 1) != pdPASS) {
+                g_external_worker_created.store(false, std::memory_order_release);
+                return false;
+            }
+        }
+    }
+    if (g_external_worker_task == nullptr) return false;
+    portENTER_CRITICAL(&g_external_mux);
+    g_external_source_config = current;
+    g_external_policy.set_enabled(true, external_now_ms());
+    portEXIT_CRITICAL(&g_external_mux);
+    g_external_enabled.store(true, std::memory_order_release);
+    return true;
+}
+
+extern "C" bool ar_ptp_lab_get_external_failover_status(
+    ar_ptp_external_failover_status_t* status) {
+    if (status == nullptr) return false;
+    *status = {};
+    portENTER_CRITICAL(&ar::esp32p4::smv::g_external_mux);
+    const auto& policy = ar::esp32p4::smv::g_external_policy;
+    status->enabled = policy.enabled();
+    status->candidate_fresh = policy.qualified_candidate(
+        static_cast<std::uint64_t>(esp_timer_get_time() / 1000LL));
+    status->stable_announces = policy.stable_announces();
+    status->handovers = ar::esp32p4::smv::g_external_handovers;
+    status->returns_to_source = ar::esp32p4::smv::g_external_returns;
+    status->failures = ar::esp32p4::smv::g_external_failures;
+    portEXIT_CRITICAL(&ar::esp32p4::smv::g_external_mux);
+    status->switching = ar::esp32p4::smv::g_external_switching.load(
+        std::memory_order_acquire);
+    return true;
 }
