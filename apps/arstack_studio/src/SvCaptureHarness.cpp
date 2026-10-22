@@ -79,6 +79,52 @@ public:
     static bool run() {
         QTemporaryDir dir;
         if (!dir.isValid()) return false;
+        // Regression: actual 2026-10-22 24-byte PCAP despite old cached
+        // 3999 FPS. Capture must block while publisher STOPPED, not silently
+        // make a successful-looking 30s measurement.
+        const QVariantMap stale{{QStringLiteral("running"), false},
+            {QStringLiteral("device_fps"), QStringLiteral("3999")},
+            {QStringLiteral("ptp_running"), true},
+            {QStringLiteral("firmware_build_id"), QStringLiteral("b0e80ad0c01de348")}};
+        if (SvCaptureController::captureStartBlocker(stale).isEmpty() ||
+            SvCaptureController::captureStartBlocker(QVariantMap{}).isEmpty() ||
+            !SvCaptureController::captureStartBlocker(
+                {{QStringLiteral("running"), true}}).isEmpty()) {
+            qCritical() << "Regression: STOPPED SV was admitted as live capture";
+            return false;
+        }
+        SvCaptureController failedCapture;
+        const QString emptyPcap = dir.filePath("empty.pcap");
+        const QString invalidJson = dir.filePath("empty_report.json");
+        QByteArray emptyHeader = QByteArray::fromHex("d4c3b2a1");
+        emptyHeader.append(QByteArray::fromHex("02000400"));
+        le32(emptyHeader, 0);
+        le32(emptyHeader, 0);
+        le32(emptyHeader, 65535);
+        le32(emptyHeader, 1);
+        QFile empty(emptyPcap);
+        if (!empty.open(QIODevice::WriteOnly) ||
+            empty.write(emptyHeader) != emptyHeader.size()) return false;
+        empty.close();
+        failedCapture.activePcap_ = emptyPcap;
+        failedCapture.activeJson_ = invalidJson;
+        failedCapture.activeAdapter_ = QStringLiteral("EXPLICIT_TEST_NIC");
+        failedCapture.activeStudioTelemetry_ = stale;
+        failedCapture.activeSecondsRequested_ = 30;
+        failedCapture.onCaptureFinished(0, QProcess::NormalExit);
+        QFile invalidFile(invalidJson);
+        if (!invalidFile.open(QIODevice::ReadOnly)) return false;
+        const auto invalidReport =
+            QJsonDocument::fromJson(invalidFile.readAll()).object();
+        if (invalidReport.value("status") != QStringLiteral("INVALID_CAPTURE") ||
+            invalidReport.value("sv_frames") != 0 ||
+            !invalidReport.value("error").toString().contains("Zero Ethernet") ||
+            invalidReport.value("studio_telemetry_snapshot_UNVERIFIED").toObject()
+                .value("running") != false ||
+            !failedCapture.status().contains(QStringLiteral("INVALID"))) {
+            qCritical() << "Regression: empty capture failure report missing";
+            return false;
+        }
         const QString pcap = dir.filePath("fixture.pcap");
         const QString csv = dir.filePath("samples.csv");
         const QString seconds = dir.filePath("seconds.csv");
