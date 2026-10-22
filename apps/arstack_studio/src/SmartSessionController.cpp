@@ -1005,6 +1005,7 @@ QString SmartSessionController::diagnosticsText() const {
         add(QStringLiteral("PTP discipline reported"), device_->ptpDiscipline());
         add(QStringLiteral("SMPSYNCH value reported"), device_->smpSynchValue());
         add(QStringLiteral("Device last error"), device_->lastError());
+        add(QStringLiteral("Persistent Studio event log (UTC)"), device_->diagnosticLogPath());
         rows << QStringLiteral("--- Device serial log, last 12000 chars ---")
              << device_->logText().right(12000);
     }

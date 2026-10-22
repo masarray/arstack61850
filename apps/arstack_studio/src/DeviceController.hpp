@@ -57,6 +57,7 @@ class DeviceController : public QObject {
     Q_PROPERTY(QString portName READ portName NOTIFY connectedChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(QString logText READ logText NOTIFY logTextChanged)
+    Q_PROPERTY(QString diagnosticLogPath READ diagnosticLogPath CONSTANT)
     Q_PROPERTY(QString syncDiagnostics READ syncDiagnostics NOTIFY syncDiagnosticsChanged)
     Q_PROPERTY(QString syncFlightLatest READ syncFlightLatest NOTIFY syncDiagnosticsChanged)
     Q_PROPERTY(QString fps READ fps NOTIFY telemetryChanged)
@@ -150,6 +151,7 @@ public:
     [[nodiscard]] QString portName() const;
     [[nodiscard]] QString lastError() const;
     [[nodiscard]] QString logText() const;
+    [[nodiscard]] QString diagnosticLogPath() const { return diagnosticLogPath_; }
     [[nodiscard]] QString syncDiagnostics() const { return syncDiagnostics_; }
     [[nodiscard]] QString syncFlightLatest() const { return syncFlightLatest_; }
     [[nodiscard]] QString fps() const;
@@ -295,6 +297,8 @@ public:
     // Diagnostics are presentation-safe: clearing the local log does not touch
     // serial ownership, output state, firmware or the device protocol.
     Q_INVOKABLE void clearLog();
+    Q_INVOKABLE bool openDiagnosticLogFolder() const;
+    Q_INVOKABLE void recordUiDiagnostic(const QString& message);
 
 signals:
     void portsChanged();
@@ -414,6 +418,7 @@ private:
     DeviceIdentity identity_;
     QString lastError_;
     QString logText_;
+    QString diagnosticLogPath_;
     QString syncDiagnostics_{QStringLiteral("Select Inspect SV lock to read on-board causes.")};
     QString syncFlightLatest_;
     QString fps_{QStringLiteral("—")};

@@ -453,7 +453,7 @@ void DeviceIoWorker::queuePrioritySvStop() {
 }
 
 void DeviceIoWorker::queuePriorityHeartbeat() {
-    // The 2.5-second firmware control lease must not be starved by a saturated
+    // The 6-second firmware control lease must not be starved by a saturated
     // 64-command queue or an exclusive profile CFG transaction. A single
     // coalesced keepalive uses the same QSerialPort owner and normal pacing;
     // it never bypasses a pending safety STOP or interrupts an active write.

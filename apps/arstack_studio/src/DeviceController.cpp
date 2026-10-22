@@ -10,7 +10,14 @@
 #include "ariec61850/ethernet/ethernet.hpp"
 #include "ariec61850/sampled_values/compiled_device_profile.hpp"
 
+#include <QCoreApplication>
 #include <QDateTime>
+#include <QDesktopServices>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QStandardPaths>
+#include <QUrl>
 #include <QDebug>
 #include <QMetaObject>
 #include <QRegularExpression>
@@ -114,6 +121,14 @@ const QRegularExpression kSmpSynchExpression{
 } // namespace
 
 DeviceController::DeviceController(QObject* parent) : QObject(parent) {
+    // A fresh per-process log lives on disk even if Studio closes or crashes.
+    // Never use the install directory (often read-only on Windows).
+    QString dataRoot = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (dataRoot.isEmpty()) dataRoot = QDir::tempPath() + QStringLiteral("/ARStackStudio");
+    diagnosticLogPath_ = QDir(dataRoot).filePath(
+        QStringLiteral("Diagnostics/ARStack-Studio-%1-P%2.log")
+            .arg(QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz")))
+            .arg(QCoreApplication::applicationPid()));
     // Serial status/log bursts must not force QML to rebind a growing text
     // document for every row. Flush at <=10 Hz; parsing/ACKs are immediate.
     logUpdateTimer_.setSingleShot(true);
@@ -381,7 +396,11 @@ void DeviceController::connectWorkerSignals() {
     connect(ioWorker_, &DeviceIoWorker::commandTransmitted, this,
             [this](const quint64 generation, const QString& command, const bool quiet) {
         if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
-        if (!quiet) appendLog(QStringLiteral("→"), command);
+        // HEARTBEAT is a firmware output lease, not disposable chatter:
+        // preserve *transmitted* times to diagnose a 6-second watchdog STOP.
+        if (command == QStringLiteral("HEARTBEAT"))
+            appendLog(QStringLiteral("HB-TX"), QStringLiteral("HEARTBEAT host drained serial bytes"));
+        else if (!quiet) appendLog(QStringLiteral("→"), command);
     });
 
     connect(ioWorker_, &DeviceIoWorker::commandRejected, this,
@@ -1871,6 +1890,24 @@ void DeviceController::failScenarioStart(const QString& message) {
 
 void DeviceController::setRunning(const bool value) {
     if (running_ == value) return;
+    appendLog(QStringLiteral("SVTX"), QStringLiteral(
+        "RUNNING_EDGE previous=%1 next=%2 operator_stop=%3 session=%4 boot=%5 stop_reason=%6 last_cause=%7")
+        .arg(running_ ? 1 : 0).arg(value ? 1 : 0)
+        .arg(operatorStopPending_ ? 1 : 0).arg(sessionGeneration_)
+        .arg(identity_.bootId).arg(svStopReason_).arg(svLastStopCause_));
+    if (running_ && !value && !operatorStopPending_ &&
+        connected_ && deviceVerified_ && scenarioStage_ == ScenarioStage::idle) {
+        // A single forensic readback, queued *after* the observed STOP, gives
+        // SVLIFE stop_seq/heartbeat age from the actual board. Do not issue
+        // an automatic STOP or START and do not hide the transition in UI.
+        const auto generation = sessionGeneration_;
+        const auto boot = identity_.bootId;
+        QTimer::singleShot(0, this, [this, generation, boot] {
+            if (connected_ && deviceVerified_ && sessionGeneration_ == generation &&
+                identity_.bootId == boot && !running_)
+                static_cast<void>(sendQuietCommand(QStringLiteral("SHOW")));
+        });
+    }
     if (!value && running_ && !operatorStopPending_ && svStopReason_.isEmpty()) {
         // Do not silently turn a physical STOP into a green READY state.
         // SHOW/SVLIFE will replace this interim state with the board cause.
@@ -1937,14 +1974,41 @@ void DeviceController::setError(const QString& message) {
 }
 
 void DeviceController::appendLog(const QString& direction, const QString& line) {
-    // Correlate operator START/STOP and firmware ACKs to UTC PCAP/flight
-    // evidence at millisecond resolution; remains a bounded UI-side log.
+    // Host UTC is for correlation with PCAP timestamps; not PTP time proof.
     const QString stamp = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
-    logText_.append(QStringLiteral("[%1] %2 %3\n").arg(stamp, direction, line));
+    const QString record = QStringLiteral("[%1] %2 %3\n").arg(stamp, direction, line);
+    logText_.append(record);
     constexpr qsizetype kMaxChars = 60000;
     constexpr qsizetype kKeepChars = 48000;
     if (logText_.size() > kMaxChars) logText_ = logText_.right(kKeepChars);
+
+    // Bound disk growth while preserving the previous segment across rollover.
+    // Clear in the GUI intentionally does not erase forensic data on disk.
+    const QFileInfo info(diagnosticLogPath_);
+    QDir directory = info.absoluteDir();
+    if (directory.exists() || directory.mkpath(QStringLiteral("."))) {
+        constexpr qint64 kMaxLogBytes = 8LL * 1024 * 1024;
+        if (info.exists() && info.size() >= kMaxLogBytes) {
+            const QString previous = diagnosticLogPath_ + QStringLiteral(".previous");
+            static_cast<void>(QFile::remove(previous));
+            static_cast<void>(QFile::rename(diagnosticLogPath_, previous));
+        }
+        QFile file(diagnosticLogPath_);
+        if (file.open(QIODevice::WriteOnly | QIODevice::Append))
+            static_cast<void>(file.write(record.toUtf8()));
+    }
     if (!logUpdateTimer_.isActive()) logUpdateTimer_.start();
+}
+
+bool DeviceController::openDiagnosticLogFolder() const {
+    const QFileInfo info(diagnosticLogPath_);
+    if (!info.absoluteDir().exists()) return false;
+    return QDesktopServices::openUrl(QUrl::fromLocalFile(info.absolutePath()));
+}
+
+void DeviceController::recordUiDiagnostic(const QString& message) {
+    if (!message.trimmed().isEmpty())
+        appendLog(QStringLiteral("UI-ERROR"), message.left(1800));
 }
 
 void DeviceController::processLine(const QString& rawLine) {

@@ -367,6 +367,8 @@ ApplicationWindow {
             messageTimer.interval = critical ? 4200 : 2300
             messageTimer.restart()
         }
+        if (critical && !duplicate && device)
+            device.recordUiDiagnostic(String(message) + " | displayed=" + userMessage)
         statusHistoryModel.append({
             timeText: new Date().toLocaleTimeString(Qt.locale(), "HH:mm:ss"),
             messageText: message,
@@ -802,7 +804,24 @@ ApplicationWindow {
                         }
                     }
                 }
+                CalmButton {
+                    theme: studioTheme
+                    uiFont: root.uiFont
+                    text: "Open log folder"
+                    onClicked: {
+                        if (!device.openDiagnosticLogFolder())
+                            root.showMessage("Diagnostic log folder is not accessible.", true)
+                    }
+                }
                 CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "Clear"; onClicked: device.clearLog() }
+            }
+            Label {
+                Layout.fillWidth: true
+                text: "Auto-saved system log: " + device.diagnosticLogPath
+                color: studioTheme.muted
+                font.family: root.monoFont
+                font.pixelSize: 9
+                wrapMode: Text.WrapAnywhere
             }
             ScrollView {
                 Layout.fillWidth: true
