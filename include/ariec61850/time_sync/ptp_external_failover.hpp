@@ -54,7 +54,7 @@ public:
     // Reject bad clocks and flapping sources before considering a handoff.
     void observe_announce(const PtpExternalCandidate& candidate,
                           const std::uint64_t now_ms) noexcept {
-        if (!enabled_ || candidate.port_number == 0U ||
+        if (candidate.port_number == 0U ||
             candidate.clock_class == 255U || candidate.steps_removed >= 255U ||
             empty_identity(candidate.port_clock) ||
             empty_identity(candidate.grandmaster_clock)) return;
