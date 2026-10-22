@@ -205,6 +205,12 @@ public:
     static constexpr std::uint32_t kMaxEvidenceAgeEpochs = kEvidenceStride + 1U;
     static constexpr std::uint32_t kRequiredMeasuredPairs = 2U;
 
+    // SOURCE and SV use the same local IEEE1588 EMAC clock. One *measured*
+    // coherent MAC TX pair is enough to prove that the canonical publisher
+    // uses that clock; the independent phase observer still must report
+    // continuous software tracking. Keep two pairs for external RECEIVER.
+    static constexpr std::uint32_t kSourceRequiredMeasuredPairs = 1U;
+
     constexpr void reset() noexcept {
         matched_pairs_ = 0U;
         session_ = 0U;
@@ -252,6 +258,24 @@ public:
         return matched_pairs_;
     }
 
+    [[nodiscard]] constexpr bool qualified_source_fast(
+        const std::uint32_t session,
+        const std::uint32_t fault_generation,
+        const std::uint32_t source_generation,
+        const std::uint32_t current_epoch,
+        const bool software_tracking,
+        const std::uint32_t software_phase_bound_us) const noexcept {
+        return matched_pairs_ >= kSourceRequiredMeasuredPairs &&
+            software_tracking &&
+            software_phase_bound_us <= kMaxSoftwarePhaseBoundUs &&
+            session != 0U && source_generation != 0U &&
+            session == session_ &&
+            fault_generation == fault_generation_ &&
+            source_generation == source_generation_ &&
+            current_epoch >= last_epoch_ &&
+            current_epoch - last_epoch_ <= kMaxEvidenceAgeEpochs;
+    }
+
     [[nodiscard]] constexpr bool qualified(
         const std::uint32_t session,
         const std::uint32_t fault_generation,
@@ -275,6 +299,58 @@ private:
     std::uint32_t fault_generation_{};
     std::uint32_t source_generation_{};
     std::uint32_t last_epoch_{};
+};
+
+// Fast internal SOURCE lock: no external servo or network clock is involved.
+// Require *two consecutive* measured phase/PTP epochs AND at least one
+// genuine coherent MAC descriptor pair from that same source/session.
+// This cannot be enabled by a UI smpSynch=2 override; it takes REAL
+// independent phase and canonical Ethernet TX evidence.
+class SvSourceSelfClockAcquisition final {
+public:
+    static constexpr std::uint32_t kRequiredQualifiedLiveEpochs = 2U;
+
+    constexpr void reset() noexcept {
+        clean_epochs_ = 0U;
+        session_ = 0U;
+        faults_ = 0U;
+        source_ = 0U;
+        epoch_ = 0U;
+    }
+
+    [[nodiscard]] constexpr bool observe(
+        const bool phase_qualified, const bool canonical_mac_qualified,
+        const std::uint32_t session, const std::uint32_t faults,
+        const std::uint32_t source, const std::uint32_t epoch) noexcept {
+        if (!phase_qualified || !canonical_mac_qualified ||
+            session == 0U || source == 0U || epoch == 0U) {
+            reset();
+            return false;
+        }
+        if (clean_epochs_ != 0U &&
+            (session != session_ || faults != faults_ ||
+             source != source_ || epoch - epoch_ != 1U)) {
+            reset();
+            return false; // Never promote on a discontinuity epoch.
+        }
+        session_ = session;
+        faults_ = faults;
+        source_ = source;
+        epoch_ = epoch;
+        if (clean_epochs_ < kRequiredQualifiedLiveEpochs) ++clean_epochs_;
+        return clean_epochs_ == kRequiredQualifiedLiveEpochs;
+    }
+
+    [[nodiscard]] constexpr std::uint32_t clean_epochs() const noexcept {
+        return clean_epochs_;
+    }
+
+private:
+    std::uint32_t clean_epochs_{};
+    std::uint32_t session_{};
+    std::uint32_t faults_{};
+    std::uint32_t source_{};
+    std::uint32_t epoch_{};
 };
 
 // Fail-closed LOCAL entry filter. A COLD start demands ten consecutive
