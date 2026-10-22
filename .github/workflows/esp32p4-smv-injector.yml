@@ -123,9 +123,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          g++ -std=c++20 -O2 -Wall -Wextra -Werror \\
-            -Iinclude tests/test_sv_tx_egress_evidence.cpp \\
-            -o /tmp/arstack_sv_egress_regression
+          g++ -std=c++20 -O2 -Wall -Wextra -Werror -Iinclude tests/test_sv_tx_egress_evidence.cpp -o /tmp/arstack_sv_egress_regression
           /tmp/arstack_sv_egress_regression
           echo 'PTP-SV SOURCE phase and MAC continuity regression: PASS'
 
