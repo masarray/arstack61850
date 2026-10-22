@@ -405,13 +405,23 @@ void handle_ptp_command(char* save) noexcept {
             ar_ptp_external_failover_status_t status{};
             if (ar_ptp_lab_get_external_failover_status(&status)) {
                 ESP_LOGI(kTag,
-                    "PTP AUTOSWITCH enabled=%u candidateFresh=%u stableAnnounces=%lu switching=%u handovers=%llu returns=%llu failures=%llu",
+                    "PTP AUTOSWITCH enabled=%u candidateFresh=%u stableAnnounces=%lu switching=%u handovers=%llu returns=%llu failures=%llu candidateGM=%02X%02X%02X%02X%02X%02X%02X%02X/%u class=%u",
                     status.enabled ? 1U : 0U, status.candidate_fresh ? 1U : 0U,
                     static_cast<unsigned long>(status.stable_announces),
                     status.switching ? 1U : 0U,
                     static_cast<unsigned long long>(status.handovers),
                     static_cast<unsigned long long>(status.returns_to_source),
-                    static_cast<unsigned long long>(status.failures));
+                    static_cast<unsigned long long>(status.failures),
+                    static_cast<unsigned>(status.candidate_gm_identity[0]),
+                    static_cast<unsigned>(status.candidate_gm_identity[1]),
+                    static_cast<unsigned>(status.candidate_gm_identity[2]),
+                    static_cast<unsigned>(status.candidate_gm_identity[3]),
+                    static_cast<unsigned>(status.candidate_gm_identity[4]),
+                    static_cast<unsigned>(status.candidate_gm_identity[5]),
+                    static_cast<unsigned>(status.candidate_gm_identity[6]),
+                    static_cast<unsigned>(status.candidate_gm_identity[7]),
+                    static_cast<unsigned>(status.candidate_source_port),
+                    static_cast<unsigned>(status.candidate_clock_class));
             }
             return;
         }

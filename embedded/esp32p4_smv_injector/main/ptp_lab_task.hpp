@@ -152,6 +152,9 @@ typedef struct ar_ptp_external_failover_status_t {
     bool enabled;
     bool candidate_fresh;
     uint32_t stable_announces;
+    uint8_t candidate_gm_identity[8];
+    uint16_t candidate_source_port;
+    uint8_t candidate_clock_class;
     uint64_t handovers;
     uint64_t returns_to_source;
     uint64_t failures;

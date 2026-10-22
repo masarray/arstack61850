@@ -306,7 +306,11 @@ SurfacePanel {
                             : panel.device.ptpExternalAutoEnabled
                                 ? "External Announce " +
                                   (panel.device.ptpExternalCandidateReady ? "qualified" : "acquiring") +
-                                  " · " + panel.device.ptpExternalStableAnnounces + "/3 · real receiver LOCK required"
+                                  " · " + panel.device.ptpExternalStableAnnounces + "/3" +
+                                  (panel.device.ptpExternalCandidateReady
+                                     ? " · GM " + panel.device.ptpExternalCandidateGm +
+                                       " class " + panel.device.ptpExternalCandidateClass
+                                     : "") + " · receiver LOCK must be measured"
                                 : (panel.device.ptpRole === "RECEIVER"
                                     ? "Off · Receiver stays active until Stop PTP"
                                     : "Off · local SOURCE selected") + " · " +

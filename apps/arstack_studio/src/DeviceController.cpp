@@ -81,7 +81,7 @@ const QRegularExpression kPtpConfigExpression{
     QStringLiteral("PTP config domain=(\\d+) transportSpecific=0x([0-9A-Fa-f]+) VLAN=(\\S+) Announce=(\\d+) ms Sync=(\\d+) ms Pdelay=(ON|OFF)"),
     QRegularExpression::CaseInsensitiveOption};
 const QRegularExpression kPtpExternalAutoExpression{
-    QStringLiteral("PTP AUTOSWITCH enabled=([01]) candidateFresh=([01]) stableAnnounces=(\\d+) switching=([01]) handovers=(\\d+) returns=(\\d+) failures=(\\d+)"),
+    QStringLiteral("PTP AUTOSWITCH enabled=([01]) candidateFresh=([01]) stableAnnounces=(\\d+) switching=([01]) handovers=(\\d+) returns=(\\d+) failures=(\\d+) candidateGM=([A-Fa-f0-9]{16})/(\\d+) class=(\\d+)"),
     QRegularExpression::CaseInsensitiveOption};
 const QRegularExpression kPtpRoleExpression{
     QStringLiteral("PTPROLE role=(SOURCE|RECEIVER|MONITOR) value=(\\d+) running=([01])"),
@@ -2282,6 +2282,10 @@ void DeviceController::processLine(const QString& rawLine) {
         ptpExternalHandovers_ = match.captured(5);
         ptpExternalReturns_ = match.captured(6);
         ptpExternalFailures_ = match.captured(7);
+        const QString gm = match.captured(8).toUpper();
+        ptpExternalCandidateGm_ = gm == QStringLiteral("0000000000000000")
+            ? QStringLiteral("NONE") : gm + QStringLiteral("/") + match.captured(9);
+        ptpExternalCandidateClass_ = match.captured(10);
         emit ptpStateChanged();
     }
     if (line.contains(QStringLiteral("PTP AUTOSWITCH accepted"), Qt::CaseInsensitive)) {
@@ -2408,6 +2412,8 @@ void DeviceController::resetPtpState() {
     ptpExternalCandidateReady_ = false;
     ptpExternalSwitching_ = false;
     ptpExternalStableAnnounces_ = QStringLiteral("0");
+    ptpExternalCandidateGm_ = QStringLiteral("NONE");
+    ptpExternalCandidateClass_ = QStringLiteral("-");
     ptpExternalHandovers_ = QStringLiteral("0");
     ptpExternalReturns_ = QStringLiteral("0");
     ptpExternalFailures_ = QStringLiteral("0");

@@ -87,6 +87,8 @@ class DeviceController : public QObject {
     Q_PROPERTY(bool ptpExternalAutoEnabled READ ptpExternalAutoEnabled NOTIFY ptpStateChanged)
     Q_PROPERTY(bool ptpExternalCandidateReady READ ptpExternalCandidateReady NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpExternalStableAnnounces READ ptpExternalStableAnnounces NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpExternalCandidateGm READ ptpExternalCandidateGm NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpExternalCandidateClass READ ptpExternalCandidateClass NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpExternalHandovers READ ptpExternalHandovers NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpExternalReturns READ ptpExternalReturns NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpExternalFailures READ ptpExternalFailures NOTIFY ptpStateChanged)
@@ -192,6 +194,8 @@ public:
     [[nodiscard]] bool ptpExternalAutoEnabled() const noexcept { return ptpExternalAutoEnabled_; }
     [[nodiscard]] bool ptpExternalCandidateReady() const noexcept { return ptpExternalCandidateReady_; }
     [[nodiscard]] QString ptpExternalStableAnnounces() const { return ptpExternalStableAnnounces_; }
+    [[nodiscard]] QString ptpExternalCandidateGm() const { return ptpExternalCandidateGm_; }
+    [[nodiscard]] QString ptpExternalCandidateClass() const { return ptpExternalCandidateClass_; }
     [[nodiscard]] QString ptpExternalHandovers() const { return ptpExternalHandovers_; }
     [[nodiscard]] QString ptpExternalReturns() const { return ptpExternalReturns_; }
     [[nodiscard]] QString ptpExternalFailures() const { return ptpExternalFailures_; }
@@ -504,6 +508,8 @@ private:
     bool ptpExternalCandidateReady_{false};
     bool ptpExternalSwitching_{false};
     QString ptpExternalStableAnnounces_{QStringLiteral("0")};
+    QString ptpExternalCandidateGm_{QStringLiteral("NONE")};
+    QString ptpExternalCandidateClass_{QStringLiteral("-")};
     QString ptpExternalHandovers_{QStringLiteral("0")};
     QString ptpExternalReturns_{QStringLiteral("0")};
     QString ptpExternalFailures_{QStringLiteral("0")};

@@ -648,7 +648,14 @@ extern "C" bool ar_ptp_lab_get_external_failover_status(
     status->candidate_fresh = policy.candidate_fresh(
         static_cast<std::uint64_t>(esp_timer_get_time() / 1000LL)) &&
         policy.stable_announces() >= ar::iec61850::time_sync::PtpExternalFailoverPolicy::required_announces;
-    status->stable_announces = policy.stable_announces();
+    status->stable_announces = policy.candidate_fresh(
+        static_cast<std::uint64_t>(esp_timer_get_time() / 1000LL))
+        ? policy.stable_announces() : 0U;
+    const auto observed = policy.candidate();
+    std::copy_n(observed.grandmaster_clock.begin(), 8U,
+                status->candidate_gm_identity);
+    status->candidate_source_port = observed.port_number;
+    status->candidate_clock_class = observed.clock_class;
     status->handovers = ar::esp32p4::smv::g_external_handovers;
     status->returns_to_source = ar::esp32p4::smv::g_external_returns;
     status->failures = ar::esp32p4::smv::g_external_failures;
