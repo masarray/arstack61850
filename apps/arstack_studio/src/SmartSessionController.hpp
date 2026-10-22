@@ -186,7 +186,8 @@ public:
         double currentCountsPerAmp,
         double voltageCountsPerVolt);
     Q_INVOKABLE bool requestSetEnabled(const QString& signalId, const bool enabled) {
-        return liveControlReady() && device_ != nullptr && device_->setEnabled(signalId, enabled);
+        return liveControlReady() && device_ != nullptr && !device_->running() &&
+            device_->setEnabled(signalId, enabled);
     }
     Q_INVOKABLE bool requestSetQuality(const QString& signalId, quint32 quality);
     Q_INVOKABLE bool requestSetCtSaturation(
