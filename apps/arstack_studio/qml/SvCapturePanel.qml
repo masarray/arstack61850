@@ -163,10 +163,12 @@ Rectangle {
                 text: capture.capturing ? "Capturing…" :
                       capture.processing ? "Exporting…" : "Capture SV + PTP"
                 tone: "accent"
-                enabled: !capture.capturing && !capture.processing && adapter.currentIndex >= 0 && !!panel.device && panel.device.running
+                enabled: !capture.capturing && !capture.processing && adapter.currentIndex >= 0
+                         && panel.device && panel.device.running && !!panel.device && panel.device.running
                 onClicked: {
                     var seconds = captureDuration.currentIndex === 2 ? 3600
                                 : captureDuration.currentIndex === 0 ? 30 : 120
+                    if (!panel.device || !panel.device.running) return
                     capture.startCapture(adapter.currentIndex, seconds, panel.telemetrySnapshot())
                 }
             }
