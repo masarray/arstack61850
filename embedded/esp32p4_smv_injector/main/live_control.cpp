@@ -41,7 +41,12 @@ constexpr char kTag[] = "ar_smv_ctrl";
 constexpr std::array<std::string_view, 8> kChannelNames{
     "IA", "IB", "IC", "IN", "UA", "UB", "UC", "UN"};
 constexpr std::string_view kTokenDelimiters{" \t\r\n"};
-constexpr std::uint32_t kControlLeaseTimeoutMs = 2500U;
+// A 700-ms host heartbeat is coalesced through a serial command queue.
+// A 2.5-second lease caused unnecessary SV STOP during transient Windows USB
+// stalls. Allow several missed scheduling slots, but still fail CLOSED after
+// six seconds without a real device-consumed heartbeat.
+constexpr std::uint32_t kControlLeaseTimeoutMs = 6000U;
+constexpr std::uint32_t kSlowHeartbeatGapMs = 2000U;
 // Fixed-rate watchdog never stops/rearms from console heartbeat and timer
 // callback concurrently. An expired lease is detected in <=timeout+250ms.
 constexpr std::uint64_t kControlWatchdogPeriodUs = 250000ULL;
@@ -67,6 +72,8 @@ std::atomic<TaskHandle_t> g_publisher_task{nullptr};
 std::atomic<bool> g_control_heartbeat_seen{false};
 std::atomic<bool> g_control_lease_active{false};
 std::atomic<std::uint32_t> g_last_heartbeat_ms{0U};
+std::atomic<std::uint32_t> g_max_heartbeat_gap_ms{0U};
+std::atomic<std::uint32_t> g_slow_heartbeat_events{0U};
 std::atomic<bool> g_control_watchdog_ready{false};
 std::atomic<SvStopCause> g_last_sv_stop_cause{SvStopCause::none};
 std::atomic<std::uint32_t> g_sv_stop_seq{0U};
@@ -155,7 +162,16 @@ void control_lease_timer_callback(void*) noexcept {
 
 void record_control_heartbeat() noexcept {
     portENTER_CRITICAL(&g_control_lease_mux);
-    g_last_heartbeat_ms.store(monotonic_ms(), std::memory_order_release);
+    const std::uint32_t now_ms = monotonic_ms();
+    if (g_control_heartbeat_seen.load(std::memory_order_relaxed)) {
+        const std::uint32_t gap_ms = now_ms -
+            g_last_heartbeat_ms.load(std::memory_order_relaxed);
+        if (gap_ms > g_max_heartbeat_gap_ms.load(std::memory_order_relaxed))
+            g_max_heartbeat_gap_ms.store(gap_ms, std::memory_order_relaxed);
+        if (gap_ms > kSlowHeartbeatGapMs)
+            g_slow_heartbeat_events.fetch_add(1U, std::memory_order_relaxed);
+    }
+    g_last_heartbeat_ms.store(now_ms, std::memory_order_release);
     g_control_heartbeat_seen.store(true, std::memory_order_release);
     portEXIT_CRITICAL(&g_control_lease_mux);
     // No esp_timer_stop/start from this control task, and no lease renewal
@@ -877,6 +893,8 @@ void live_control_initialize(
     g_running.store(false, std::memory_order_release);
     g_start_request.store(false, std::memory_order_release);
     clear_control_session();
+    g_max_heartbeat_gap_ms.store(0U, std::memory_order_release);
+    g_slow_heartbeat_events.store(0U, std::memory_order_release);
     g_last_sv_stop_cause.store(SvStopCause::none, std::memory_order_release);
     g_sv_stop_seq.store(0U, std::memory_order_release);
     g_last_sv_stop_ms.store(0U, std::memory_order_release);
