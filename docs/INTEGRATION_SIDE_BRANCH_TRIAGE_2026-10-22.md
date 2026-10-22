@@ -53,3 +53,19 @@ GitHub initial inventory: 64 open PRs, 26 real open issues, 27 direct base-chain
 Every PR must receive exactly one reviewed outcome: INCLUDED_SHA, EQUIVALENT_VERIFIED (target code + regression evidence), MISSING_NEEDS_PORT (new isolated patch and test), REPLACED_WITH_RATIONALE (replacement implementation and test), INDEPENDENT_DEFERRED (separate integration lane). Current unresolved rows above MUST stay open. The current user's firmware build and main remain untouched. Integrate distinct lanes separately with exact SHA builds and per-lane CI; hard PTP/SV acceptance requires real SIPROTEC Pdelay, time lock, phase-boundary smpCnt and 4I4V SV. Run native .exe + bundled firmware exact-SHA lifecycle. #286 pure AUTO_FAILOVER policy core is not ESP32 actuator yet. Never imply tested hardware passed.
 
 **Thread handoff:** start from [full ledger](./INTEGRATION_CONSOLIDATION_LEDGER_2026-10-22.md), this table, refresh 64 PR heads and exact CI statuses, start with #251/#253/#248/#250/#249 P0 semantics, then #279/#278/#277 GUI. No broad cherry-pick and no PR/issue closures without proof.
+
+## Deep comparison #251 vs current #286 transaction core (static source audit)
+
+Read exact original `include/ariec61850/sampled_values/live_scenario_transaction.hpp` at #251 and current `live_signal_transaction.hpp` with `tests/test_sv_scenario_transaction.cpp` at #286:
+
+| Contract | #251 original | #286 current | Decision |
+|---|---|---|---|
+| Hash schema | FNV-1a over LE words with `0x41525331` (`ARS1`) prefix | FNV-1a over LE words **without** prefix | **Different wire hashes. DO NOT use old and new GUI/firmware mixed** |
+| Token | 32-bit; `begin` refuses already applied token | 64-bit; `begin` refuses zero, transaction consume clears START ticket | Different API; preserve idempotence regression |
+| Staging timeout | No explicit timeout within transaction class | 8,000 ms staged transaction timeout | New policy is stricter |
+| Concurrent generation drift before commit | Explicit baseline generation check before publish | Current commit lacks explicit baseline-generation check; post-commit readback checks generation | **P0 potential lost-update contract**, audit single serial writer + all bank writers and write a negative test before considering parity complete |
+| Stage validation | Setter methods validate/poison each step, all 8 SET and ENABLE + FREQ/SHAPE required | Caller's `draft()` plus mark masks, validates once at commit, marks rejection; all 18 fields required | Different failure surfaces; validate malformed command poisoning in firmware transport |
+| START after commit | `matches_applied()` checks token/hash/current generation | `confirm_readback()` mandatory before `can_start()`; `consume_start()` prevents replay | Better explicit handshake but test board-specific ACK |
+| Atomic publish | Both publish one canonical bank state | Both publish one canonical bank state | Structural similarity only; run 4kHz PCAP / live update test |
+
+**Finding:** #251 is not a trivial duplicate. New class provides improvements (bounded timeout and explicit START readback), but differs on precommit generation-race handling and hash schema. Treat #251 as `UNRESOLVED / SEMANTIC_GAP_REVIEW`, do not cherry-pick original header and do not close PR until the current generation-race ownership and interop tests prove appropriate behavior. Existing #286 portable tests cover atomic commit, incomplete state, checksum, expiry, replay and invalidated readback, but do not visibly include a pre-commit bank-mutation test.
