@@ -337,6 +337,7 @@ bool SvCaptureController::startCapture(int index, int seconds, const QVariantMap
     activeStudioTelemetrySeries_.append(studioTelemetry);
     activeSecondsRequested_ = seconds;
     abortRequested_ = false;
+    captureInterruptionReason_.clear();
     lastReport_.clear();
     summary_.clear();
     const QStringList args{
@@ -363,6 +364,16 @@ void SvCaptureController::sampleTelemetry(const QVariantMap& passiveSnapshot) {
     entry.insert(QStringLiteral("observed_utc"),
         QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     activeStudioTelemetrySeries_.append(entry);
+    if (!captureStartBlocker(entry).isEmpty()) {
+        // A STOPPED publisher invalidates a continuous-SV measurement.
+        // Keep the raw PCAP forensics, never label it a successful capture.
+        captureInterruptionReason_ = QStringLiteral(
+            "SV publisher STOPPED during capture. Inspect device SVLIFE "
+            "stop cause; packets recorded before STOP are only partial evidence.");
+        abortRequested_ = true;
+        capture_.terminate();
+        setStatus(QStringLiteral("CAPTURE INVALID: ") + captureInterruptionReason_);
+    }
 }
 void SvCaptureController::abortCapture() {
     if (!capturing()) return;
@@ -376,13 +387,24 @@ void SvCaptureController::abortCapture() {
 void SvCaptureController::onCaptureFinished(int exitCode, QProcess::ExitStatus exitStatus) {
     emit stateChanged();
     if (abortRequested_) {
-        setStatus(QStringLiteral("Capture canceled. No success report generated."));
+        const QString reason = captureInterruptionReason_.isEmpty()
+            ? QStringLiteral("Capture manually canceled before completion.")
+            : captureInterruptionReason_;
+        writeInvalidCaptureReport(reason);
+        setStatus(QStringLiteral("CAPTURE INVALID: ") + reason +
+                  QStringLiteral(" See _report.json."));
         return;
     }
     if (exitCode != 0 || exitStatus != QProcess::NormalExit ||
         QFileInfo(activePcap_).size() < 64) {
-        setStatus(QStringLiteral("Capture failed or empty. Check adapter/TAP, Npcap and capture permissions. ")
-            + QString::fromUtf8(capture_.readAllStandardError()).right(360));
+        const QString reason = QStringLiteral(
+            "Zero Ethernet SV/PTP packets: PCAP header only or dumpcap failure. "
+            "Check SV RUNNING, physical capture NIC/TAP-SPAN, multicast "
+            "forwarding and Npcap. dumpcap: ") +
+            QString::fromUtf8(capture_.readAllStandardError()).right(360);
+        writeInvalidCaptureReport(reason);
+        setStatus(QStringLiteral("CAPTURE INVALID: ") + reason +
+                  QStringLiteral(" See _report.json."));
         return;
     }
     decodeCapturedFile();
