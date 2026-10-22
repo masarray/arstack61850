@@ -55,6 +55,7 @@ ApplicationWindow {
         // All edits are a draft until the matching command is queued.
         // Never label a visible draft as proven transmitted waveform data.
         pendingApply = true
+        scenarioRevision += 1
     }
     function restoreLocalScenario() {
         const saved = scenarioSettings.lastScenario
@@ -129,6 +130,8 @@ ApplicationWindow {
     property bool phaseLink: false
     property bool profileDirty: false
     property bool pendingApply: true
+    property int scenarioRevision: 0
+    property int liveSubmissionRevision: -1
     // Session-only operator intent. Never persist across application launches:
     // an explicit PTP ON can be restored after a firmware reflash/reconnect
     // without introducing an uncontrolled power-on publisher.
@@ -224,7 +227,19 @@ ApplicationWindow {
         }
         function onDeviceVerifiedChanged() {
             root.pendingApply = true
+            root.liveSubmissionRevision = -1
             root.offlinePreviewRunning = false
+        }
+        function onLiveScenarioApplied() {
+            if (root.liveSubmissionRevision >= 0 &&
+                root.liveSubmissionRevision === root.scenarioRevision) {
+                root.pendingApply = false
+                root.showMessage("4I+4V live setpoints verified by firmware readback.", false)
+            } else {
+                root.pendingApply = true
+                root.showMessage("Live setpoints verified; newer edits remain pending.", false)
+            }
+            root.liveSubmissionRevision = -1
         }
     }
 
@@ -552,18 +567,14 @@ ApplicationWindow {
         }
 
         selectSignal(group, row)
+        // Running edits only change the draft. Apply live sends one verified
+        // eight-channel transaction instead of partial per-channel SETs.
         markScenarioDirty()
-        if (workflowBar.injectionRunning && workflowBar.session &&
-                workflowBar.session.liveControlReady) {
-            const queued = phaseLink && row < 3
-                ? sendLinkedGroup(group) : sendSignal(group, row)
-            if (!queued) showMessage("Signal update not queued; retry or Stop/Start.", true)
-            else pendingApply = false
-        }
         return true
     }
 
     function applyAllSignals() {
+        if (workflowBar.injectionRunning) return applyLiveScenario()
         if (!workflowBar.session || !workflowBar.session.liveControlReady) return false
         var ok = workflowBar.session.requestSetFrequency(signalFrequency)
         for (var group = 0; group < 2; ++group)
@@ -602,6 +613,22 @@ ApplicationWindow {
         draft.ct = { enabled: ctSaturationEnabled, dc: ctDcOffsetPercent,
                      harmonic: ctHarmonicPercent, order: ctHarmonicOrder, clip: ctClipPercent }
         return draft
+    }
+
+    function applyLiveScenario() {
+        if (!workflowBar.injectionRunning || !workflowBar.session ||
+            !workflowBar.session.liveControlReady || device.scenarioApplying) return false
+        const snapshot = startScenarioSnapshot()
+        if (!snapshot) return false
+        const revision = scenarioRevision
+        if (!workflowBar.session.requestApplyLiveScenario(snapshot)) {
+            pendingApply = true
+            showMessage("Live setpoints not queued; check board and retry.", true)
+            return false
+        }
+        liveSubmissionRevision = revision
+        showMessage("Applying eight setpoints; awaiting firmware commit/readback.", false)
+        return true
     }
 
     function setFrequencyValue(value) {
@@ -829,7 +856,9 @@ ApplicationWindow {
             Rectangle { width: 1; height: 12; color: studioTheme.lineSoft }
             Label {
                 text: root.pendingApply
-                    ? "4I + 4V · Setpoints pending · Start to apply"
+                    ? (workflowBar.injectionRunning
+                        ? "4I + 4V · Pending · Apply live"
+                        : "4I + 4V · Setpoints pending · Start to apply")
                     : "4I + 4V · 4000 samples/s"
                 color: root.pendingApply
                     ? studioTheme.amber : studioTheme.muted
@@ -1094,8 +1123,19 @@ ApplicationWindow {
                                 Label { text: "4I + 4V Injection"; color: studioTheme.text; font.family: root.uiFont; font.pixelSize: 17; font.weight: Font.DemiBold }
                             }
                             Item { Layout.fillWidth: true }
-                            // START owns the single ordered scenario transaction.
-                            // No redundant Apply button in the operator workflow.
+                            // START still uses the visible setpoints.
+                            // Apply live is shown only while SV is running.
+                            CalmButton {
+                                visible: workflowBar.injectionRunning
+                                theme: studioTheme
+                                uiFont: root.uiFont
+                                tone: "accent"
+                                text: device.scenarioApplying ? "Verifying..." : "Apply live"
+                                enabled: root.pendingApply && !device.scenarioApplying &&
+                                         workflowBar.session && workflowBar.session.liveControlReady
+                                toolTipText: "Apply all 4I+4V values without restarting SV"
+                                onClicked: root.applyLiveScenario()
+                            }
                         }
 
                         Rectangle {
