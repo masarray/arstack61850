@@ -24,6 +24,7 @@
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -76,7 +77,8 @@ ar::iec61850::sampled_values::SampledValueAsdu make_reference_asdu() {
         2U,
         std::uint16_t{4000U},
         std::uint16_t{1U},
-        from_hex("0000006400000001000000C800000003")};
+        from_hex("0000006400000001000000C800000003"),
+        std::nullopt};
 }
 
 void sampled_values_pdu_matches_csharp_golden_vector() {
