@@ -119,6 +119,64 @@ void check_fast_source_auto_qualification_with_fresh_evidence() {
     REQUIRE(!gate.qualified(7U, 0U, 3U, 8U, true, 4U));
 }
 
+// Internal SOURCE is the same EMAC oscillator driving PTP and SMV. Reuse
+// the independent software tracking gate, but skip the arbitrary 10-s
+// receiver/cold-stability probation once real MAC egress has corroborated it.
+// A manual FORCE_2 mode never participates in this test or AUTO admission.
+void check_internal_source_auto_acquires_without_ten_second_probation() {
+    SvTxEgressEvidence tx;
+    SvLocalSyncEvidenceGate mac;
+    SvSourceSelfClockAcquisition source;
+    constexpr std::uint32_t base = 1700001200U;
+    REQUIRE(!source.observe(false, false, 7U, 0U, 3U, 1U));
+
+    // A descriptor BASELINE at 2s proves nothing; do not promote.
+    auto first = make_good(2U, base + 2U, 85000U);
+    auto result = tx.record(first);
+    mac.observe(first, result, tx.summary().last_phase_ns);
+    REQUIRE(result == SvTxEvidenceResult::baseline_established);
+    REQUIRE(!mac.qualified_source_fast(7U, 0U, 3U, 2U, true, 2U));
+    REQUIRE(!source.observe(true, false, 7U, 0U, 3U, 2U));
+
+    // 4s: the FIRST coherent measured TX pair and actual software phase.
+    auto second = make_good(4U, base + 4U, 85000U);
+    result = tx.record(second);
+    mac.observe(second, result, tx.summary().last_phase_ns);
+    REQUIRE(result == SvTxEvidenceResult::measured);
+    REQUIRE(mac.qualified_source_fast(7U, 0U, 3U, 4U, true, 4U));
+    REQUIRE(!mac.qualified(7U, 0U, 3U, 4U, true, 4U));
+    REQUIRE(!mac.qualified_source_fast(7U, 0U, 3U, 4U, false, 0U));
+    REQUIRE(!mac.qualified_source_fast(7U, 0U, 3U, 4U, true, 5U));
+    REQUIRE(!source.observe(true,
+        mac.qualified_source_fast(7U, 0U, 3U, 4U, true, 3U),
+        7U, 0U, 3U, 4U)); // still only one qualified 1-Hz phase epoch
+    REQUIRE(source.clean_epochs() == 1U);
+
+    // 5s: a second independent continuous PTP-second/phase measurement
+    // proves the SOURCE and SV timelines still agree. No 10s artificial
+    // wait or GNSS/external receiver needed.
+    REQUIRE(source.observe(true,
+        mac.qualified_source_fast(7U, 0U, 3U, 5U, true, 3U),
+        7U, 0U, 3U, 5U));
+    REQUIRE(source.clean_epochs() == 2U);
+
+    // Both fast and full routes must revoke when the clock/GM changes,
+    // MAC evidence expires, a publisher fault occurs, or an epoch is skipped.
+    REQUIRE(!source.observe(true,
+        mac.qualified_source_fast(7U, 0U, 4U, 6U, true, 3U),
+        7U, 0U, 4U, 6U));
+    REQUIRE(source.clean_epochs() == 0U);
+    REQUIRE(!source.observe(true, true, 7U, 0U, 4U, 7U));
+    REQUIRE(!source.observe(true, true, 7U, 0U, 4U, 9U)); // discontinuity
+    REQUIRE(source.clean_epochs() == 0U);
+    REQUIRE(!source.observe(true, true, 7U, 0U, 4U, 10U));
+    REQUIRE(source.observe(true, true, 7U, 0U, 4U, 11U));
+    REQUIRE(!source.observe(true, false, 7U, 0U, 4U, 12U)); // TX fail
+    REQUIRE(!source.observe(true, true, 7U, 1U, 4U, 13U)); // fault
+    REQUIRE(!source.observe(false, true, 7U, 1U, 4U, 14U)); // phase lost
+    REQUIRE(!mac.qualified_source_fast(7U, 0U, 3U, 8U, true, 3U));
+}
+
 void check_external_gm_receiver_requires_real_sv_egress_and_phase() {
     SvTxEgressEvidence tx;
     SvLocalSyncEvidenceGate mac;
@@ -404,6 +462,7 @@ int main() {
     try {
         check_auto_local_sync_gate_requires_both_clocks_and_fresh_mac();
         check_fast_source_auto_qualification_with_fresh_evidence();
+        check_internal_source_auto_acquires_without_ten_second_probation();
         check_external_gm_receiver_requires_real_sv_egress_and_phase();
         check_warm_phase_preflight_cannot_fake_canonical_mac();
         check_warm_preflight_negative_session_and_clock_faults();
