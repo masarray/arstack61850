@@ -273,6 +273,13 @@ if(ARIEC61850_BUILD_TESTS)
         add_test(NAME ariec61850_${test_name}_tests COMMAND ariec61850_${test_name}_tests)
     endforeach()
 
+    add_executable(ariec61850_ptp_external_failover_tests tests/test_ptp_external_failover.cpp)
+    target_link_libraries(ariec61850_ptp_external_failover_tests PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_ptp_external_failover_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_ptp_external_failover_tests)
+    ariec61850_apply_sanitizers(ariec61850_ptp_external_failover_tests)
+    add_test(NAME ariec61850_ptp_external_failover_tests COMMAND ariec61850_ptp_external_failover_tests)
+
     add_executable(ariec61850_live_signal_tests tests/test_live_signal.cpp)
     target_link_libraries(ariec61850_live_signal_tests PRIVATE ARIEC61850::core)
     target_compile_features(ariec61850_live_signal_tests PRIVATE cxx_std_20)

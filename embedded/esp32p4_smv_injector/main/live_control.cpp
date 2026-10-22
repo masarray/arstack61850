@@ -396,6 +396,7 @@ void handle_ptp_command(char* save) noexcept {
         else print_ptp_state();
         return;
     }
+#if CONFIG_AR_PTP_LAB_TX
     if (std::strcmp(subcommand, "AUTOSWITCH") == 0) {
         char* value = strtok_r(nullptr, kTokenDelimiters.data(), &save);
         if (value != nullptr) uppercase_ascii(value);
@@ -427,6 +428,7 @@ void handle_ptp_command(char* save) noexcept {
         ESP_LOGE(kTag, "Usage: PTP AUTOSWITCH <0|1|SHOW>");
         return;
     }
+#endif
     if (std::strcmp(subcommand, "DIAG") == 0) {
         if (has_extra_token(&save)) ESP_LOGE(kTag, "Usage: PTP DIAG");
         else print_sv_sync_diagnostics();
