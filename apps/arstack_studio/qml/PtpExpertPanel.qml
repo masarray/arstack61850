@@ -9,6 +9,7 @@ SurfacePanel {
     property var controller
     property var device
     property var session
+    property var profiles
     property string uiFont: "Inter"
     property string monoFont: "Inter"
     property var roleValues: ["SOURCE", "RECEIVER", "MONITOR"]
@@ -49,6 +50,16 @@ SurfacePanel {
     function applyProfile() {
         return panel.session && panel.session.requestConfigurePtp(
             panel.ptpProfile(panel.activeRole))
+    }
+
+    function matchSvVlan() {
+        if (!panel.profiles || !panel.profiles.hasProfiles)
+            return false
+        const sv = panel.profiles.selectedProfile
+        vlanCheck.checked = Boolean(sv.vlanPresent)
+        vlanField.text = String(sv.vlanId)
+        pcpField.text = String(sv.vlanPriority)
+        return true
     }
 
     function startRole(role) {
@@ -549,6 +560,16 @@ SurfacePanel {
                     NumericField { id: vlanField; enabled: vlanCheck.checked; theme: panel.theme; monoFont: panel.uiFont; text: "0"; validator: IntValidator { bottom: 0; top: 4094 } }
                     Label { text: "VLAN PCP"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: pcpField; enabled: vlanCheck.checked; theme: panel.theme; monoFont: panel.uiFont; text: "4"; validator: IntValidator { bottom: 0; top: 7 } }
+                    CalmButton {
+                        theme: panel.theme
+                        uiFont: panel.uiFont
+                        text: "Match SV VLAN"
+                        enabled: panel.profiles && panel.profiles.hasProfiles &&
+                            !panel.device.ptpRunning && !panel.startPending
+                        onClicked: panel.matchSvVlan()
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Copy current SV profile VLAN enable, VID and PCP into PTP settings"
+                    }
                     Label {
                         visible: modeCombo.currentIndex === 0
                         Layout.columnSpan: 4
