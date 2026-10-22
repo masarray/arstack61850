@@ -150,6 +150,9 @@ public:
             return reply();
         case PtpSourceState::external_loss:
             if (e.receiver_worker_active && e.selected_external_servo_locked) {
+                // A recovered selected external source must never be mistaken
+                // for the board's internal GM during SV re-arm.
+                switch_to_external_ = true;
                 rearm_required_ = true;
                 state_ = PtpSourceState::waiting_second_boundary;
                 return reply();
