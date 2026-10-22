@@ -430,15 +430,30 @@ void handle_ptp_command(char* save) noexcept {
             }
         }
         bool bench_global = false;
-        std::uint32_t utc_epoch = 0U;
+        std::uint32_t utc_epoch_seconds = 0U;
+        std::uint16_t utc_epoch_millis = 0U;
         char* bench_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
         if (bench_text != nullptr) {
             std::uint32_t bench = 0U;
+            std::uint64_t utc_input = 0ULL;
             if (!parse_u32(bench_text, bench) || bench > 1U ||
-                !parse_u32(strtok_r(nullptr, kTokenDelimiters.data(), &save), utc_epoch)) {
+                !parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), utc_input, 10)) {
                 ESP_LOGE(kTag, "PTP configuration rejected: expected bench mode and UTC epoch");
                 return;
             }
+            // Accept both legacy Unix seconds and new Unix milliseconds.
+            // Full milliseconds avoid the ~0..999ms truncation caused by
+            // QDateTime::currentSecsSinceEpoch on the Windows host.
+            const bool epoch_in_milliseconds = utc_input >= 100000000000ULL;
+            const std::uint64_t seconds = epoch_in_milliseconds
+                ? utc_input / 1000ULL : utc_input;
+            if (seconds > UINT32_MAX || seconds < 1577836800ULL) {
+                ESP_LOGE(kTag, "PTP configuration rejected: UTC epoch outside supported range");
+                return;
+            }
+            utc_epoch_seconds = static_cast<std::uint32_t>(seconds);
+            utc_epoch_millis = epoch_in_milliseconds
+                ? static_cast<std::uint16_t>(utc_input % 1000ULL) : 0U;
             bench_global = bench != 0U;
         }
         if (has_extra_token(&save) || values[0] > 255U || values[1] > 15U || values[2] > 1U ||
@@ -461,7 +476,8 @@ void handle_ptp_command(char* save) noexcept {
         config.sync_interval_ms = values[6];
         config.respond_to_peer_delay = values[7] != 0U;
         config.bench_global_gm = bench_global;
-        config.bench_utc_epoch_seconds = bench_global ? utc_epoch : 0U;
+        config.bench_utc_epoch_seconds = bench_global ? utc_epoch_seconds : 0U;
+        config.bench_utc_epoch_millisecond = bench_global ? utc_epoch_millis : 0U;
         config.bench_epoch_received_mono_us = bench_global ? esp_timer_get_time() : 0LL;
         if (!ar_ptp_lab_configure(&config)) {
             ESP_LOGE(kTag, "PTP configuration rejected: reason=%s",
@@ -469,9 +485,10 @@ void handle_ptp_command(char* save) noexcept {
             return;
         }
         ESP_LOGI(kTag, "PTP configuration accepted");
-        ESP_LOGI(kTag, "PTP GM emulation=%u UTC_seed=%lu",
+        ESP_LOGI(kTag, "PTP GM emulation=%u UTC_seed=%lu.%03u",
                  config.bench_global_gm ? 1U : 0U,
-                 static_cast<unsigned long>(config.bench_utc_epoch_seconds));
+                 static_cast<unsigned long>(config.bench_utc_epoch_seconds),
+                 static_cast<unsigned>(config.bench_utc_epoch_millisecond));
         print_ptp_state();
         return;
     }
