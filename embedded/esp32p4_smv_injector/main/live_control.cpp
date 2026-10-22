@@ -266,7 +266,7 @@ void print_help() noexcept {
     ESP_LOGI(kTag, "  ENABLE <channel> <0|1>");
     ESP_LOGI(kTag, "  QUALITY <channel> <uint32/0xhex>");
     ESP_LOGI(kTag, "  SHAPE CT <0|1> <dc_permille> <harmonic_permille> <order> <clip_permille>");
-    ESP_LOGI(kTag, "  PTP SHOW | PTP DIAG | PTP START | PTP STOP");
+    ESP_LOGI(kTag, "  PTP SHOW | PTP DIAG | PTP START | PTP STOP | PTP AUTOSWITCH <0|1|SHOW>");
     ESP_LOGI(kTag, "  PTP CONFIG <domain> <transport> <vlan> <vid> <pcp> <announce_ms> <sync_ms> <pdelay> [bench_global_0_1 UTC_epoch_seconds]");
     ESP_LOGI(kTag, "GUI profile deployment uses bounded PROFILE subcommands while STOPPED.");
 }
@@ -394,6 +394,37 @@ void handle_ptp_command(char* save) noexcept {
     if (std::strcmp(subcommand, "SHOW") == 0) {
         if (has_extra_token(&save)) ESP_LOGE(kTag, "Usage: PTP SHOW");
         else print_ptp_state();
+        return;
+    }
+    if (std::strcmp(subcommand, "AUTOSWITCH") == 0) {
+        char* value = strtok_r(nullptr, kTokenDelimiters.data(), &save);
+        if (value != nullptr) uppercase_ascii(value);
+        if (value != nullptr && std::strcmp(value, "SHOW") == 0 &&
+            !has_extra_token(&save)) {
+            ar_ptp_external_failover_status_t status{};
+            if (ar_ptp_lab_get_external_failover_status(&status)) {
+                ESP_LOGI(kTag,
+                    "PTP AUTOSWITCH enabled=%u candidateFresh=%u stableAnnounces=%lu switching=%u handovers=%llu returns=%llu failures=%llu",
+                    status.enabled ? 1U : 0U, status.candidate_fresh ? 1U : 0U,
+                    static_cast<unsigned long>(status.stable_announces),
+                    status.switching ? 1U : 0U,
+                    static_cast<unsigned long long>(status.handovers),
+                    static_cast<unsigned long long>(status.returns_to_source),
+                    static_cast<unsigned long long>(status.failures));
+            }
+            return;
+        }
+        if (value != nullptr && !has_extra_token(&save) &&
+            (std::strcmp(value, "0") == 0 || std::strcmp(value, "1") == 0)) {
+            const bool enabled = std::strcmp(value, "1") == 0;
+            if (!ar_ptp_lab_set_external_failover(enabled)) {
+                ESP_LOGE(kTag, "PTP AUTOSWITCH rejected: start physical SOURCE, verify Ethernet and use 0 or 1");
+            } else {
+                ESP_LOGI(kTag, "PTP AUTOSWITCH accepted enabled=%u", enabled ? 1U : 0U);
+            }
+            return;
+        }
+        ESP_LOGE(kTag, "Usage: PTP AUTOSWITCH <0|1|SHOW>");
         return;
     }
     if (std::strcmp(subcommand, "DIAG") == 0) {

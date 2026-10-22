@@ -80,6 +80,9 @@ struct PtpLabContext final {
     std::uint8_t rx_domain{};
     std::uint8_t rx_transport_specific{};
     bool rx_respond_to_peer_delay{};
+    bool rx_vlan_enabled{};
+    std::uint16_t rx_vlan_id{};
+    std::array<std::uint8_t, 8> rx_own_clock{};
 };
 
 PtpLabContext g_ptp_context{};
@@ -624,29 +627,48 @@ esp_err_t ptp_input_info(
     if (buffer == nullptr) return ESP_OK;
 
     if (g_ptp_accept_rx.load(std::memory_order_acquire) &&
-        context != nullptr &&
-        context->rx_respond_to_peer_delay &&
-        context->pdelay_queue != nullptr &&
-        info != nullptr) {
+        context != nullptr) {
         PtpFrame frame;
         if (ar::iec61850::time_sync::PtpCodec::try_parse_ethernet_frame(
-                std::span<const std::uint8_t>{buffer, length},
-                frame) &&
-            frame.peer_delay_multicast &&
-            frame.header.message_type == PtpMessageType::pdelay_req &&
+                std::span<const std::uint8_t>{buffer, length}, frame) &&
             frame.header.domain_number == context->rx_domain &&
-            frame.header.transport_specific == context->rx_transport_specific) {
-            const auto& rx_timestamp = *static_cast<const eth_mac_time_t*>(info);
-            if (valid_hw_timestamp(rx_timestamp)) {
-                const PdelayRequestEvent event{
-                    frame.header.source_port_identity,
-                    to_ptp_timestamp(rx_timestamp),
-                    frame.header.sequence_id,
-                    frame.header.log_message_interval,
-                };
-                if (xQueueSend(context->pdelay_queue, &event, 0U) == pdTRUE &&
-                    context->task_handle != nullptr) {
-                    xTaskNotifyGive(context->task_handle);
+            frame.header.transport_specific == context->rx_transport_specific &&
+            !frame.outer_vlan_id.has_value() &&
+            (context->rx_vlan_enabled
+                ? frame.vlan_id.has_value() &&
+                  *frame.vlan_id == context->rx_vlan_id
+                : !frame.vlan_id.has_value())) {
+            if (frame.header.message_type == PtpMessageType::announce &&
+                frame.announce.has_value() &&
+                frame.header.source_port_identity.clock_identity !=
+                    context->rx_own_clock) {
+                // Observation is only candidate selection. Actual receiver
+                // Pdelay, hardware timestamps and discipline LOCK are
+                // required AFTER the exclusive EMAC break-before-make.
+                ar_ptp_lab_observe_external_announce(
+                    frame.header.source_port_identity.clock_identity.data(),
+                    frame.announce->grandmaster_identity.data(),
+                    frame.header.source_port_identity.port_number,
+                    frame.announce->clock_class,
+                    frame.announce->steps_removed,
+                    static_cast<std::uint64_t>(esp_timer_get_time() / 1000LL));
+            }
+            if (context->rx_respond_to_peer_delay &&
+                context->pdelay_queue != nullptr && info != nullptr &&
+                frame.peer_delay_multicast &&
+                frame.header.message_type == PtpMessageType::pdelay_req) {
+                const auto& rx_timestamp = *static_cast<const eth_mac_time_t*>(info);
+                if (valid_hw_timestamp(rx_timestamp)) {
+                    const PdelayRequestEvent event{
+                        frame.header.source_port_identity,
+                        to_ptp_timestamp(rx_timestamp),
+                        frame.header.sequence_id,
+                        frame.header.log_message_interval,
+                    };
+                    if (xQueueSend(context->pdelay_queue, &event, 0U) == pdTRUE &&
+                        context->task_handle != nullptr) {
+                        xTaskNotifyGive(context->task_handle);
+                    }
                 }
             }
         }
@@ -768,6 +790,9 @@ void ptp_lab_task(void* argument) {
     context.rx_domain = options.domain_number;
     context.rx_transport_specific = options.transport_specific;
     context.rx_respond_to_peer_delay = options.respond_to_peer_delay;
+    context.rx_vlan_enabled = options.vlan_id.has_value();
+    context.rx_vlan_id = options.vlan_id.value_or(0U);
+    context.rx_own_clock = options.clock_identity;
 
     bool pdelay_enabled = false;
     if (options.respond_to_peer_delay && context.pdelay_queue != nullptr) {

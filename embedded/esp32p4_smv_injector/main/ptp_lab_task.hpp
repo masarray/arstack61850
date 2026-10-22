@@ -141,6 +141,28 @@ void ar_ptp_lab_start(esp_eth_handle_t eth_handle);
 /** Request a clean stop of the PTP task without touching the SV hot path. */
 void ar_ptp_lab_stop(void);
 
+// Physical Ethernet Announce only (matching transport/domain/VLAN, non-self).
+// This callback observes candidates; it must NEVER claim receiver LOCKED.
+void ar_ptp_lab_observe_external_announce(
+    const uint8_t source_clock[8], const uint8_t grandmaster_clock[8],
+    uint16_t source_port, uint8_t clock_class, uint16_t steps_removed,
+    uint64_t received_ms);
+
+typedef struct ar_ptp_external_failover_status_t {
+    bool enabled;
+    bool candidate_fresh;
+    uint32_t stable_announces;
+    uint64_t handovers;
+    uint64_t returns_to_source;
+    uint64_t failures;
+    bool switching;
+} ar_ptp_external_failover_status_t;
+
+// Operator opt-in. Only valid when PTP SOURCE is physically running.
+// A failure cannot promote smpSynch or reconfigure the EMAC clock implicitly.
+bool ar_ptp_lab_set_external_failover(bool enabled);
+bool ar_ptp_lab_get_external_failover_status(ar_ptp_external_failover_status_t* status);
+
 /** Return whether the selected PTP runtime is currently ready/running. */
 bool ar_ptp_lab_is_running(void);
 
