@@ -83,6 +83,20 @@ config AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL
         unavailable, never substituted with esp_timer time or claimed as
         proof that a relay has synchronized. Defaults OFF.
 
+config AR_PTP_BOOT_SOURCE_AUTOSTART
+    bool "LAB ONLY: start local PTP SOURCE and SV dry sample grid on boot"
+    default n
+    depends on AR_PTP_LAB_TX && AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL
+    help
+        Explicit isolated-laboratory feature: after PHY link is verified,
+        start the configured PTP LAB SOURCE automatically once at boot.
+        Existing inactive-SV preflight then aligns its dry GPTimer without
+        requiring Studio START or a USB serial session. The boot supervisor
+        never starts SOURCE when role is RECEIVER/MONITOR, never restarts
+        after operator PTP START/STOP/CONFIG, and limits failed retries.
+        SV Ethernet transmission remains OFF until operator SV START.
+        Never enable while connected to an energized utility process bus.
+
 config AR_PTP_OPERATING_ROLE
     int "PTP operating role (0=lab source, 1=time receiver, 2=monitor)"
     range 0 2
