@@ -2,6 +2,7 @@
 #include "ariec61850/time_sync/sv_ptp_phase_authority.hpp"
 #include "ariec61850/time_sync/sv_boot_clock_policy.hpp"
 #include "ariec61850/time_sync/ptp_external_candidate_policy.hpp"
+#include "ariec61850/time_sync/ptp_advanced_policy.hpp"
 #include "ariec61850/time_sync/sv_ptp_clock_lease.hpp"
 #include "ariec61850/sampled_values/rational_schedule.hpp"
 
@@ -246,6 +247,37 @@ void check_m3c_foreign_announce_and_exclusive_emac_handover() {
     CHECK(!Guard::may_fallback(true,false,true,true,false,true,15000U));
     CHECK(!Guard::may_fallback(true,false,false,true,false,true,14999U));
     CHECK(!Guard::may_fallback(true,false,false,true,false,false,20000U));
+}
+
+void check_m3d_advanced_ptp_policy_prevents_implicit_role_promotion() {
+    using Mode = PtpAdvancedMode;
+    using Policy = PtpAdvancedPolicy;
+    CHECK(Policy::valid(Mode::internal_gm_only));
+    CHECK(Policy::valid(Mode::auto_prefer_external));
+    CHECK(Policy::valid(Mode::external_only));
+    CHECK(Policy::valid(Mode::monitor_only));
+    CHECK(!Policy::valid(static_cast<Mode>(255U)));
+    CHECK(Policy::may_apply(true,true,true,true));
+    CHECK(!Policy::may_apply(false,true,true,true));
+    CHECK(!Policy::may_apply(true,false,true,true));
+    CHECK(!Policy::may_apply(true,true,false,true));
+    CHECK(!Policy::may_apply(true,true,true,false));
+    CHECK(Policy::starts_source(Mode::internal_gm_only));
+    CHECK(Policy::starts_source(Mode::auto_prefer_external));
+    CHECK(!Policy::starts_source(Mode::external_only));
+    CHECK(!Policy::starts_source(Mode::monitor_only));
+    CHECK(Policy::starts_receiver(Mode::external_only));
+    CHECK(!Policy::starts_receiver(Mode::auto_prefer_external));
+    CHECK(Policy::starts_monitor(Mode::monitor_only));
+    CHECK(!Policy::starts_monitor(Mode::external_only));
+    CHECK(Policy::auto_handover(Mode::auto_prefer_external));
+    CHECK(!Policy::auto_handover(Mode::internal_gm_only));
+    CHECK(!Policy::auto_handover(Mode::external_only));
+    CHECK(!Policy::auto_handover(Mode::monitor_only));
+    CHECK(Policy::permits_local_fallback(Mode::auto_prefer_external,true));
+    CHECK(!Policy::permits_local_fallback(Mode::auto_prefer_external,false));
+    CHECK(!Policy::permits_local_fallback(Mode::external_only,true));
+    CHECK(!Policy::permits_local_fallback(Mode::monitor_only,true));
 }
 
 void check_receiver_preflight_requires_measured_gm_lease() {
@@ -618,6 +650,7 @@ int main() {
         check_m3a_stop_start_keeps_qualified_sample_grid();
         check_m3b_boot_ptp_is_safe_and_operator_owned();
         check_m3c_foreign_announce_and_exclusive_emac_handover();
+        check_m3d_advanced_ptp_policy_prevents_implicit_role_promotion();
         check_phase_observer_stall_revokes_source_wire_claim();
         check_receiver_preflight_requires_measured_gm_lease();
         check_phase_sign_and_bounded_corrections();
