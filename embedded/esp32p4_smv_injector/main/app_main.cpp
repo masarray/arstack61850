@@ -797,6 +797,8 @@ void sv_boot_clock_supervisor_task(void*) {
     std::uint32_t retry_after_ms = 0U;
     bool ready_once = false;
     bool observed_link_loss = false;
+    std::uint32_t observed_policy_generation =
+        ar_ptp_lab_advanced_policy_generation();
 #if defined(CONFIG_AR_PTP_AUTO_PREFER_EXTERNAL) && CONFIG_AR_PTP_AUTO_PREFER_EXTERNAL
     bool external_runtime_selected = false;
     std::uint64_t external_quiet_since_ms = 0U;
@@ -831,6 +833,28 @@ void sv_boot_clock_supervisor_task(void*) {
             (xEventGroupGetBits(g_link_events) & kLinkUpBit) != 0U;
         const bool runtime_owned =
             ar_ptp_source_runtime_active() || ar_ptp_lab_is_running();
+        const auto current_policy_generation =
+            ar_ptp_lab_advanced_policy_generation();
+        if (current_policy_generation != observed_policy_generation) {
+            observed_policy_generation = current_policy_generation;
+            // A new operator policy is permitted only after both PTP and
+            // SV STOP. Re-arm the bounded boot worker once for that mode.
+            // Old external quiet windows and failures never carry across.
+            if (!runtime_owned && !live_tx_running()) {
+                ready_once = false;
+                observed_link_loss = false;
+                attempts = 0U;
+                retry_after_ms = 0U;
+#if defined(CONFIG_AR_PTP_AUTO_PREFER_EXTERNAL) && CONFIG_AR_PTP_AUTO_PREFER_EXTERNAL
+                external_runtime_selected = false;
+                external_quiet_since_ms = 0U;
+                handover_failure_latched = false;
+                next_external_handover_ms = 0U;
+#endif
+                ESP_LOGI(kTag, "M3D policy generation %lu admitted at stopped boundary",
+                    static_cast<unsigned long>(observed_policy_generation));
+            }
+        }
         const auto now_ms =
             static_cast<std::uint32_t>(esp_timer_get_time() / 1000LL);
         if (ready_once && !link_ready) observed_link_loss = true;
