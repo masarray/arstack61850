@@ -487,6 +487,13 @@ bool SmartSessionController::requestSmpSynch(const QString& mode) {
 bool SmartSessionController::requestConfigurePtp(const QVariantMap& profile) {
     return deviceControlAvailable() && device_ != nullptr && device_->configurePtp(profile);
 }
+bool SmartSessionController::requestPtpAdvancedPolicy(const QString& mode) {
+    return deviceControlAvailable() && device_ != nullptr &&
+        !device_->running() && !device_->ptpRunning() &&
+        !device_->ptpStarting() && !device_->scenarioApplying() &&
+        !device_->profileDeploying() && !updateRequested_ &&
+        device_->setPtpAdvancedPolicy(mode);
+}
 
 bool SmartSessionController::requestStartPtp() {
     return deviceControlAvailable() && device_ != nullptr && device_->startPtp();
