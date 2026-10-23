@@ -17,6 +17,8 @@ struct PtpAnnounceRank final {
     std::uint8_t priority2{255};
     std::array<std::uint8_t, 8> gm_identity{};
     std::uint16_t steps_removed{65535};
+    std::array<std::uint8_t, 8> source_identity{};
+    std::uint16_t source_port{};
 
     [[nodiscard]] constexpr auto order_key() const noexcept {
         return std::tie(priority1, clock_class, clock_accuracy, variance,
@@ -24,63 +26,101 @@ struct PtpAnnounceRank final {
     }
 };
 
+// At most four foreign port candidates, no heap or unbounded scans. This
+// avoids a pathological single-slot gate that never qualifies when two GMs
+// Announce alternately on the same utility LAN.
 struct PtpExternalCandidateGate final {
     static constexpr std::uint64_t kStableMs = 3000U;
     static constexpr std::uint64_t kStaleMs = 2500U;
     static constexpr std::uint8_t kMinAnnounces = 3U;
+    static constexpr std::size_t kMaxCandidates = 4U;
 
-    // Called only with a *parsed*, domain/transport/VLAN-matched Announce.
-    // No heap, dynamic clock reads, mutex, network action, or task start.
-    // Caller serializes access on one small RX control-path lock.
+    // Caller serializes access on a short control-plane RX spinlock.
     void observe(const PtpAnnounceRank& incoming,
                  const PtpAnnounceRank& local,
                  const std::uint64_t now_ms) noexcept {
-        if (incoming.gm_identity == local.gm_identity ||
-            incoming.steps_removed > 255U ||
-            !(incoming.order_key() < local.order_key())) return;
-
-        // Consecutive source identity and quality are required, including
-        // unchanged class/priority. A single spoofed/burst Announce cannot
-        // request an EMAC timebase handover.
-        if (!has_candidate_ || incoming.order_key() != candidate_.order_key() ||
-            now_ms < last_seen_ms_ || now_ms - last_seen_ms_ > kStaleMs) {
-            candidate_ = incoming;
-            has_candidate_ = true;
-            first_seen_ms_ = now_ms;
-            last_seen_ms_ = now_ms;
-            count_ = 1U;
+        auto* slot = find_source(incoming);
+        const bool valid = incoming.gm_identity != local.gm_identity &&
+            incoming.steps_removed <= 255U &&
+            incoming.order_key() < local.order_key();
+        if (!valid) {
+            if (slot) *slot = {}; // immediately revoke worsened GM quality
             return;
         }
-        // Additional datagrams at the SAME timestamp do not qualify;
-        // hysteresis is measured in true monotonic time.
-        if (now_ms > last_seen_ms_) {
-            last_seen_ms_ = now_ms;
-            if (count_ < kMinAnnounces) ++count_;
+        if (slot == nullptr) {
+            slot = find_free_or_stale(now_ms);
+            if (slot == nullptr) {
+                // Retain stronger, already-qualifying candidates when a
+                // fifth, less capable clock begins broadcasting.
+                slot = &slots_[0];
+                for (auto& other : slots_) {
+                    if (slot->rank.order_key() < other.rank.order_key())
+                        slot = &other;
+                }
+                if (!(incoming.order_key() < slot->rank.order_key()))
+                    return;
+            }
+            *slot = {};
+            slot->rank = incoming;
+            slot->first_ms = now_ms;
+            slot->last_ms = now_ms;
+            slot->observations = 1U;
+            slot->occupied = true;
+            return;
+        }
+        if (incoming.order_key() != slot->rank.order_key() ||
+            now_ms < slot->last_ms ||
+            now_ms - slot->last_ms > kStaleMs) {
+            *slot = {};
+            slot->rank = incoming;
+            slot->first_ms = now_ms;
+            slot->last_ms = now_ms;
+            slot->observations = 1U;
+            slot->occupied = true;
+            return;
+        }
+        // Identical-timestamp burst cannot increase qualification counter.
+        if (now_ms > slot->last_ms) {
+            slot->last_ms = now_ms;
+            if (slot->observations < kMinAnnounces) ++slot->observations;
         }
     }
 
     [[nodiscard]] bool stable(const std::uint64_t now_ms) const noexcept {
-        return has_candidate_ && now_ms >= last_seen_ms_ &&
-            now_ms - last_seen_ms_ <= kStaleMs &&
-            now_ms >= first_seen_ms_ &&
-            now_ms - first_seen_ms_ >= kStableMs &&
-            count_ >= kMinAnnounces;
+        for (const auto& slot : slots_) {
+            if (slot.occupied && now_ms >= slot.last_ms &&
+                now_ms - slot.last_ms <= kStaleMs &&
+                now_ms >= slot.first_ms &&
+                now_ms - slot.first_ms >= kStableMs &&
+                slot.observations >= kMinAnnounces) return true;
+        }
+        return false;
     }
 
-    void reset() noexcept {
-        candidate_ = {};
-        has_candidate_ = false;
-        first_seen_ms_ = 0U;
-        last_seen_ms_ = 0U;
-        count_ = 0U;
-    }
+    void reset() noexcept { slots_ = {}; }
 
 private:
-    PtpAnnounceRank candidate_{};
-    std::uint64_t first_seen_ms_{};
-    std::uint64_t last_seen_ms_{};
-    std::uint8_t count_{};
-    bool has_candidate_{};
+    struct Slot {
+        PtpAnnounceRank rank{};
+        std::uint64_t first_ms{};
+        std::uint64_t last_ms{};
+        std::uint8_t observations{};
+        bool occupied{};
+    };
+    [[nodiscard]] Slot* find_source(const PtpAnnounceRank& rank) noexcept {
+        for (auto& slot : slots_)
+            if (slot.occupied && slot.rank.source_identity == rank.source_identity &&
+                slot.rank.source_port == rank.source_port) return &slot;
+        return nullptr;
+    }
+    [[nodiscard]] Slot* find_free_or_stale(
+        const std::uint64_t now_ms) noexcept {
+        for (auto& slot : slots_)
+            if (!slot.occupied || now_ms < slot.last_ms ||
+                now_ms - slot.last_ms > kStaleMs) return &slot;
+        return nullptr;
+    }
+    std::array<Slot, kMaxCandidates> slots_{};
 };
 
 struct PtpExternalHandoverGuard final {
