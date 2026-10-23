@@ -754,6 +754,13 @@ def main() -> None:
             and "g_preflight_phase_clock_active" in firmware_source
             and "g_warm_resume_first_epoch" in firmware_source,
             "SV STOP/START must preserve measured PTP clock authority")
+    # PTP SOURCE readiness recovery cannot fabricate a NEW timebase lease.
+    # A source generation bump belongs to hardware initialization only.
+    source_generation_bump = "g_ptp_source_generation.fetch_add(1U"
+    require(ptp_source_task.count(source_generation_bump) == 1
+            and ptp_source_task.find(source_generation_bump) <
+                ptp_source_task.find("std::uint32_t consecutive_failures = 0U"),
+            "PTP source generation must never advance on TX readiness recovery")
 
     print("Studio operator workspace contract: PASS")
 
