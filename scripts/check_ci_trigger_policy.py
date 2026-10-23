@@ -122,8 +122,11 @@ def main():
             "'feat/m3a-persistent-sv-grid-20261023' }}"
         )
         m3a_firmware_gate = preview_gate.replace(
-            "')) }}",
-            "')) || github.event.pull_request.head.ref == "
+            "'fix/autolive-from-pcap-proven-7c95-20261023')) }}",
+            "'fix/autolive-from-pcap-proven-7c95-20261023' || "
+            "github.event.pull_request.head.ref == "
+            "'feat/m3a-persistent-sv-grid-20261023')) || "
+            "github.event.pull_request.head.ref == "
             "'feat/m3a-persistent-sv-grid-20261023' }}"
         )
         for index, boundary in enumerate(boundaries):
