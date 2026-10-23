@@ -24,6 +24,9 @@ CONFIG_AR_SMV_VOLTAGE_RMS_MV=57740
 # v0.1.1 production timing companion. LAB_SOURCE preserves the existing
 # ARIEC61850/ARSVIN lab behavior while using ESP32-P4 IEEE1588 HW timestamps.
 CONFIG_AR_PTP_LAB_TX=y
+# M3.B isolated bench: PTP SOURCE starts after PHY link, irrespective of USB
+# Studio connection; SV remains OFF and the 4-kHz grid prequalifies silently.
+CONFIG_AR_PTP_BOOT_SOURCE_AUTOSTART=y
 CONFIG_AR_PTP_OPERATING_ROLE=0
 CONFIG_AR_PTP_DOMAIN=0
 CONFIG_AR_PTP_TRANSPORT_SPECIFIC=0
