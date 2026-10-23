@@ -83,6 +83,18 @@ config AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL
         unavailable, never substituted with esp_timer time or claimed as
         proof that a relay has synchronized. Defaults OFF.
 
+config AR_SMV_RELAY_BENCH_GLOBAL_GUARD
+    bool "Lab FAT: require seeded internal PTP GM before SOURCE SV injection"
+    default n
+    depends on AR_PTP_LAB_TX && AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL
+    help
+        In the isolated relay-test profile, refuse SV START while the local
+        PTP SOURCE has not passed the verified Studio UTC-seed/hardware
+        Grandmaster boot. This is safer than publishing LOCAL smpSynch=1 and
+        letting the relay silently reject the data. External PTP RECEIVER
+        remains governed by its independently measured clock discipline.
+        No change to the real PTP/SMV packet encoders.
+
 config AR_PTP_BOOT_SOURCE_AUTOSTART
     bool "LAB ONLY: start local PTP SOURCE and SV dry sample grid on boot"
     default n
