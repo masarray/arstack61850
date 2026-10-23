@@ -49,8 +49,22 @@ public:
                 (frequencyPending_ || !pendingSignals_.isEmpty()))
                 scheduleLiveFlush();
         });
+        portAbsenceTimer_.setSingleShot(true);
+        portAbsenceTimer_.setInterval(2250); // three 750ms enumeration periods
+        connect(&portAbsenceTimer_, &QTimer::timeout, this, [this] {
+            const QString activePort = portName().trimmed();
+            if (connected() && !activePort.isEmpty() &&
+                !ports().contains(activePort, Qt::CaseInsensitive)) {
+                emit deviceMessage(QStringLiteral(
+                    "%1 remained absent from USB/COM enumeration for 2.25 seconds. "
+                    "Releasing the session; firmware output remains fail-closed.")
+                    .arg(activePort));
+                disconnectPort();
+            }
+        });
         connect(this, &DeviceController::connectedChanged, this, [this] {
             if (!connected()) {
+                portAbsenceTimer_.stop();
                 clearPendingLiveCommands();
                 resetControlHealth();
             }
@@ -77,16 +91,16 @@ public:
             confirmControlHealth();
         });
         connect(this, &DeviceController::portsChanged, this, [this] {
-            // QSerialPort errors are still authoritative, but the worker's
-            // 750 ms enumeration snapshot closes the gap where Windows removes
-            // a COM device before Qt surfaces ResourceError/DeviceNotFoundError.
+            // One Windows COM enumeration miss is not proof of disconnection.
+            // A false close would disable worker HEARTBEAT and stop SV after
+            // the 6-second firmware lease. Serial errors remain immediate.
             const QString activePort = portName().trimmed();
-            if (connected() && !activePort.isEmpty() && !ports().contains(activePort)) {
-                emit deviceMessage(QStringLiteral(
-                    "%1 disappeared from USB/COM enumeration. Releasing the stale session for automatic recovery.")
-                    .arg(activePort));
-                disconnectPort();
+            if (!connected() || activePort.isEmpty() ||
+                ports().contains(activePort, Qt::CaseInsensitive)) {
+                portAbsenceTimer_.stop();
+                return;
             }
+            if (!portAbsenceTimer_.isActive()) portAbsenceTimer_.start();
         });
 
     }
@@ -352,6 +366,7 @@ private:
 
     QTimer liveFlushTimer_;
     QTimer controlHealthTimer_;
+    QTimer portAbsenceTimer_;
     QHash<QString, PendingSignal> pendingSignals_;
     double requestedFrequencyHz_{50.0};
     double pendingFrequencyHz_{50.0};

@@ -93,6 +93,7 @@ public:
             {"CFG transport exclusivity cannot trigger false health loss", healthProbeDefersDuringScenario()},
             {"control health misses -> bounded failure", healthTimeoutIsBounded()},
             {"RUNNING SHOW timeout never drops a healthy COM/heartbeat lease", healthTimeoutKeepsRunningTransport()},
+            {"transient Windows COM enumeration miss does not break a live session", transientComAbsenceDoesNotDisconnect()},
             {"worker teardown -> joins cleanly", workerTeardownCompletes()},
         };
 
@@ -1804,6 +1805,34 @@ private:
             device.missedHealthReplies_ == StudioDeviceController::controlHealthMaxMisses() &&
             !device.controlResponsive_ &&
             !device.healthProbeOutstanding_;
+    }
+
+    static bool transientComAbsenceDoesNotDisconnect() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        seedVerified(fixture, identity(), QStringLiteral("COM7"), true);
+        auto& d = fixture.device;
+        int missingNotices = 0;
+        QObject::connect(&d, &DeviceController::deviceMessage, &d,
+            [&missingNotices](const QString& message) {
+                if (message.contains(QStringLiteral("remained absent")))
+                    ++missingNotices;
+            });
+
+        d.ports_.clear();
+        emit d.portsChanged();  // one noisy 750ms scan
+        if (!d.portAbsenceTimer_.isActive() || !d.running()) return false;
+        d.ports_ = {QStringLiteral("COM7")};
+        emit d.portsChanged();  // recovered before three scans
+        if (d.portAbsenceTimer_.isActive() || !d.connected() || !d.running() ||
+            missingNotices != 0) return false;
+
+        d.ports_.clear();
+        emit d.portsChanged();
+        if (!d.portAbsenceTimer_.isActive()) return false;
+        d.portAbsenceTimer_.start(0); // deterministic sustained-absence deadline
+        QCoreApplication::processEvents();
+        return missingNotices == 1 && d.running();
     }
 
     static bool healthTimeoutKeepsRunningTransport() {
