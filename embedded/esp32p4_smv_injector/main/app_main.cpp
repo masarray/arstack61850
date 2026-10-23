@@ -6,6 +6,7 @@
 #include "ariec61850/sampled_values/frame_codec.hpp"
 #include "ariec61850/sampled_values/live_signal_state.hpp"
 #include "ariec61850/time_sync/sv_ptp_epoch.hpp"
+#include "ariec61850/time_sync/sv_boot_clock_policy.hpp"
 #include "ariec61850/time_sync/sv_ptp_clock_lease.hpp"
 #include "ariec61850/time_sync/ptp_runtime.hpp"
 
@@ -783,6 +784,76 @@ void stop_sample_clock(gptimer_handle_t& timer) noexcept {
     xSemaphoreGive(g_phase_timer_mutex);
 #endif
 }
+
+#if AR_SV_PTP_PHASE_SUPPORTED && defined(CONFIG_AR_PTP_BOOT_SOURCE_AUTOSTART) && CONFIG_AR_PTP_BOOT_SOURCE_AUTOSTART
+// CPU0 control-plane only. PTP SOURCE and the dry sample grid are brought
+// online from boot without waiting for a USB host or a first SV START.
+// Publisher ISR/smpCnt/BER remain unchanged. Never issue an SV START here.
+void sv_boot_clock_supervisor_task(void*) {
+    using Boot = ar::iec61850::time_sync::SvBootClockPolicy;
+    std::uint32_t attempts = 0U;
+    std::uint32_t retry_after_ms = 0U;
+    bool ready_once = false;
+    bool reported_grid = false;
+    // Let the control and publisher tasks bind before background admission.
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    ESP_LOGI(kTag, "M3B boot timebase: enabled for isolated SOURCE profile; SV remains OFF");
+    while (true) {
+        const bool operator_overrode =
+            !ar_ptp_boot_supervisor_autostart_allowed();
+        ar_ptp_lab_config_t config{};
+        const bool source_selected =
+            ar_ptp_lab_get_config(&config) &&
+            config.role == AR_PTP_ROLE_LAB_SOURCE;
+        const bool link_ready =
+            (xEventGroupGetBits(g_link_events) & kLinkUpBit) != 0U;
+        const bool runtime_owned =
+            ar_ptp_source_runtime_active() || ar_ptp_lab_is_running();
+        const auto now_ms =
+            static_cast<std::uint32_t>(esp_timer_get_time() / 1000LL);
+        if (Boot::may_start(
+                !ready_once, operator_overrode, source_selected,
+                link_ready, runtime_owned, attempts, now_ms, retry_after_ms)) {
+            ++attempts;
+            // Blocking verified SOURCE start is allowed only in this
+            // low-priority worker. It is never called from ISR/publisher.
+            const bool started = ar_esp32p4_ptp_start();
+            if (started) {
+                ready_once = true; // never auto-reseed after a later STOP
+                ESP_LOGI(kTag,
+                    "M3B SOURCE READY from boot: attempt=%lu; waiting for dry SV grid",
+                    static_cast<unsigned long>(attempts));
+            } else {
+                retry_after_ms = now_ms + Boot::retry_delay_ms(attempts);
+                ESP_LOGW(kTag,
+                    "M3B boot SOURCE not ready: attempt=%lu/%lu; bounded retry",
+                    static_cast<unsigned long>(attempts),
+                    static_cast<unsigned long>(Boot::kMaxAttempts));
+            }
+        }
+        const bool dry_phase_observed =
+            g_preflight_phase_clock_active.load(std::memory_order_acquire) &&
+            g_sample_clock_context.epoch_generation.load(
+                std::memory_order_acquire) != 0U &&
+            g_sample_clock_context.last_phase_observed_epoch.load(
+                std::memory_order_acquire) != 0U;
+        if (dry_phase_observed && !reported_grid) {
+            ESP_LOGI(kTag,
+                "M3B dry PTP/SV sample grid tracking before injection; SV TX OFF");
+            reported_grid = true;
+        } else if (!dry_phase_observed) {
+            reported_grid = false; // SOURCE/GM fault, operator STOP or relock
+        }
+        if (operator_overrode && !ready_once && attempts == 0U) {
+            // Manual PTP control has taken over and there is no boot session
+            // to observe. One-time task can retire cleanly.
+            ESP_LOGI(kTag, "M3B boot autostart cancelled by operator PTP control");
+            vTaskDelete(nullptr);
+        }
+        vTaskDelay(pdMS_TO_TICKS(Boot::kPollPeriodMs));
+    }
+}
+#endif
 
 void publisher_task(void* argument) {
 #if CONFIG_AR_SMV_LIVE_TX && CONFIG_AR_SMV_P2_REALTIME_50HZ
@@ -1905,6 +1976,14 @@ extern "C" void app_main(void) {
         ESP_LOGE(kTag, "Failed to create telemetry task on CPU0");
         return;
     }
+#if AR_SV_PTP_PHASE_SUPPORTED && defined(CONFIG_AR_PTP_BOOT_SOURCE_AUTOSTART) && CONFIG_AR_PTP_BOOT_SOURCE_AUTOSTART
+    if (xTaskCreatePinnedToCore(
+            &sv_boot_clock_supervisor_task, "ar_smv_boot_clock", 4096,
+            nullptr, 1, nullptr, 0) != pdPASS) {
+        // The verified legacy manual PTP START remains available.
+        ESP_LOGE(kTag, "M3B boot clock supervisor creation failed; manual PTP available");
+    }
+#endif
 #else
     ESP_LOGW(kTag, "Live transmission disabled; Ethernet bring-up only");
 #endif
