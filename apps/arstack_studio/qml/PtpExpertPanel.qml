@@ -14,6 +14,21 @@ SurfacePanel {
     property string monoFont: "Inter"
     property var roleValues: ["SOURCE", "RECEIVER", "MONITOR"]
     property bool advancedVisible: false
+    property int policyDraftIndex: -1
+    readonly property var ptpPolicyModes: [
+        "INTERNAL_GM_ONLY", "AUTO_PREFER_EXTERNAL",
+        "EXTERNAL_ONLY", "MONITOR_ONLY"
+    ]
+    function ptpPolicyIndex(mode) {
+        const index = panel.ptpPolicyModes.indexOf(mode)
+        return index >= 0 ? index : 0
+    }
+    readonly property bool canConfigurePolicy: panel.session &&
+        panel.device && panel.device.deviceVerified &&
+        panel.device.ptpAvailable && !panel.device.running &&
+        !panel.device.ptpRunning && !panel.startPending &&
+        !panel.session.updatingFirmware
+
     readonly property bool startPending: panel.device && panel.device.ptpStarting
 
     function roleIndex(role) {
@@ -603,7 +618,79 @@ SurfacePanel {
                 spacing: 10
 
                 Rectangle { Layout.fillWidth: true; height: 1; color: panel.theme.lineSoft }
-                Label { text: "Advanced PTP profile"; color: panel.theme.text; font.family: panel.uiFont; font.pixelSize: 12; font.weight: Font.DemiBold }
+                Label { text: "Advanced PTP policy & profile"; color: panel.theme.text; font.family: panel.uiFont; font.pixelSize: 12; font.weight: Font.DemiBold }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+                    Label {
+                        text: "Time source"
+                        color: panel.theme.muted
+                        font.family: panel.uiFont
+                        font.pixelSize: 10
+                    }
+                    StudioDarkComboBox {
+                        id: policyCombo
+                        Layout.fillWidth: true
+                        model: [
+                            "Internal GM only — laboratory SOURCE",
+                            "AUTO — prefer better external GM",
+                            "External only — PTP RECEIVER",
+                            "Monitor only — passive observation"
+                        ]
+                        currentIndex: panel.policyDraftIndex >= 0
+                            ? panel.policyDraftIndex
+                            : panel.ptpPolicyIndex(panel.device.ptpPolicy)
+                        enabled: panel.canConfigurePolicy
+                        onActivated: function(index) {
+                            panel.policyDraftIndex = index
+                        }
+                    }
+                    CalmButton {
+                        theme: panel.theme
+                        uiFont: panel.uiFont
+                        text: "Set policy"
+                        enabled: panel.canConfigurePolicy &&
+                            panel.device.ptpPolicy !== "UNKNOWN"
+                        onClicked: {
+                            const mode = panel.ptpPolicyModes[policyCombo.currentIndex]
+                            if (panel.session.requestPtpAdvancedPolicy(mode)) {
+                                panel.policyDraftIndex = -1
+                                if (panel.controller)
+                                    panel.controller.showMessage(
+                                        "PTP policy queued — confirming board readback.", false)
+                            } else if (panel.controller) {
+                                panel.controller.showMessage(
+                                    "PTP policy rejected. Stop SV/PTP first and inspect diagnostics.", true)
+                            }
+                        }
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    text: "Board policy: " + panel.device.ptpPolicy +
+                          "  ·  Actual role: " + panel.device.ptpRole +
+                          "  ·  Supervisor: " +
+                          (panel.device.ptpPolicyBootAuto === "1" ? "ENABLED" : "MANUAL/INACTIVE") +
+                          "  ·  External candidate: " +
+                          (panel.device.ptpCandidate === "1" ? "STABLE ANNOUNCE (not LOCK)" : "NONE") +
+                          "  ·  Source generation: " + panel.device.ptpSourceGeneration
+                    color: panel.theme.textSoft
+                    font.family: panel.monoFont
+                    font.pixelSize: 10
+                }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    text: "Changing source policy requires SV STOP and verified PTP STOP. " +
+                          "AUTO handover occurs only while SV is OFF; external LOCK requires " +
+                          "measured Pdelay/offset. Policy is kept in board RAM until reboot. " +
+                          "All internal-GM and automatic fallback modes are for isolated lab networks."
+                    color: panel.theme.muted
+                    font.family: panel.uiFont
+                    font.pixelSize: 10
+                }
 
                 GridLayout {
                     Layout.fillWidth: true
