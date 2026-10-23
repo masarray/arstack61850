@@ -56,7 +56,8 @@ private:
                                  const QString& secondsFile, const QString& eventsFile, const QString& jsonFile,
                                  int requestedSeconds, const QString& adapter,
                                  const QVariantMap& studioTelemetry,
-                                 const QVariantList& studioTelemetrySeries);
+                                 const QVariantList& studioTelemetrySeries,
+                                 const QString& interruptionReason = QString());
     QProcess discovery_;
     QProcess capture_;
     QFutureWatcher<QVariantMap> decoder_;
