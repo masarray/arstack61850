@@ -7,6 +7,7 @@
 #include "ariec61850/time_sync/ptp_runtime.hpp"
 #include "ariec61850/time_sync/ptp_tai_source.hpp"
 #include "ariec61850/time_sync/ptp_external_candidate_policy.hpp"
+#include "ariec61850/time_sync/ptp_advanced_policy.hpp"
 
 #include "esp_err.h"
 #include "esp_eth.h"
@@ -434,7 +435,8 @@ void disable_hardware_ptp(const esp_eth_handle_t eth_handle) noexcept {
     if (bench && (config.bench_utc_epoch_seconds < 1577836800U ||
                   config.bench_epoch_received_mono_us <= 0LL ||
                   now_mono_us < config.bench_epoch_received_mono_us ||
-                  now_mono_us - config.bench_epoch_received_mono_us > 30000000LL)) {
+                  now_mono_us - config.bench_epoch_received_mono_us >
+                      ar::iec61850::time_sync::PtpAdvancedPolicy::kBenchSeedMaxAgeUs)) {
         ESP_LOGE(kTag, "BENCH GM epoch missing or expired before EMAC clock start");
         return false;
     }
