@@ -50,7 +50,7 @@ concurrency:
 jobs:
   portable-ptp:
     # Exactly this isolated Draft M3.A runs GCC/Clang phase regression.
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft || (github.event.pull_request.head.ref == 'feat/m3a-persistent-sv-grid-20261023' || github.event.pull_request.head.ref == 'feat/m3b-boot-timebase-supervisor-20261023' || github.event.pull_request.head.ref == 'feat/m3c-safe-external-gm-handover-20261023' || github.event.pull_request.head.ref == 'feat/m3d-ptp-advanced-policy-diagnostics-20261024') }}
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft || (github.event.pull_request.head.ref == 'feat/m3a-persistent-sv-grid-20261023' || github.event.pull_request.head.ref == 'feat/m3b-boot-timebase-supervisor-20261023' || github.event.pull_request.head.ref == 'feat/m3c-safe-external-gm-handover-20261023' || github.event.pull_request.head.ref == 'feat/m3d-ptp-advanced-policy-diagnostics-20261024' || github.event.pull_request.head.ref == 'fix/m3d-relay-bench-global-ptp-persistent-20261024') }}
     strategy:
       fail-fast: false
       matrix:
