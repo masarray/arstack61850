@@ -42,6 +42,8 @@ portMUX_TYPE g_ptp_facade_mux = portMUX_INITIALIZER_UNLOCKED;
 ar_ptp_lab_config_t g_facade_override{};
 bool g_facade_override_valid = false;
 std::atomic_bool g_receiver_stop_pending{false};
+// Cancel only automatic boot attempts; operator PTP actions are authoritative.
+std::atomic_bool g_boot_source_autostart_allowed{true};
 ar::iec61850::time_sync::PtpControlCancellationGate g_role_control;
 
 void stop_active_ptp_roles() noexcept;
@@ -235,6 +237,16 @@ void log_p2_status(const ar_ptp_lab_status_t& status) noexcept {
 
 } // namespace
 } // namespace ar::esp32p4::smv
+
+extern "C" void ar_ptp_boot_supervisor_operator_override(void) {
+    ar::esp32p4::smv::g_boot_source_autostart_allowed.store(
+        false, std::memory_order_release);
+}
+
+extern "C" bool ar_ptp_boot_supervisor_autostart_allowed(void) {
+    return ar::esp32p4::smv::g_boot_source_autostart_allowed.load(
+        std::memory_order_acquire);
+}
 
 extern "C" void ar_ptp_lab_get_default_config(ar_ptp_lab_config_t* config) {
     if (config == nullptr) return;
