@@ -747,6 +747,14 @@ def main() -> None:
             and "g_warm_resume_first_epoch" in firmware_source,
             "isolated simulated GM must boot/fallback and warm SV resume must requalify MAC")
 
+    # M3.E: IEC 61850 sample-clock sync must survive SV-only STOP/START.
+    require("g_parked_source_clock_certified" in firmware_source
+            and "SvParkedClockAuthority::may_preserve" in firmware_source
+            and "SvParkedClockAuthority::may_resume" in firmware_source
+            and "g_preflight_phase_clock_active" in firmware_source
+            and "g_warm_resume_first_epoch" in firmware_source,
+            "SV STOP/START must preserve measured PTP clock authority")
+
     print("Studio operator workspace contract: PASS")
 
 
