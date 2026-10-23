@@ -1193,6 +1193,7 @@ void publisher_task(void* argument) {
                      static_cast<unsigned>(active_profile.vlan_priority),
                      static_cast<unsigned>(canonical.bytes.size()));
 
+#if AR_SV_PTP_PHASE_SUPPORTED
             // Preserve a previously verified SOURCE/phase claim only when
             // the very same GPTimer+PTP lease is reused. Fresh MAC TX
             // evidence must replace this continuity within seven epochs.
@@ -1203,6 +1204,7 @@ void publisher_task(void* argument) {
                     std::memory_order_acquire) : 0U;
             g_sample_clock_context.warm_source_resume_epoch.store(
                 resume_epoch, std::memory_order_release);
+#endif
             // Timer commit is the final operation in this branch.
             // Formatting the profile log after timer enable previously queued
             // dozens of ISR notifications before the publisher could consume
