@@ -12,6 +12,7 @@
 #include "ariec61850/time_sync/ptp_control_cancellation.hpp"
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
 #include "sdkconfig.h"
@@ -292,17 +293,25 @@ extern "C" bool ar_ptp_lab_set_advanced_policy(
         ar::esp32p4::smv::live_tx_running())
         return false;
     auto config = ar::esp32p4::smv::selected_config();
+    const bool previous_source = config.role == AR_PTP_ROLE_LAB_SOURCE;
     config.role = requested == AR_PTP_POLICY_MONITOR_ONLY
         ? AR_PTP_ROLE_MONITOR
         : requested == AR_PTP_POLICY_EXTERNAL_ONLY
             ? AR_PTP_ROLE_TIME_RECEIVER : AR_PTP_ROLE_LAB_SOURCE;
-    // A source-policy change is NEVER a bench GNSS quality request.
-    // Require the explicit Studio bench-GM UTC-seed workflow again if
-    // emulation is desired. Prevent stale GNSS flags after role changes.
-    config.bench_global_gm = false;
-    config.bench_utc_epoch_seconds = 0U;
-    config.bench_utc_epoch_millisecond = 0U;
-    config.bench_epoch_received_mono_us = 0LL;
+    // An explicit SOURCE->SOURCE policy selection must not silently
+    // downgrade a still-valid bench GM to LOCAL. Freshness is checked again
+    // by seed_hardware_clock() when the PTP worker actually starts.
+    const bool keep_seed = PtpAdvancedPolicy::may_preserve_bench_seed(
+        static_cast<PtpAdvancedMode>(requested), previous_source,
+        config.bench_global_gm, config.bench_utc_epoch_seconds,
+        config.bench_utc_epoch_millisecond, config.bench_epoch_received_mono_us,
+        esp_timer_get_time());
+    if (!keep_seed) {
+        config.bench_global_gm = false;
+        config.bench_utc_epoch_seconds = 0U;
+        config.bench_utc_epoch_millisecond = 0U;
+        config.bench_epoch_received_mono_us = 0LL;
+    }
     if (!ar::esp32p4::smv::valid_public_config(config) ||
         !ar_ptp_source_configure(&config)) return false;
     portENTER_CRITICAL(&ar::esp32p4::smv::g_ptp_facade_mux);
