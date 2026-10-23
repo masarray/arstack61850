@@ -730,6 +730,9 @@ def main() -> None:
     # adopt that running SOURCE as if it were a seeded GM, nor kill PTP on
     # an ordinary SV STOP/START.
     require("PTPGM bench_configured=%u bench_ready=%u" in live_control
+            and "START rejected: BENCH_GM_NOT_READY" in live_control
+            and "CONFIG_AR_SMV_RELAY_BENCH_GLOBAL_GUARD=y" in
+                (project_root / "embedded/esp32p4_smv_injector/sdkconfig.defaults").read_text(encoding="utf-8")
             and "kPtpBenchReadyExpression" in device_cpp
             and "pendingPtpBenchRequested_" in device_cpp
             and "PTP STOPPED; selecting SOURCE with a fresh bench UTC epoch" in device_cpp
