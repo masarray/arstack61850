@@ -826,6 +826,12 @@ void ptp_lab_task(void* argument) {
     g_bench_global_active.store(
         selected_ptp_config.bench_global_gm && ptp_tai_epoch_seeded,
         std::memory_order_release);
+    // Clock-generation identifies the actual EMAC IEEE1588 timebase
+    // lifetime. It changes when that hardware timebase is initialized,
+    // NEVER when a transient Announce/Sync/Pdelay TX readiness drops and
+    // recovers. The latter is transport health, not a PTP clock step.
+    // One exclusive SOURCE runtime owns the EMAC, so one bump per START.
+    g_ptp_source_generation.fetch_add(1U, std::memory_order_release);
     const auto options = context.runtime->options();
     // Nonstandard bench cadences are explicitly opt-in, so expiry tracks the
     // larger validated interval. Default power-profile TTL = 3 seconds.
@@ -960,7 +966,9 @@ void ptp_lab_task(void* argument) {
         if (!qualified_ready) {
             g_ptp_ready.store(false, std::memory_order_release);
         } else if (!was_ready) {
-            g_ptp_source_generation.fetch_add(1U, std::memory_order_release);
+            // A recovered TX stream uses the SAME still-running EMAC clock.
+            // Do not report a new GM generation and force the SV sample
+            // phase servo to throw away its continuous 4-kHz grid.
             g_source_start_reason.store(
                 PtpSourceStartReason::ready, std::memory_order_release);
             g_ptp_ready.store(true, std::memory_order_release);
