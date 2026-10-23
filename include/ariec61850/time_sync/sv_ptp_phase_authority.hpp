@@ -332,6 +332,25 @@ struct SvAutoPreflightPolicy final {
     }
 };
 
+// M3 FAT: a previously MAC-verified SOURCE can retain its qualified sync
+// across *operator-only* SV TX STOP, provided the GPTimer and EMAC PTP lease
+// never stopped, the 1Hz phase servo remains healthy, and no TX fault occurs.
+// First canonical SV TX following START must still succeed. Fresh descriptor
+// evidence replaces this bounded warm continuation within seven 1Hz epochs.
+// This never promotes a cold clock or external RECEIVER.
+struct SvWarmSourceResumePolicy final {
+    static constexpr std::uint32_t kMaxUnconfirmedEpochs = 7U;
+    [[nodiscard]] static constexpr bool may_preserve(
+        const bool previously_qualified, const bool same_source_lease,
+        const bool phase_tracked, const bool fault_free,
+        const std::uint32_t resume_epoch,
+        const std::uint32_t current_epoch) noexcept {
+        return previously_qualified && same_source_lease && phase_tracked &&
+            fault_free && resume_epoch != 0U && current_epoch != 0U &&
+            current_epoch - resume_epoch <= kMaxUnconfirmedEpochs;
+    }
+};
+
 // ISR-safe, O(1), no allocation/locks/IOCTL. Each interval differs from the
 // existing rational scheduler by at most ONE 1-MHz timer tick. The complete
 // correction is distributed across one explicitly armed second (4000/4800
