@@ -176,6 +176,8 @@ void check_m3c_foreign_announce_and_exclusive_emac_handover() {
     foreign.priority1 = 100U;
     foreign.gm_identity = {0x20,0,0,0,0,0,0,2};
     foreign.steps_removed = 1U;
+    foreign.source_identity = foreign.gm_identity;
+    foreign.source_port = 1U;
     PtpExternalCandidateGate gate;
     // One forged packet or a burst of same-time packets cannot switch GM.
     gate.observe(foreign, local, 1000U);
@@ -207,6 +209,25 @@ void check_m3c_foreign_announce_and_exclusive_emac_handover() {
     for (std::uint64_t t = 11000; t <= 15000; t+=1000)
         gate.observe(foreign, local, t);
     CHECK(gate.stable(15000U));
+    // Two independent foreign grandmasters, Announce streams interleaved:
+    // neither must cancel the other's qualification history. The weaker
+    // candidate still outranks our internal 248-class lab oscillator.
+    gate.reset();
+    auto other = foreign;
+    other.priority1 = 110U;
+    other.gm_identity = {0x30,0,0,0,0,0,0,3};
+    other.source_identity = other.gm_identity;
+    for (std::uint64_t t = 20000U; t <= 24000U; t+=1000U) {
+        gate.observe(foreign, local, t);
+        gate.observe(other, local, t + 1U);
+    }
+    CHECK(gate.stable(24001U));
+    // Degrade one peer's quality and verify its old lease is revoked
+    // without deleting independent healthy candidates.
+    auto degraded = other;
+    degraded.priority1 = 240U;
+    gate.observe(degraded, local, 25000U);
+    CHECK(gate.stable(25000U));
     CHECK(Guard::may_handover(true,false,true,false,true,false,true));
     CHECK(!Guard::may_handover(true,false,true,true,true,false,true));
     CHECK(!Guard::may_handover(true,true,true,false,true,false,true));
