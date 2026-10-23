@@ -288,13 +288,13 @@ extern "C" bool ar_ptp_lab_set_advanced_policy(
         ? AR_PTP_ROLE_MONITOR
         : requested == AR_PTP_POLICY_EXTERNAL_ONLY
             ? AR_PTP_ROLE_TIME_RECEIVER : AR_PTP_ROLE_LAB_SOURCE;
-    if (config.role != AR_PTP_ROLE_LAB_SOURCE) {
-        // No stale bench emulated GPS/UTC status during external follow.
-        config.bench_global_gm = false;
-        config.bench_utc_epoch_seconds = 0U;
-        config.bench_utc_epoch_millisecond = 0U;
-        config.bench_epoch_received_mono_us = 0LL;
-    }
+    // A source-policy change is NEVER a bench GNSS quality request.
+    // Require the explicit Studio bench-GM UTC-seed workflow again if
+    // emulation is desired. Prevent stale GNSS flags after role changes.
+    config.bench_global_gm = false;
+    config.bench_utc_epoch_seconds = 0U;
+    config.bench_utc_epoch_millisecond = 0U;
+    config.bench_epoch_received_mono_us = 0LL;
     if (!ar::esp32p4::smv::valid_public_config(config) ||
         !ar_ptp_source_configure(&config)) return false;
     portENTER_CRITICAL(&ar::esp32p4::smv::g_ptp_facade_mux);
