@@ -290,6 +290,14 @@ ApplicationWindow {
 
     Connections {
         target: workflowBar.session
+        function onStateChanged() {
+            // If a committed edit was queued while the serial/session
+            // transport was briefly not ready, deliver it once the
+            // verified RUNNING session becomes writable again.
+            if (root.autoLiveQueuedRevision >= 0 && device.running &&
+                !device.scenarioApplying)
+                autoLiveApplyTimer.restart()
+        }
         function onFirmwareUpdateFinished(success) {
             // Reset during firmware install stops the board's PTP SOURCE.
             // If the operator explicitly enabled it in this live Studio
