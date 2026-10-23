@@ -97,6 +97,32 @@ config AR_PTP_BOOT_SOURCE_AUTOSTART
         SV Ethernet transmission remains OFF until operator SV START.
         Never enable while connected to an energized utility process bus.
 
+config AR_PTP_AUTO_PREFER_EXTERNAL
+    bool "LAB ONLY: prefer better qualified external GM using safe EMAC handover"
+    default n
+    depends on AR_PTP_BOOT_SOURCE_AUTOSTART && AR_PTP_RESPOND_PDELAY
+    help
+        In an isolated process-bus simulator, observe foreign PTP Announce
+        through the existing local SOURCE peer-delay RX callback. Prefer
+        an independently stable, strictly better foreign GM only while
+        the operator's SV injection is STOPPED. Drain local SOURCE fully,
+        then run the measured Pdelay/Sync TIME_RECEIVER and require actual
+        discipline LOCK before qualifying SV. Never run both roles on one
+        ESP32-P4 EMAC simultaneously, and do not switch during live SV TX.
+        Advanced runtime mode selection is a later M3.D task.
+
+config AR_PTP_AUTO_LOCAL_FALLBACK
+    bool "LAB ONLY: restore internal SOURCE after external GM is fully absent"
+    default n
+    depends on AR_PTP_AUTO_PREFER_EXTERNAL
+    help
+        Explicit isolated-bench authorization to restore local GM if the
+        external receiver has no selected Announce for at least 15 seconds,
+        the operator's SV output is STOPPED and cleanup completes. Never
+        promote a local GM in an energized utility network or while a
+        foreign GM is selected; a partially failed receiver is not proof
+        that the foreign network is absent.
+
 config AR_PTP_OPERATING_ROLE
     int "PTP operating role (0=lab source, 1=time receiver, 2=monitor)"
     range 0 2
