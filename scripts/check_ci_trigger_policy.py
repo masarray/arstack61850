@@ -163,6 +163,24 @@ def main():
             "github.event.pull_request.head.ref == "
             "'feat/m3c-safe-external-gm-handover-20261023' }}"
         )
+        # M3.D remains a Draft; permit only its exact stacked head.
+        m3d_ptp_gate = m3c_ptp_gate.replace(
+            "'feat/m3c-safe-external-gm-handover-20261023') }}",
+            "'feat/m3c-safe-external-gm-handover-20261023' || "
+            "github.event.pull_request.head.ref == "
+            "'feat/m3d-ptp-advanced-policy-diagnostics-20261024') }}"
+        )
+        m3d_firmware_gate = m3c_firmware_gate.replace(
+            "'feat/m3c-safe-external-gm-handover-20261023')) ||",
+            "'feat/m3c-safe-external-gm-handover-20261023' || "
+            "github.event.pull_request.head.ref == "
+            "'feat/m3d-ptp-advanced-policy-diagnostics-20261024')) ||"
+        ).replace(
+            "'feat/m3c-safe-external-gm-handover-20261023' }}",
+            "'feat/m3c-safe-external-gm-handover-20261023' || "
+            "github.event.pull_request.head.ref == "
+            "'feat/m3d-ptp-advanced-policy-diagnostics-20261024' }}"
+        )
         for index, boundary in enumerate(boundaries):
             job_name = boundary.group(1)
             block_end = (
@@ -174,12 +192,12 @@ def main():
             if if_lines == [gate]:
                 continue
             if name == "esp32p4-smv-injector.yml" and job_name == "build-esp32p4":
-                assert if_lines == [m3c_firmware_gate], (
+                assert if_lines == [m3d_firmware_gate], (
                     name, job_name, "unexpected Draft firmware bypass"
                 )
                 continue
             if name == "ptp-core-ci.yml" and job_name == "portable-ptp":
-                assert if_lines == [m3c_ptp_gate], (
+                assert if_lines == [m3d_ptp_gate], (
                     name, job_name, "unexpected Draft PTP regression bypass"
                 )
                 continue
