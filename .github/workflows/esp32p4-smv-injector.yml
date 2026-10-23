@@ -59,7 +59,7 @@ jobs:
     # On draft consolidation, do not run ordinary expensive standalone builds.
     # The Studio Native Preview explicitly requests a paired firmware via
     # workflow_call phase_sync_preview=true; allow only that purposeful build.
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft || (inputs.phase_sync_preview == true && (github.event.pull_request.head.ref == 'feat/ptp-source-policy-fsm-20261022' || github.event.pull_request.head.ref == 'fix/autolive-from-pcap-proven-7c95-20261023')) || github.event.pull_request.head.ref == 'feat/m3a-persistent-sv-grid-20261023' }}
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft || (inputs.phase_sync_preview == true && (github.event.pull_request.head.ref == 'feat/ptp-source-policy-fsm-20261022' || github.event.pull_request.head.ref == 'fix/autolive-from-pcap-proven-7c95-20261023' || github.event.pull_request.head.ref == 'feat/m3a-persistent-sv-grid-20261023')) || github.event.pull_request.head.ref == 'feat/m3a-persistent-sv-grid-20261023' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
