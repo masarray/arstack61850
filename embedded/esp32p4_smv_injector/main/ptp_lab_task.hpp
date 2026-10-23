@@ -17,6 +17,15 @@ typedef enum ar_ptp_role_t {
     AR_PTP_ROLE_MONITOR = 2,
 } ar_ptp_role_t;
 
+// M3.D operator policy: verified board readback, no implicit SV START.
+// Runtime choice is RAM-only; reboot returns to compiled isolated-LAB default.
+typedef enum ar_ptp_advanced_mode_t {
+    AR_PTP_POLICY_INTERNAL_GM_ONLY = 0,
+    AR_PTP_POLICY_AUTO_PREFER_EXTERNAL = 1,
+    AR_PTP_POLICY_EXTERNAL_ONLY = 2,
+    AR_PTP_POLICY_MONITOR_ONLY = 3,
+} ar_ptp_advanced_mode_t;
+
 typedef enum ar_ptp_discipline_state_t {
     AR_PTP_DISCIPLINE_UNLOCKED = 0,
     AR_PTP_DISCIPLINE_ACQUIRING = 1,
@@ -139,6 +148,11 @@ void ar_ptp_boot_supervisor_operator_override(void);
 bool ar_ptp_boot_supervisor_autostart_allowed(void);
 // Runtime ownership is not equivalent to verified SOURCE READY.
 bool ar_ptp_source_runtime_active(void);
+// Requires both EMAC roles STOPPED (and SV TX STOP enforced by the
+// serial command caller). Changes the configured role atomically.
+bool ar_ptp_lab_set_advanced_policy(ar_ptp_advanced_mode_t mode);
+ar_ptp_advanced_mode_t ar_ptp_lab_advanced_policy(void);
+const char* ar_ptp_lab_advanced_policy_name(ar_ptp_advanced_mode_t mode);
 // Passive SOURCE-side foreign Announce monitor: evidence only, never PTP LOCK.
 bool ar_ptp_source_external_candidate_stable(void);
 
