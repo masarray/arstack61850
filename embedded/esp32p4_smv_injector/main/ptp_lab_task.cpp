@@ -83,6 +83,7 @@ struct PtpLabContext final {
     bool rx_respond_to_peer_delay{};
     bool rx_vlan_enabled{};
     std::uint16_t rx_vlan_id{};
+    std::uint8_t rx_vlan_priority{};
 };
 
 PtpLabContext g_ptp_context{};
@@ -654,7 +655,10 @@ esp_err_t ptp_input_info(
             !frame.outer_vlan_id.has_value() &&
             (context->rx_vlan_enabled
                 ? frame.vlan_id.has_value() &&
-                    *frame.vlan_id == context->rx_vlan_id
+                    *frame.vlan_id == context->rx_vlan_id &&
+                    length >= 16U && buffer[12] == 0x81U &&
+                    buffer[13] == 0x00U &&
+                    (buffer[14] >> 5U) == context->rx_vlan_priority
                 : !frame.vlan_id.has_value())) {
             if (g_foreign_announce_enabled.load(std::memory_order_acquire) &&
                 frame.header.message_type == PtpMessageType::announce &&
@@ -812,6 +816,7 @@ void ptp_lab_task(void* argument) {
     context.rx_respond_to_peer_delay = options.respond_to_peer_delay;
     context.rx_vlan_enabled = options.vlan_id.has_value();
     context.rx_vlan_id = options.vlan_id.value_or(0U);
+    context.rx_vlan_priority = options.vlan_priority;
     portENTER_CRITICAL(&g_foreign_announce_mux);
     g_foreign_announce_gate.reset();
     g_local_announce_rank = {
