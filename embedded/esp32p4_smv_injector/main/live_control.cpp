@@ -267,6 +267,7 @@ void print_help() noexcept {
     ESP_LOGI(kTag, "  QUALITY <channel> <uint32/0xhex>");
     ESP_LOGI(kTag, "  SHAPE CT <0|1> <dc_permille> <harmonic_permille> <order> <clip_permille>");
     ESP_LOGI(kTag, "  PTP SHOW | PTP DIAG | PTP START | PTP STOP");
+    ESP_LOGI(kTag, "  PTP POLICY <INTERNAL_GM_ONLY|AUTO_PREFER_EXTERNAL|EXTERNAL_ONLY|MONITOR_ONLY> (PTP+SV must be STOPPED)");
     ESP_LOGI(kTag, "  PTP CONFIG <domain> <transport> <vlan> <vid> <pcp> <announce_ms> <sync_ms> <pdelay> [bench_global_0_1 UTC_epoch_seconds]");
     ESP_LOGI(kTag, "GUI profile deployment uses bounded PROFILE subcommands while STOPPED.");
 }
@@ -308,6 +309,16 @@ void print_ptp_state() noexcept {
         return;
     }
     ar_esp32p4_ptp_print_link_status(); // actual Ethernet driver + PHY event state
+    const auto policy = ar_ptp_lab_advanced_policy();
+    ESP_LOGI(kTag,
+        "PTPPOLICY mode=%s role=%s boot_auto=%u ext_candidate=%u source_generation=%lu sv_running=%u",
+        ar_ptp_lab_advanced_policy_name(policy),
+        config.role == AR_PTP_ROLE_LAB_SOURCE ? "SOURCE" :
+            config.role == AR_PTP_ROLE_TIME_RECEIVER ? "RECEIVER" : "MONITOR",
+        ar_ptp_boot_supervisor_autostart_allowed() ? 1U : 0U,
+        ar_ptp_source_external_candidate_stable() ? 1U : 0U,
+        static_cast<unsigned long>(ar_ptp_lab_source_generation()),
+        live_tx_running() ? 1U : 0U);
     ESP_LOGI(kTag,
              "PTP status=%s Announce=%llu Sync=%llu FollowUp=%llu PdelayFrames=%llu TXfail=%llu",
              status.is_running ? "RUNNING" : "STOPPED",
@@ -437,6 +448,42 @@ void handle_ptp_command(char* save) noexcept {
         ar_ptp_boot_supervisor_operator_override();
         ar_ptp_lab_stop();
         ESP_LOGI(kTag, "PTP stop requested");
+        return;
+    }
+    if (std::strcmp(subcommand, "POLICY") == 0) {
+        char* requested = strtok_r(nullptr, kTokenDelimiters.data(), &save);
+        if (requested == nullptr || has_extra_token(&save)) {
+            ESP_LOGE(kTag, "Usage: PTP POLICY <INTERNAL_GM_ONLY|AUTO_PREFER_EXTERNAL|EXTERNAL_ONLY|MONITOR_ONLY>");
+            return;
+        }
+        uppercase_ascii(requested);
+        ar_ptp_advanced_mode_t desired;
+        if (std::strcmp(requested, "INTERNAL_GM_ONLY") == 0)
+            desired = AR_PTP_POLICY_INTERNAL_GM_ONLY;
+        else if (std::strcmp(requested, "AUTO_PREFER_EXTERNAL") == 0)
+            desired = AR_PTP_POLICY_AUTO_PREFER_EXTERNAL;
+        else if (std::strcmp(requested, "EXTERNAL_ONLY") == 0)
+            desired = AR_PTP_POLICY_EXTERNAL_ONLY;
+        else if (std::strcmp(requested, "MONITOR_ONLY") == 0)
+            desired = AR_PTP_POLICY_MONITOR_ONLY;
+        else {
+            ESP_LOGE(kTag, "PTP POLICY rejected: INVALID_MODE");
+            return;
+        }
+        // Always reject a time-authority role mutation during live SV or
+        // PTP ownership. No implicit STOP/restart of a healthy clock.
+        if (live_tx_running() || ar_ptp_source_runtime_active() ||
+            ar_ptp_lab_is_running()) {
+            ESP_LOGE(kTag, "PTP POLICY rejected: STOP_SV_AND_PTP_FIRST");
+            return;
+        }
+        if (!ar_ptp_lab_set_advanced_policy(desired)) {
+            ESP_LOGE(kTag, "PTP POLICY rejected: BUSY_OR_UNSUPPORTED_PROFILE");
+            return;
+        }
+        ESP_LOGI(kTag, "PTP POLICY accepted mode=%s",
+            ar_ptp_lab_advanced_policy_name(desired));
+        print_ptp_state();
         return;
     }
     if (std::strcmp(subcommand, "CONFIG") == 0) {
