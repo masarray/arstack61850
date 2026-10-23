@@ -669,6 +669,8 @@ esp_err_t ptp_input_info(
                     static_cast<std::uint8_t>(a.clock_accuracy),
                     a.offset_scaled_log_variance, a.priority2,
                     a.grandmaster_identity, a.steps_removed,
+                    frame.header.source_port_identity.clock_identity,
+                    frame.header.source_port_identity.port_number,
                 };
                 const auto time_us = esp_timer_get_time();
                 if (time_us >= 0) {
