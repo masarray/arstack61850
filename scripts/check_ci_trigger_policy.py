@@ -113,6 +113,19 @@ def main():
             "github.event.pull_request.head.ref == "
             "'fix/autolive-from-pcap-proven-7c95-20261023')) }}"
         )
+        # One isolated M3.A Draft may compile its firmware and GCC/Clang
+        # timing regressions. All other Draft jobs remain guarded.
+        m3a_ptp_gate = (
+            "    if: ${{ github.event_name != 'pull_request' || "
+            "!github.event.pull_request.draft || "
+            "github.event.pull_request.head.ref == "
+            "'feat/m3a-persistent-sv-grid-20261023' }}"
+        )
+        m3a_firmware_gate = preview_gate.replace(
+            "')) }}",
+            "')) || github.event.pull_request.head.ref == "
+            "'feat/m3a-persistent-sv-grid-20261023' }}"
+        )
         for index, boundary in enumerate(boundaries):
             job_name = boundary.group(1)
             block_end = (
@@ -124,8 +137,13 @@ def main():
             if if_lines == [gate]:
                 continue
             if name == "esp32p4-smv-injector.yml" and job_name == "build-esp32p4":
-                assert if_lines == [preview_gate], (
+                assert if_lines == [m3a_firmware_gate], (
                     name, job_name, "unexpected Draft firmware bypass"
+                )
+                continue
+            if name == "ptp-core-ci.yml" and job_name == "portable-ptp":
+                assert if_lines == [m3a_ptp_gate], (
+                    name, job_name, "unexpected Draft PTP regression bypass"
                 )
                 continue
             if name == "esp32p4-ptp-lab.yml" and job_name == "phase-guard-checkpoint":
