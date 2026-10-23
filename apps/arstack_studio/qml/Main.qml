@@ -633,10 +633,11 @@ ApplicationWindow {
                        : "One or more draft commands could not be queued; retry after checking the board.", !ok)
         return ok
     }
-    function startScenarioSnapshot() {
+    function startScenarioSnapshot(flushDrafts) {
         // Flush every local draft once before serializing the canonical
         // 4I+4V scenario. An invalid draft cannot be sent to the board.
-        if (!currentMatrix.flushPendingEdits() || !voltageMatrix.flushPendingEdits()) {
+        if (flushDrafts !== false &&
+            (!currentMatrix.flushPendingEdits() || !voltageMatrix.flushPendingEdits())) {
             showMessage("Invalid signal input: correct highlighted field before Start.", true)
             return null
         }
@@ -665,7 +666,9 @@ ApplicationWindow {
     function applyLiveScenario() {
         if (!workflowBar.injectionRunning || !workflowBar.session ||
             !workflowBar.session.liveControlReady || device.scenarioApplying) return false
-        const snapshot = startScenarioSnapshot()
+        // Live must transmit committed model values only. A second text cell
+        // that is still being typed remains a draft until Enter/focus-out.
+        const snapshot = startScenarioSnapshot(false)
         if (!snapshot) return false
         const revision = scenarioRevision
         if (!workflowBar.session.requestApplyLiveScenario(snapshot)) {
