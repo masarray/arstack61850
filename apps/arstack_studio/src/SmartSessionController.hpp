@@ -202,6 +202,7 @@ public:
     Q_INVOKABLE bool requestPtpRole(const QString& role);
     Q_INVOKABLE bool requestSmpSynch(const QString& mode);
     Q_INVOKABLE bool requestConfigurePtp(const QVariantMap& profile);
+    Q_INVOKABLE bool requestPtpAdvancedPolicy(const QString& mode);
     Q_INVOKABLE bool requestStartPtp();
     Q_INVOKABLE bool requestStartPtpConfigured(const QString& role, const QVariantMap& profile);
     Q_INVOKABLE bool requestStopPtp();
