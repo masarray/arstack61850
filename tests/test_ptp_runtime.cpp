@@ -119,16 +119,16 @@ void scheduler_sequence_and_status_match_runtime_contract() {
     // precise SOURCE passive-watch domain, transport, VLAN and PCP gate.
     const PtpForeignWireProfile profile{0U, 1U, true, 100U, 4U};
     CHECK(profile.matches(parsed, announce->ethernet_frame));
-    CHECK(!PtpForeignWireProfile{1U,1U,true,100U,4U}.matches(
-        parsed, announce->ethernet_frame));
-    CHECK(!PtpForeignWireProfile{0U,0U,true,100U,4U}.matches(
-        parsed, announce->ethernet_frame));
-    CHECK(!PtpForeignWireProfile{0U,1U,true,101U,4U}.matches(
-        parsed, announce->ethernet_frame));
-    CHECK(!PtpForeignWireProfile{0U,1U,true,100U,5U}.matches(
-        parsed, announce->ethernet_frame));
-    CHECK(!PtpForeignWireProfile{0U,1U,false,0U,0U}.matches(
-        parsed, announce->ethernet_frame));
+    CHECK((!PtpForeignWireProfile{1U,1U,true,100U,4U}.matches(
+        parsed, announce->ethernet_frame)));
+    CHECK((!PtpForeignWireProfile{0U,0U,true,100U,4U}.matches(
+        parsed, announce->ethernet_frame)));
+    CHECK((!PtpForeignWireProfile{0U,1U,true,101U,4U}.matches(
+        parsed, announce->ethernet_frame)));
+    CHECK((!PtpForeignWireProfile{0U,1U,true,100U,5U}.matches(
+        parsed, announce->ethernet_frame)));
+    CHECK((!PtpForeignWireProfile{0U,1U,false,0U,0U}.matches(
+        parsed, announce->ethernet_frame)));
     auto corrupted_pcp = announce->ethernet_frame;
     CHECK(corrupted_pcp.size() > 16U);
     corrupted_pcp[14] = static_cast<std::uint8_t>(
