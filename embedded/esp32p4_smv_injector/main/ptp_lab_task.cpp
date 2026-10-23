@@ -650,16 +650,11 @@ esp_err_t ptp_input_info(
         PtpFrame frame;
         if (ar::iec61850::time_sync::PtpCodec::try_parse_ethernet_frame(
                 std::span<const std::uint8_t>{buffer, length}, frame) &&
-            frame.header.domain_number == context->rx_domain &&
-            frame.header.transport_specific == context->rx_transport_specific &&
-            !frame.outer_vlan_id.has_value() &&
-            (context->rx_vlan_enabled
-                ? frame.vlan_id.has_value() &&
-                    *frame.vlan_id == context->rx_vlan_id &&
-                    length >= 16U && buffer[12] == 0x81U &&
-                    buffer[13] == 0x00U &&
-                    (buffer[14] >> 5U) == context->rx_vlan_priority
-                : !frame.vlan_id.has_value())) {
+            ar::iec61850::time_sync::PtpForeignWireProfile{
+                context->rx_domain, context->rx_transport_specific,
+                context->rx_vlan_enabled, context->rx_vlan_id,
+                context->rx_vlan_priority
+            }.matches(frame, std::span<const std::uint8_t>{buffer, length})) {
             if (g_foreign_announce_enabled.load(std::memory_order_acquire) &&
                 frame.header.message_type == PtpMessageType::announce &&
                 frame.announce.has_value()) {
