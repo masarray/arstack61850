@@ -735,6 +735,18 @@ def main() -> None:
             and "PtpAdvancedPolicy::kBenchSeedMaxAgeUs" in ptp_source_task,
             "M3.D must retain only a fresh SOURCE bench GM seed across SOURCE policy selection")
 
+    # Boot and fallback must use the SAME explicit isolated simulated GM
+    # policy. A bare LOCAL SOURCE default would regress smpSynch to 1.
+    firmware_defaults = (project_root / "embedded/esp32p4_smv_injector/sdkconfig.defaults").read_text(encoding="utf-8")
+    phase_header = (project_root / "include/ariec61850/time_sync/sv_ptp_phase_authority.hpp").read_text(encoding="utf-8")
+    require("CONFIG_AR_PTP_BOOT_SIMULATED_GLOBAL_GM=y" in firmware_defaults
+            and "CONFIG_AR_PTP_BOOT_SIMULATED_GLOBAL_GM" in ptp_source_task
+            and "fresh_lab.bench_global_gm" in firmware_source
+            and "SvWarmResumePolicy::retain" in firmware_source
+            and "SvWarmResumePolicy" in phase_header
+            and "g_warm_resume_first_epoch" in firmware_source,
+            "isolated simulated GM must boot/fallback and warm SV resume must requalify MAC")
+
     print("Studio operator workspace contract: PASS")
 
 

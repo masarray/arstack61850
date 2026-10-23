@@ -114,6 +114,32 @@ void check_m3a_stop_start_keeps_qualified_sample_grid() {
             CHECK(source_generation == 7U && phase_session == 3U);
         }
     }
+    // Warm resume uses already *measured* sync and a continuous dry grid.
+    // It may bridge one new MAC baseline, not a real phase/lease/Tx fault.
+    using Warm = ar::iec61850::time_sync::SvWarmResumePolicy;
+    for (std::uint32_t cycle = 0U; cycle < 100U; ++cycle) {
+        const std::uint32_t previous_epoch = 50U + cycle * 20U;
+        CHECK(Warm::may_begin(true, true, true, true, true));
+        for (std::uint32_t n = 1U; n <= Warm::kMaxLiveReacquireEpochs; ++n) {
+            CHECK(Warm::retain(previous_epoch, previous_epoch + n,
+                               true, true, true, true));
+        }
+        CHECK(!Warm::within_window(previous_epoch,
+                                   previous_epoch + Warm::kMaxLiveReacquireEpochs + 1U));
+        CHECK(!Warm::retain(previous_epoch, previous_epoch + 1U,
+                            false, true, true, true)); // lost sample phase
+        CHECK(!Warm::retain(previous_epoch, previous_epoch + 1U,
+                            true, false, true, true)); // different GM/lease
+        CHECK(!Warm::retain(previous_epoch, previous_epoch + 1U,
+                            true, true, false, true)); // lost publisher slot
+        CHECK(!Warm::retain(previous_epoch, previous_epoch + 1U,
+                            true, true, true, false)); // revoked by MAC
+    }
+    CHECK(!Warm::may_begin(true, true, false, true, true)); // cold START
+    CHECK(!Warm::may_begin(true, true, true, false, true)); // stale observer
+    CHECK(!Warm::may_begin(true, true, true, true, false)); // external receiver
+    CHECK(!Warm::within_window(0U, 1U));
+
     // Any real source/lease/profile/phase fault must prevent parking, not
     // silently keep a stale GPTimer authority or a stale smpSynch claim.
     for (int fault = 0; fault < 6; ++fault) {
