@@ -152,6 +152,7 @@ bool ar_ptp_source_runtime_active(void);
 // serial command caller). Changes the configured role atomically.
 bool ar_ptp_lab_set_advanced_policy(ar_ptp_advanced_mode_t mode);
 ar_ptp_advanced_mode_t ar_ptp_lab_advanced_policy(void);
+uint32_t ar_ptp_lab_advanced_policy_generation(void);
 const char* ar_ptp_lab_advanced_policy_name(ar_ptp_advanced_mode_t mode);
 // Passive SOURCE-side foreign Announce monitor: evidence only, never PTP LOCK.
 bool ar_ptp_source_external_candidate_stable(void);
