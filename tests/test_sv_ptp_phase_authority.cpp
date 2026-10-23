@@ -280,6 +280,28 @@ void check_m3d_advanced_ptp_policy_prevents_implicit_role_promotion() {
     CHECK(!Policy::permits_local_fallback(Mode::monitor_only,true));
 }
 
+void check_relay_bench_warm_source_global_resume_is_bounded() {
+    using Resume = SvWarmSourceResumePolicy;
+    CHECK(Resume::kMaxUnconfirmedEpochs == 7U);
+    // Previous real MAC/phase qualification, unchanged live SOURCE/clock.
+    for (std::uint32_t e = 100U; e <= 107U; ++e)
+        CHECK(Resume::may_preserve(true, true, true, true, 100U, e));
+    CHECK(!Resume::may_preserve(true, true, true, true, 100U, 108U));
+    // No cold promotion or stale evidence after SOURCE, lease, timer, fault,
+    // phase or GM identity change. Fail closed on zero/unarmed epochs.
+    CHECK(!Resume::may_preserve(false,true,true,true,100U,101U));
+    CHECK(!Resume::may_preserve(true,false,true,true,100U,101U));
+    CHECK(!Resume::may_preserve(true,true,false,true,100U,101U));
+    CHECK(!Resume::may_preserve(true,true,true,false,100U,101U));
+    CHECK(!Resume::may_preserve(true,true,true,true,0U,101U));
+    CHECK(!Resume::may_preserve(true,true,true,true,100U,0U));
+    CHECK(!Resume::may_preserve(true,true,true,true,100U,99U));
+    // Uptime/epoch uint32 wrap is not a phase fault by itself.
+    CHECK(Resume::may_preserve(
+        true, true, true, true, 0xFFFFFFFCU, 3U));
+    CHECK(!Resume::may_preserve(
+        true, true, true, true, 0xFFFFFFFCU, 4U));
+}
 void check_receiver_preflight_requires_measured_gm_lease() {
     SvPtpClockLease gm{};
     gm.role = PtpAuthorityRole::receiver;
@@ -651,6 +673,7 @@ int main() {
         check_m3b_boot_ptp_is_safe_and_operator_owned();
         check_m3c_foreign_announce_and_exclusive_emac_handover();
         check_m3d_advanced_ptp_policy_prevents_implicit_role_promotion();
+        check_relay_bench_warm_source_global_resume_is_bounded();
         check_phase_observer_stall_revokes_source_wire_claim();
         check_receiver_preflight_requires_measured_gm_lease();
         check_phase_sign_and_bounded_corrections();
