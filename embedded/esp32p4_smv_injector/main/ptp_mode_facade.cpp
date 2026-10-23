@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "ptp_lab_task.hpp"
+#include "ariec61850/time_sync/ptp_advanced_policy.hpp"
 #include "ptp_receiver_task.hpp"
 #include "smp_synch_lab.hpp"
 
@@ -44,6 +45,13 @@ bool g_facade_override_valid = false;
 std::atomic_bool g_receiver_stop_pending{false};
 // Cancel only automatic boot attempts; operator PTP actions are authoritative.
 std::atomic_bool g_boot_source_autostart_allowed{true};
+#if defined(CONFIG_AR_PTP_AUTO_PREFER_EXTERNAL) && CONFIG_AR_PTP_AUTO_PREFER_EXTERNAL
+std::atomic<ar_ptp_advanced_mode_t> g_advanced_ptp_mode{
+    AR_PTP_POLICY_AUTO_PREFER_EXTERNAL};
+#else
+std::atomic<ar_ptp_advanced_mode_t> g_advanced_ptp_mode{
+    AR_PTP_POLICY_INTERNAL_GM_ONLY};
+#endif
 ar::iec61850::time_sync::PtpControlCancellationGate g_role_control;
 
 void stop_active_ptp_roles() noexcept;
@@ -246,6 +254,64 @@ extern "C" void ar_ptp_boot_supervisor_operator_override(void) {
 extern "C" bool ar_ptp_boot_supervisor_autostart_allowed(void) {
     return ar::esp32p4::smv::g_boot_source_autostart_allowed.load(
         std::memory_order_acquire);
+}
+
+extern "C" const char* ar_ptp_lab_advanced_policy_name(
+    ar_ptp_advanced_mode_t mode) {
+    switch (mode) {
+    case AR_PTP_POLICY_INTERNAL_GM_ONLY: return "INTERNAL_GM_ONLY";
+    case AR_PTP_POLICY_AUTO_PREFER_EXTERNAL: return "AUTO_PREFER_EXTERNAL";
+    case AR_PTP_POLICY_EXTERNAL_ONLY: return "EXTERNAL_ONLY";
+    case AR_PTP_POLICY_MONITOR_ONLY: return "MONITOR_ONLY";
+    }
+    return "INVALID";
+}
+
+extern "C" ar_ptp_advanced_mode_t ar_ptp_lab_advanced_policy(void) {
+    return ar::esp32p4::smv::g_advanced_ptp_mode.load(
+        std::memory_order_acquire);
+}
+
+extern "C" bool ar_ptp_lab_set_advanced_policy(
+    const ar_ptp_advanced_mode_t requested) {
+    using ar::iec61850::time_sync::PtpAdvancedMode;
+    using ar::iec61850::time_sync::PtpAdvancedPolicy;
+    if (!PtpAdvancedPolicy::valid(
+            static_cast<PtpAdvancedMode>(requested))) return false;
+    // Shared EMAC owner arbitration: never reconfigure SOURCE under a
+    // receiver, even if a worker START/STOP is still being cleaned up.
+    ar::esp32p4::smv::RoleControlClaim transaction{};
+    if (!transaction.held || !ar::esp32p4::smv::emac_role_free())
+        return false;
+    auto config = ar::esp32p4::smv::selected_config();
+    config.role = requested == AR_PTP_POLICY_MONITOR_ONLY
+        ? AR_PTP_ROLE_MONITOR
+        : requested == AR_PTP_POLICY_EXTERNAL_ONLY
+            ? AR_PTP_ROLE_TIME_RECEIVER : AR_PTP_ROLE_LAB_SOURCE;
+    if (config.role != AR_PTP_ROLE_LAB_SOURCE) {
+        // No stale bench emulated GPS/UTC status during external follow.
+        config.bench_global_gm = false;
+        config.bench_utc_epoch_seconds = 0U;
+        config.bench_utc_epoch_millisecond = 0U;
+        config.bench_epoch_received_mono_us = 0LL;
+    }
+    if (!ar::esp32p4::smv::valid_public_config(config) ||
+        !ar_ptp_source_configure(&config)) return false;
+    portENTER_CRITICAL(&ar::esp32p4::smv::g_ptp_facade_mux);
+    if (!ar::esp32p4::smv::emac_role_free()) {
+        portEXIT_CRITICAL(&ar::esp32p4::smv::g_ptp_facade_mux);
+        return false;
+    }
+    ar::esp32p4::smv::g_facade_override = config;
+    ar::esp32p4::smv::g_facade_override_valid = true;
+    // PTP POLICY explicitly gives background authority to the selected
+    // bench mode. Later PTP STOP or CONFIG disables it until another POLICY.
+    ar::esp32p4::smv::g_advanced_ptp_mode.store(
+        requested, std::memory_order_release);
+    ar::esp32p4::smv::g_boot_source_autostart_allowed.store(
+        true, std::memory_order_release);
+    portEXIT_CRITICAL(&ar::esp32p4::smv::g_ptp_facade_mux);
+    return transaction.finish();
 }
 
 extern "C" void ar_ptp_lab_get_default_config(ar_ptp_lab_config_t* config) {
