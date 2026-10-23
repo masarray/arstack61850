@@ -871,7 +871,8 @@ void sv_boot_clock_supervisor_task(void*) {
                 live_tx_running(), ar_ptp_source_runtime_active(),
                 external_runtime_selected, link_ready);
         if (may_external && !handover_failure_latched &&
-            static_cast<std::int32_t>(now_ms - next_external_handover_ms) >= 0) {
+            ar::iec61850::time_sync::PtpExternalHandoverGuard::cooldown_expired(
+                now_ms, next_external_handover_ms)) {
             // No SV output, so a GM change explicitly invalidates the old
             // phase/lease. The dry grid's preflight owner sees generation
             // change and tears down/re-arms only after RECEIVER is LOCKED.
@@ -891,7 +892,8 @@ void sv_boot_clock_supervisor_task(void*) {
                     external_quiet_since_ms = 0U;
                     // Avoid repeated GM oscillation when several clocks
                     // advertise near-equal priority or a flaky PHY bounces.
-                    next_external_handover_ms = now_ms + 30000U;
+                    next_external_handover_ms = now_ms +
+                        ar::iec61850::time_sync::PtpExternalHandoverGuard::kMinSwitchDwellMs;
                     ESP_LOGI(kTag,
                         "M3C RECEIVER active; waiting for measured GM/offset/Pdelay LOCK");
                 } else {
@@ -949,7 +951,8 @@ void sv_boot_clock_supervisor_task(void*) {
                     ar_esp32p4_ptp_start()) {
                     ready_once = true;
                     handover_failure_latched = false;
-                    next_external_handover_ms = now_ms + 30000U;
+                    next_external_handover_ms = now_ms +
+                        ar::iec61850::time_sync::PtpExternalHandoverGuard::kMinSwitchDwellMs;
                     ESP_LOGI(kTag,
                         "M3C restored lab LOCAL SOURCE; new generation requires fresh SV phase");
                 } else {
