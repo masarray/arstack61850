@@ -97,6 +97,20 @@ config AR_PTP_BOOT_SOURCE_AUTOSTART
         SV Ethernet transmission remains OFF until operator SV START.
         Never enable while connected to an energized utility process bus.
 
+config AR_PTP_BOOT_SIMULATED_GLOBAL_GM
+    bool "ISOLATED FAT ONLY: boot as simulated Global PTP Grandmaster"
+    default n
+    depends on AR_PTP_BOOT_SOURCE_AUTOSTART
+    help
+        Explicit IEC 61850 laboratory TEST-SET simulation. On isolated
+        Ethernet, the ESP32-P4 PTP SOURCE emulates GNSS-quality Announce
+        metadata and a PTP/TAI epoch without a real GPS. Its own EMAC clock
+        drives both PTP and the PTP-aligned SV grid. A plausible RTC epoch is
+        used if available; otherwise a fixed synthetic UTC anchor is used
+        with monotonic uptime (NOT true UTC or certified 1-us accuracy).
+        smpSynch=2 is STILL gated on measured SV sample phase and canonical
+        MAC evidence. DO NOT enable on a live utility process bus.
+
 config AR_PTP_AUTO_PREFER_EXTERNAL
     bool "LAB ONLY: prefer better qualified external GM using safe EMAC handover"
     default n

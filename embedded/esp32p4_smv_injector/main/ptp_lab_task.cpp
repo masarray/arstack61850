@@ -222,6 +222,30 @@ void fill_kconfig_defaults(ar_ptp_lab_config_t& config) noexcept {
     config.bench_utc_epoch_seconds = 0U;
     config.bench_utc_epoch_millisecond = 0U;
     config.bench_epoch_received_mono_us = 0LL;
+#if defined(CONFIG_AR_PTP_BOOT_SIMULATED_GLOBAL_GM) && CONFIG_AR_PTP_BOOT_SIMULATED_GLOBAL_GM
+    // Explicit isolated FAT test-set emulation, never a physical GNSS claim.
+    // Boot has no Studio/USB UTC seed. Keep PTP and SV on the same EMAC clock.
+    // If ESP-IDF RTC has valid UTC use it; otherwise monotonic uptime advances
+    // a fixed synthetic anchor. A receiver may lock to this *simulated* GM,
+    // but its timestamps are not independently UTC-traceable.
+    if (config.role == AR_PTP_ROLE_LAB_SOURCE) {
+        constexpr std::int64_t kSyntheticUtcAnchor = 1767225600LL; // 2026-01-01
+        const std::int64_t monotonic_us = esp_timer_get_time();
+        const std::int64_t rtc_seconds = static_cast<std::int64_t>(std::time(nullptr));
+        const bool plausible_rtc =
+            rtc_seconds >= 1577836800LL && rtc_seconds <= UINT32_MAX;
+        const std::int64_t positive_mono_us =
+            std::max<std::int64_t>(1LL, monotonic_us);
+        const std::int64_t epoch = plausible_rtc
+            ? rtc_seconds : kSyntheticUtcAnchor + positive_mono_us / 1000000LL;
+        config.bench_global_gm = true;
+        config.bench_utc_epoch_seconds = static_cast<std::uint32_t>(epoch);
+        config.bench_utc_epoch_millisecond = plausible_rtc
+            ? 0U : static_cast<std::uint16_t>(
+                (positive_mono_us % 1000000LL) / 1000LL);
+        config.bench_epoch_received_mono_us = positive_mono_us;
+    }
+#endif
 
     const std::string configured_identity{CONFIG_AR_PTP_CLOCK_IDENTITY};
     if (!configured_identity.empty()) {

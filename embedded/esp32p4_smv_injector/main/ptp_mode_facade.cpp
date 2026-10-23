@@ -311,6 +311,20 @@ extern "C" bool ar_ptp_lab_set_advanced_policy(
         config.bench_utc_epoch_seconds = 0U;
         config.bench_utc_epoch_millisecond = 0U;
         config.bench_epoch_received_mono_us = 0LL;
+#if defined(CONFIG_AR_PTP_BOOT_SIMULATED_GLOBAL_GM) && CONFIG_AR_PTP_BOOT_SIMULATED_GLOBAL_GM
+        if (PtpAdvancedPolicy::starts_source(
+                static_cast<PtpAdvancedMode>(requested))) {
+            // New SOURCE policy after external/monitor/expired authority:
+            // acquire a FRESH lab seed instead of resurrecting stale UTC.
+            const auto lab_default = ar::esp32p4::smv::default_config();
+            config.bench_global_gm = lab_default.bench_global_gm;
+            config.bench_utc_epoch_seconds = lab_default.bench_utc_epoch_seconds;
+            config.bench_utc_epoch_millisecond =
+                lab_default.bench_utc_epoch_millisecond;
+            config.bench_epoch_received_mono_us =
+                lab_default.bench_epoch_received_mono_us;
+        }
+#endif
     }
     if (!ar::esp32p4::smv::valid_public_config(config) ||
         !ar_ptp_source_configure(&config)) return false;

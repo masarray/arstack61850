@@ -973,13 +973,29 @@ void sv_boot_clock_supervisor_task(void*) {
                     "M3C no selected external GM for >=15s: explicit lab fallback");
                 ar_ptp_lab_stop(); // fully drain receiver ownership first
                 ar_ptp_lab_config_t local = config;
-                // A stale Studio BENCH_GM epoch must NOT be reused on
-                // fallback. Local oscillator profile makes no GNSS claim.
+                // Failover changes the clock lease and must reacquire phase.
+                // Never recycle a stale Studio seed. When the isolated FAT
+                // build explicitly enables boot simulated GM, obtain a NEW
+                // monotonic/RTC-derived test-set seed instead of silently
+                // regressing from GLOBAL to LOCAL during local fallback.
                 local.role = AR_PTP_ROLE_LAB_SOURCE;
                 local.bench_global_gm = false;
                 local.bench_utc_epoch_seconds = 0U;
                 local.bench_utc_epoch_millisecond = 0U;
                 local.bench_epoch_received_mono_us = 0LL;
+#if defined(CONFIG_AR_PTP_BOOT_SIMULATED_GLOBAL_GM) && CONFIG_AR_PTP_BOOT_SIMULATED_GLOBAL_GM
+                ar_ptp_lab_config_t fresh_lab{};
+                ar_ptp_lab_get_default_config(&fresh_lab);
+                if (fresh_lab.role == AR_PTP_ROLE_LAB_SOURCE &&
+                    fresh_lab.bench_global_gm) {
+                    local.bench_global_gm = true;
+                    local.bench_utc_epoch_seconds = fresh_lab.bench_utc_epoch_seconds;
+                    local.bench_utc_epoch_millisecond =
+                        fresh_lab.bench_utc_epoch_millisecond;
+                    local.bench_epoch_received_mono_us =
+                        fresh_lab.bench_epoch_received_mono_us;
+                }
+#endif
                 external_runtime_selected = false;
                 // Prevent indefinite repeated local promotions if startup
                 // fails; only explicit PTP control may reset this latch.
@@ -992,7 +1008,8 @@ void sv_boot_clock_supervisor_task(void*) {
                     next_external_handover_ms = now_ms +
                         ar::iec61850::time_sync::PtpExternalHandoverGuard::kMinSwitchDwellMs;
                     ESP_LOGI(kTag,
-                        "M3C restored lab LOCAL SOURCE; new generation requires fresh SV phase");
+                        "M3C restored lab SOURCE; simulated Global GM=%u; new phase required",
+                        local.bench_global_gm ? 1U : 0U);
                 } else {
                     ESP_LOGE(kTag,
                         "M3C lab SOURCE restoration FAILED; leave PTP unqualified");
