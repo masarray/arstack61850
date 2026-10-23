@@ -737,6 +737,20 @@ void handle_line(char* line) noexcept {
             ESP_LOGE(kTag, "START rejected: CFG commit/readback token or boot invalid");
             return;
         }
+#if defined(CONFIG_AR_SMV_RELAY_BENCH_GLOBAL_GUARD) && CONFIG_AR_SMV_RELAY_BENCH_GLOBAL_GUARD
+        ar_ptp_lab_config_t selected_ptp{};
+        // An active local SOURCE before Studio UTC commissioning is only
+        // LOCAL, however healthy its Announce and Sync cadence may look.
+        // Do not emit a local-flag SV stream to the relay in FAT mode.
+        if (ar_ptp_lab_get_config(&selected_ptp) &&
+            selected_ptp.role == AR_PTP_ROLE_LAB_SOURCE &&
+            !ar_ptp_lab_bench_global_ready()) {
+            ESP_LOGE(kTag,
+                "START rejected: BENCH_GM_NOT_READY; open Time Sync, "
+                "Verify / Commission Bench GM while SV STOPPED, then retry");
+            return;
+        }
+#endif
         if (!arm_control_lease_if_fresh()) {
             ESP_LOGE(kTag, "START rejected: Studio control-session lease is unavailable");
             return;
