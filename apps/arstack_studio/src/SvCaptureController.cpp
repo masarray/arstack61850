@@ -373,7 +373,10 @@ void SvCaptureController::sampleTelemetry(const QVariantMap& passiveSnapshot) {
             "stop cause; packets recorded before STOP are only partial evidence.");
         abortRequested_ = true;
         capture_.terminate();
-        setStatus(QStringLiteral("CAPTURE INVALID: ") + captureInterruptionReason_);
+        QTimer::singleShot(2500, &capture_, [this] {
+            if (capture_.state() != QProcess::NotRunning) capture_.kill();
+        });
+        setStatus(QStringLiteral("CAPTURE INTERRUPTED: ") + captureInterruptionReason_);
     }
 }
 void SvCaptureController::abortCapture() {
@@ -391,9 +394,17 @@ void SvCaptureController::onCaptureFinished(int exitCode, QProcess::ExitStatus e
         const QString reason = captureInterruptionReason_.isEmpty()
             ? QStringLiteral("Capture manually canceled before completion.")
             : captureInterruptionReason_;
-        writeInvalidCaptureReport(reason);
-        setStatus(QStringLiteral("CAPTURE INVALID: ") + reason +
-                  QStringLiteral(" See _report.json."));
+        // A partial PCAP still carries independent physical SV/PTP evidence.
+        // Decode it to all five outputs and preserve INVALID_CAPTURE status;
+        // never replace genuine wire frame counts with the placeholder zero.
+        captureInterruptionReason_ = reason;
+        if (QFileInfo(activePcap_).size() >= 64) {
+            decodeCapturedFile();
+        } else {
+            writeInvalidCaptureReport(reason);
+            setStatus(QStringLiteral("CAPTURE INVALID: ") + reason +
+                      QStringLiteral(" See _report.json."));
+        }
         return;
     }
     if (exitCode != 0 || exitStatus != QProcess::NormalExit ||
@@ -414,7 +425,8 @@ void SvCaptureController::decodeCapturedFile() {
     setStatus(QStringLiteral("Writing filtered SV CSV and JSON report (off the UI thread)..."));
     decoder_.setFuture(QtConcurrent::run(&SvCaptureController::decodePcap,
         activePcap_, activeCsv_, activeSeconds_, activeEvents_, activeJson_, activeSecondsRequested_, activeAdapter_,
-        activeStudioTelemetry_, activeStudioTelemetrySeries_));
+        activeStudioTelemetry_, activeStudioTelemetrySeries_,
+        captureInterruptionReason_));
     emit stateChanged();
 }
 void SvCaptureController::openOutputFolder() {
@@ -432,7 +444,8 @@ QVariantMap SvCaptureController::decodePcap(
     const QString& pcapFile, const QString& csvFile, const QString& secondsFile,
     const QString& eventsFile, const QString& jsonFile, int requestedSeconds, const QString& adapter,
     const QVariantMap& studioTelemetry,
-    const QVariantList& studioTelemetrySeries) {
+    const QVariantList& studioTelemetrySeries,
+    const QString& interruptionReason) {
     QVariantMap result;
     result.insert(QStringLiteral("json"), jsonFile);
     result.insert(QStringLiteral("status"), QStringLiteral("Capture failed: PCAP parser error."));
@@ -795,10 +808,17 @@ QVariantMap SvCaptureController::decodePcap(
     const bool usable = parseFailure.isEmpty() && matched > 0;
     const bool anomalies = missing > 0 || duplicates > 0 ||
         malformed > 0 || malformedPtp > 0 || backwardOrResetEvents > 0;
-    report.insert(QStringLiteral("status"), !usable ? QStringLiteral("INVALID_CAPTURE")
+    report.insert(QStringLiteral("status"), !usable || !interruptionReason.isEmpty()
+        ? QStringLiteral("INVALID_CAPTURE")
         : anomalies ? QStringLiteral("CAPTURED_WITH_ANOMALIES")
                     : QStringLiteral("CAPTURED_NOT_ACCEPTED"));
-    if (!parseFailure.isEmpty()) report.insert(QStringLiteral("error"), parseFailure);
+    if (!interruptionReason.isEmpty()) {
+        report.insert(QStringLiteral("error"), interruptionReason);
+        report.insert(QStringLiteral("capture_interrupted"), true);
+        report.insert(QStringLiteral("partial_wire_evidence"), true);
+    } else if (!parseFailure.isEmpty()) {
+        report.insert(QStringLiteral("error"), parseFailure);
+    }
     QFile json(jsonFile);
     if (!json.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
         json.write(QJsonDocument::fromVariant(report).toJson(QJsonDocument::Indented)) < 0) {
@@ -820,8 +840,11 @@ QVariantMap SvCaptureController::decodePcap(
         });
     }
     result.insert(QStringLiteral("status"), usable
-        ? QStringLiteral("Capture saved: %1 SV / %2 PTP frames, %3 missing, %4 sync transitions. "
-                         "Status: %5. Share report.json + events.csv first; keep PCAP for deep analysis.")
+        ? (interruptionReason.isEmpty()
+            ? QStringLiteral("Capture saved: %1 SV / %2 PTP frames, %3 missing, %4 sync transitions. "
+                             "Status: %5. Share report.json + events.csv first; keep PCAP for deep analysis.")
+            : QStringLiteral("INVALID/INTERRUPTED: %1 SV / %2 PTP frames, %3 gaps, %4 sync transitions. "
+                             "Saved five partial-evidence files; do not treat as 120s continuous pass."))
               .arg(matched).arg(ptpFrames).arg(missing).arg(syncTransitions)
               .arg(anomalies ? QStringLiteral("ANOMALIES") : QStringLiteral("NOT PHYSICAL PASS"))
         : formatError(QStringLiteral("Capture validation failed"),

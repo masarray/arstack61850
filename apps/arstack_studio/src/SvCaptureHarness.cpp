@@ -223,8 +223,45 @@ public:
             result.value("summary").toMap().value("missing_samples").toULongLong() == 1 &&
             result.value("summary").toMap().value("sync_transitions").toULongLong() == 1 &&
             !result.value("summary").toMap().value("physical_acceptance").toBool();
-        if (!ok) qCritical() << "Failed production PCAP fixture:" << result << parsed;
-        return ok;
+        if (!ok) {
+            qCritical() << "Failed production PCAP fixture:" << result << parsed;
+            return false;
+        }
+        // Regression from 2026-10-23 FAT: capture requested 120 seconds but
+        // publisher STOPPED mid-run. Report INVALID_CAPTURE while preserving
+        // 3 actual SV, 1 PTP, and all four parsed output artifacts.
+        const QString partialCsv = dir.filePath("partial_samples.csv");
+        const QString partialSeconds = dir.filePath("partial_seconds.csv");
+        const QString partialEvents = dir.filePath("partial_events.csv");
+        const QString partialJson = dir.filePath("partial_report.json");
+        const QString interrupted = QStringLiteral(
+            "SV publisher STOPPED during capture; partial on-wire evidence.");
+        const auto partialResult = SvCaptureController::decodePcap(
+            pcap, partialCsv, partialSeconds, partialEvents, partialJson,
+            120, QStringLiteral("TEST_ETHERNET"), {}, {}, interrupted);
+        QFile partialReportFile(partialJson);
+        if (!partialReportFile.open(QIODevice::ReadOnly)) return false;
+        const QJsonObject partialReport =
+            QJsonDocument::fromJson(partialReportFile.readAll()).object();
+        const bool partialOk =
+            partialReport.value("status").toString() == "INVALID_CAPTURE" &&
+            partialReport.value("error").toString() == interrupted &&
+            partialReport.value("capture_interrupted").toBool() &&
+            partialReport.value("partial_wire_evidence").toBool() &&
+            partialReport.value("sv_frames").toDouble() == 3 &&
+            partialReport.value("ptp_l2_frames").toDouble() == 1 &&
+            !partialReport.value("physical_acceptance").toBool() &&
+            QFileInfo::exists(partialCsv) &&
+            QFileInfo::exists(partialSeconds) &&
+            QFileInfo::exists(partialEvents) &&
+            partialResult.value("status").toString().contains(
+                QStringLiteral("INVALID/INTERRUPTED")) &&
+            partialResult.value("summary").toMap()
+                .value("sv_frames").toULongLong() == 3;
+        if (!partialOk)
+            qCritical() << "Failed partial-capture 5-file regression:"
+                        << partialResult << partialReport;
+        return partialOk;
     }
 };
 

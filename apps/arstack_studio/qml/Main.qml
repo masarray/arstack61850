@@ -49,13 +49,41 @@ ApplicationWindow {
         return { version: 1, hz: signalFrequency, current: values(currentModel),
                  voltage: values(voltageModel), linked: phaseLink }
     }
+    // One full 4I+4V firmware transaction per committed edit, coalesced across
+    // focus/Enter/context-menu events. Never emit serial commands per keystroke.
+    Timer {
+        id: autoLiveApplyTimer
+        interval: 40
+        repeat: false
+        onTriggered: root.drainAutoLiveEdits()
+    }
+    function scheduleAutoLiveEdit() {
+        if (!device.running || !device.deviceVerified || !workflowBar.injectionRunning)
+            return
+        autoLiveQueuedRevision = scenarioRevision
+        autoLiveApplyTimer.restart()
+    }
+    function drainAutoLiveEdits() {
+        if (autoLiveQueuedRevision < 0) return
+        if (!device.deviceVerified || !device.running || !workflowBar.injectionRunning) {
+            autoLiveQueuedRevision = -1
+            return
+        }
+        // No START or STOP: wait for the previous verified CFG COMMIT+readback
+        // to complete, then submit the newest snapshot, never stale drafts.
+        if (!workflowBar.session || !workflowBar.session.liveControlReady ||
+            device.scenarioApplying) return
+        autoLiveQueuedRevision = -1
+        // On rejection, retain pendingApply and surface the error. Do not
+        // silently retry forever or advance the claimed applied revision.
+        applyLiveScenario()
+    }
     function markScenarioDirty() {
         if (restoringScenario) return
         saveScenarioTimer.restart()
-        // All edits are a draft until the matching command is queued.
-        // Never label a visible draft as proven transmitted waveform data.
         pendingApply = true
         scenarioRevision += 1
+        scheduleAutoLiveEdit()
     }
     function restoreLocalScenario() {
         const saved = scenarioSettings.lastScenario
@@ -132,6 +160,7 @@ ApplicationWindow {
     property bool pendingApply: true
     property int scenarioRevision: 0
     property int liveSubmissionRevision: -1
+    property int autoLiveQueuedRevision: -1
     // Session-only operator intent. Never persist across application launches:
     // an explicit PTP ON can be restored after a firmware reflash/reconnect
     // without introducing an uncontrolled power-on publisher.
@@ -228,7 +257,23 @@ ApplicationWindow {
         function onDeviceVerifiedChanged() {
             root.pendingApply = true
             root.liveSubmissionRevision = -1
+            root.autoLiveQueuedRevision = -1
+            autoLiveApplyTimer.stop()
             root.offlinePreviewRunning = false
+        }
+        function onRunningChanged() {
+            // An operator STOP or a firmware fault cancels unsent live edits.
+            // Reconnect/START must never replay edits from a previous session.
+            if (!device.running) {
+                root.autoLiveQueuedRevision = -1
+                autoLiveApplyTimer.stop()
+            }
+        }
+        function onScenarioApplicationFinished() {
+            // The board ACK/readback gate is now idle. If the operator edited
+            // another field during the transaction, drain that newest edit.
+            if (root.autoLiveQueuedRevision >= 0 && device.running)
+                autoLiveApplyTimer.restart()
         }
         function onLiveScenarioApplied() {
             if (root.liveSubmissionRevision >= 0 &&
@@ -245,6 +290,14 @@ ApplicationWindow {
 
     Connections {
         target: workflowBar.session
+        function onStateChanged() {
+            // If a committed edit was queued while the serial/session
+            // transport was briefly not ready, deliver it once the
+            // verified RUNNING session becomes writable again.
+            if (root.autoLiveQueuedRevision >= 0 && device.running &&
+                !device.scenarioApplying)
+                autoLiveApplyTimer.restart()
+        }
         function onFirmwareUpdateFinished(success) {
             // Reset during firmware install stops the board's PTP SOURCE.
             // If the operator explicitly enabled it in this live Studio
@@ -588,10 +641,11 @@ ApplicationWindow {
                        : "One or more draft commands could not be queued; retry after checking the board.", !ok)
         return ok
     }
-    function startScenarioSnapshot() {
+    function startScenarioSnapshot(flushDrafts) {
         // Flush every local draft once before serializing the canonical
         // 4I+4V scenario. An invalid draft cannot be sent to the board.
-        if (!currentMatrix.flushPendingEdits() || !voltageMatrix.flushPendingEdits()) {
+        if (flushDrafts !== false &&
+            (!currentMatrix.flushPendingEdits() || !voltageMatrix.flushPendingEdits())) {
             showMessage("Invalid signal input: correct highlighted field before Start.", true)
             return null
         }
@@ -620,7 +674,9 @@ ApplicationWindow {
     function applyLiveScenario() {
         if (!workflowBar.injectionRunning || !workflowBar.session ||
             !workflowBar.session.liveControlReady || device.scenarioApplying) return false
-        const snapshot = startScenarioSnapshot()
+        // Live must transmit committed model values only. A second text cell
+        // that is still being typed remains a draft until Enter/focus-out.
+        const snapshot = startScenarioSnapshot(false)
         if (!snapshot) return false
         const revision = scenarioRevision
         if (!workflowBar.session.requestApplyLiveScenario(snapshot)) {
@@ -635,15 +691,33 @@ ApplicationWindow {
 
     function setFrequencyValue(value) {
         if (!validFrequency(value)) return false
+        if (signalFrequency === value) {
+            frequencyField.text = value.toFixed(3)
+            frequencyField.frequencyDirty = false
+            frequencyField.invalidInput = false
+            return true
+        }
         signalFrequency = value
         if (value > 0) previousAcFrequency = value
         frequencyField.text = value.toFixed(3)
+        frequencyField.frequencyDirty = false
         frequencyField.invalidInput = false
         refreshPreview()
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
-            workflowBar.session.requestSetFrequency(value)
         return true
+    }
+    function commitFrequencyEditor() {
+        if (!frequencyField.frequencyDirty) return true
+        const value = parseOperatorNumber(frequencyField.text)
+        if (!validFrequency(value)) {
+            frequencyField.text = signalFrequency.toFixed(3)
+            frequencyField.invalidInput = false
+            frequencyField.frequencyDirty = false
+            showMessage("Frequency must be within 0..1000 Hz (0 = DC).", true)
+            return false
+        }
+        frequencyField.frequencyDirty = false
+        return setFrequencyValue(value)
     }
 
     function setWaveformMode(mode) {
@@ -876,7 +950,8 @@ ApplicationWindow {
             Label {
                 text: root.pendingApply
                     ? (workflowBar.injectionRunning
-                        ? "4I + 4V · Pending · Apply live"
+                        ? (device.scenarioApplying ? "4I + 4V · Applying live..." :
+                           "4I + 4V · Auto-apply pending")
                         : "4I + 4V · Setpoints pending · Start to apply")
                     : "4I + 4V · 4000 samples/s"
                 color: root.pendingApply
@@ -1142,18 +1217,13 @@ ApplicationWindow {
                                 Label { text: "4I + 4V Injection"; color: studioTheme.text; font.family: root.uiFont; font.pixelSize: 17; font.weight: Font.DemiBold }
                             }
                             Item { Layout.fillWidth: true }
-                            // START still uses the visible setpoints.
-                            // Apply live is shown only while SV is running.
-                            CalmButton {
+                            Label {
                                 visible: workflowBar.injectionRunning
-                                theme: studioTheme
-                                uiFont: root.uiFont
-                                tone: "accent"
-                                text: device.scenarioApplying ? "Verifying..." : "Apply live"
-                                enabled: root.pendingApply && !device.scenarioApplying &&
-                                         workflowBar.session && workflowBar.session.liveControlReady
-                                toolTipText: "Apply all 4I+4V values without restarting SV"
-                                onClicked: root.applyLiveScenario()
+                                text: device.scenarioApplying ? "LIVE · VERIFYING" : "LIVE · AUTO"
+                                color: device.scenarioApplying ? studioTheme.amber : studioTheme.green
+                                font.family: root.uiFont
+                                font.pixelSize: 10
+                                font.weight: Font.DemiBold
                             }
                         }
 
@@ -1217,25 +1287,16 @@ ApplicationWindow {
                                     suffixText: "Hz"
                                     enabled: true
                                     validator: DoubleValidator { bottom: 0.0; top: 1000.0; decimals: 3 }
+                                    property bool frequencyDirty: false
                                     onTextEdited: {
-                                        var value = root.parseOperatorNumber(text)
-                                        if (root.validFrequency(value)) {
-                                            invalidInput = false
-                                            root.signalFrequency = value
-                                            if (value > 0) root.previousAcFrequency = value
-                                            root.refreshPreview()
-                                            root.markScenarioDirty()
-                                            if (workflowBar.session && workflowBar.session.liveControlReady && !root.pendingApply)
-                                                workflowBar.session.requestSetFrequency(value)
-                                        } else invalidInput = true
+                                        frequencyDirty = true
+                                        invalidInput = !root.validFrequency(
+                                            root.parseOperatorNumber(text))
                                     }
-                                    onEditingFinished: {
-                                        var value = root.parseOperatorNumber(text)
-                                        if (!root.validFrequency(value)) {
-                                            text = root.signalFrequency.toFixed(3)
-                                            invalidInput = false
-                                            root.showMessage("Frequency must be within 0..1000 Hz (0 = DC).", true)
-                                        } else text = value.toFixed(3)
+                                    onEditingFinished: root.commitFrequencyEditor()
+                                    onAccepted: root.commitFrequencyEditor()
+                                    onActiveFocusChanged: {
+                                        if (!activeFocus) root.commitFrequencyEditor()
                                     }
                                 }
 

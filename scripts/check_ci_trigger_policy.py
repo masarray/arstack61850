@@ -101,15 +101,17 @@ def main():
             "github.event.pull_request.draft && "
             "contains(github.event.pull_request.body, '[run-phase-guard]') }}"
         )
-        # Limited testbench artifact exception: only consolidated Draft #286
-        # explicitly calling the existing firmware workflow for its exact-head
-        # Studio preview; no general Draft PR heavy-build bypass.
+        # Limited exact-head artifact exceptions: consolidated Draft #286
+        # and the isolated physically-observed-source recovery Draft #288.
+        # No general Draft PR heavy-build bypass.
         preview_gate = (
             "    if: ${{ github.event_name != 'pull_request' || "
             "!github.event.pull_request.draft || "
             "(inputs.phase_sync_preview == true && "
+            "(github.event.pull_request.head.ref == "
+            "'feat/ptp-source-policy-fsm-20261022' || "
             "github.event.pull_request.head.ref == "
-            "'feat/ptp-source-policy-fsm-20261022') }}"
+            "'fix/autolive-from-pcap-proven-7c95-20261023')) }}"
         )
         for index, boundary in enumerate(boundaries):
             job_name = boundary.group(1)
