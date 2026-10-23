@@ -6,6 +6,7 @@
 #include "ariec61850/time_sync/ptp_power_profile.hpp"
 #include "ariec61850/time_sync/ptp_runtime.hpp"
 #include "ariec61850/time_sync/ptp_tai_source.hpp"
+#include "ariec61850/time_sync/ptp_external_candidate_policy.hpp"
 
 #include "esp_err.h"
 #include "esp_eth.h"
@@ -80,6 +81,8 @@ struct PtpLabContext final {
     std::uint8_t rx_domain{};
     std::uint8_t rx_transport_specific{};
     bool rx_respond_to_peer_delay{};
+    bool rx_vlan_enabled{};
+    std::uint16_t rx_vlan_id{};
 };
 
 PtpLabContext g_ptp_context{};
@@ -140,6 +143,24 @@ std::atomic<std::int64_t> g_ptp_freshness_timeout_us{3000000LL};
 std::atomic<std::uint32_t> g_ptp_source_generation{0U};
 std::atomic_bool g_stop_requested{false};
 std::atomic_bool g_ptp_accept_rx{false};
+// The Pdelay responder is the sole SOURCE RX hook. Use the SAME callback
+// for a passive foreign Announce candidate; never spawn a competing RX owner.
+portMUX_TYPE g_foreign_announce_mux = portMUX_INITIALIZER_UNLOCKED;
+ar::iec61850::time_sync::PtpExternalCandidateGate g_foreign_announce_gate{};
+ar::iec61850::time_sync::PtpAnnounceRank g_local_announce_rank{};
+std::atomic_bool g_foreign_announce_enabled{false};
+
+[[nodiscard]] bool foreign_candidate_stable() noexcept {
+    if (!g_foreign_announce_enabled.load(std::memory_order_acquire) ||
+        !g_ptp_started.load(std::memory_order_acquire)) return false;
+    const auto now_us = esp_timer_get_time();
+    if (now_us < 0) return false;
+    portENTER_CRITICAL(&g_foreign_announce_mux);
+    const bool result = g_foreign_announce_gate.stable(
+        static_cast<std::uint64_t>(now_us) / 1000U);
+    portEXIT_CRITICAL(&g_foreign_announce_mux);
+    return result;
+}
 std::atomic<std::uint64_t> g_announce_sent{0U};
 std::atomic<std::uint64_t> g_sync_sent{0U};
 std::atomic<std::uint64_t> g_follow_up_sent{0U};
@@ -624,29 +645,49 @@ esp_err_t ptp_input_info(
     if (buffer == nullptr) return ESP_OK;
 
     if (g_ptp_accept_rx.load(std::memory_order_acquire) &&
-        context != nullptr &&
-        context->rx_respond_to_peer_delay &&
-        context->pdelay_queue != nullptr &&
-        info != nullptr) {
+        context != nullptr) {
         PtpFrame frame;
         if (ar::iec61850::time_sync::PtpCodec::try_parse_ethernet_frame(
-                std::span<const std::uint8_t>{buffer, length},
-                frame) &&
-            frame.peer_delay_multicast &&
-            frame.header.message_type == PtpMessageType::pdelay_req &&
+                std::span<const std::uint8_t>{buffer, length}, frame) &&
             frame.header.domain_number == context->rx_domain &&
-            frame.header.transport_specific == context->rx_transport_specific) {
-            const auto& rx_timestamp = *static_cast<const eth_mac_time_t*>(info);
-            if (valid_hw_timestamp(rx_timestamp)) {
-                const PdelayRequestEvent event{
-                    frame.header.source_port_identity,
-                    to_ptp_timestamp(rx_timestamp),
-                    frame.header.sequence_id,
-                    frame.header.log_message_interval,
+            frame.header.transport_specific == context->rx_transport_specific &&
+            !frame.outer_vlan_id.has_value() &&
+            (context->rx_vlan_enabled
+                ? frame.vlan_id.has_value() &&
+                    *frame.vlan_id == context->rx_vlan_id
+                : !frame.vlan_id.has_value())) {
+            if (g_foreign_announce_enabled.load(std::memory_order_acquire) &&
+                frame.header.message_type == PtpMessageType::announce &&
+                frame.announce.has_value()) {
+                const auto& a = *frame.announce;
+                ar::iec61850::time_sync::PtpAnnounceRank rank{
+                    a.priority1, a.clock_class,
+                    static_cast<std::uint8_t>(a.clock_accuracy),
+                    a.offset_scaled_log_variance, a.priority2,
+                    a.grandmaster_identity, a.steps_removed,
                 };
-                if (xQueueSend(context->pdelay_queue, &event, 0U) == pdTRUE &&
-                    context->task_handle != nullptr) {
-                    xTaskNotifyGive(context->task_handle);
+                const auto time_us = esp_timer_get_time();
+                if (time_us >= 0) {
+                    portENTER_CRITICAL(&g_foreign_announce_mux);
+                    g_foreign_announce_gate.observe(rank, g_local_announce_rank,
+                        static_cast<std::uint64_t>(time_us) / 1000U);
+                    portEXIT_CRITICAL(&g_foreign_announce_mux);
+                }
+            } else if (context->rx_respond_to_peer_delay &&
+                       context->pdelay_queue != nullptr && info != nullptr &&
+                       frame.peer_delay_multicast &&
+                       frame.header.message_type == PtpMessageType::pdelay_req) {
+                const auto& rx_timestamp = *static_cast<const eth_mac_time_t*>(info);
+                if (valid_hw_timestamp(rx_timestamp)) {
+                    const PdelayRequestEvent event{
+                        frame.header.source_port_identity,
+                        to_ptp_timestamp(rx_timestamp),
+                        frame.header.sequence_id,
+                        frame.header.log_message_interval,
+                    };
+                    if (xQueueSend(context->pdelay_queue, &event, 0U) == pdTRUE &&
+                        context->task_handle != nullptr)
+                        xTaskNotifyGive(context->task_handle);
                 }
             }
         }
@@ -657,6 +698,7 @@ esp_err_t ptp_input_info(
 }
 
 void finish_runtime(PtpLabContext& context) {
+    g_foreign_announce_enabled.store(false, std::memory_order_release);
     g_ptp_accept_rx.store(false, std::memory_order_release);
     g_ptp_ready.store(false, std::memory_order_release);
     g_bench_global_active.store(false, std::memory_order_release);
@@ -768,6 +810,17 @@ void ptp_lab_task(void* argument) {
     context.rx_domain = options.domain_number;
     context.rx_transport_specific = options.transport_specific;
     context.rx_respond_to_peer_delay = options.respond_to_peer_delay;
+    context.rx_vlan_enabled = options.vlan_id.has_value();
+    context.rx_vlan_id = options.vlan_id.value_or(0U);
+    portENTER_CRITICAL(&g_foreign_announce_mux);
+    g_foreign_announce_gate.reset();
+    g_local_announce_rank = {
+        options.priority1, options.clock_class,
+        static_cast<std::uint8_t>(options.clock_accuracy),
+        options.offset_scaled_log_variance, options.priority2,
+        options.clock_identity, 0U,
+    };
+    portEXIT_CRITICAL(&g_foreign_announce_mux);
 
     bool pdelay_enabled = false;
     if (options.respond_to_peer_delay && context.pdelay_queue != nullptr) {
@@ -778,6 +831,9 @@ void ptp_lab_task(void* argument) {
         if (input_result == ESP_OK) {
             pdelay_enabled = true;
             g_ptp_accept_rx.store(true, std::memory_order_release);
+#if defined(CONFIG_AR_PTP_AUTO_PREFER_EXTERNAL) && CONFIG_AR_PTP_AUTO_PREFER_EXTERNAL
+            g_foreign_announce_enabled.store(true, std::memory_order_release);
+#endif
         } else {
             ESP_LOGW(kTag,
                      "Hardware RX timestamp path unavailable; Pdelay responder disabled: %s",
@@ -1094,6 +1150,10 @@ extern "C" bool ar_ptp_lab_is_running(void) {
 
 // Lifetime/ownership is deliberately independent of measured PTP READY.
 // Used only by the facade to prevent simultaneous EMAC timebase owners.
+extern "C" bool ar_ptp_source_external_candidate_stable(void) {
+    return ar::esp32p4::smv::foreign_candidate_stable();
+}
+
 extern "C" bool ar_ptp_source_runtime_active(void) {
     return ar::esp32p4::smv::g_ptp_started.load(std::memory_order_acquire);
 }
