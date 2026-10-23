@@ -317,6 +317,19 @@ struct SvAutoPreflightPolicy final {
         return preflight_running && phase_enabled &&
             source_lease_unchanged && rate_unchanged && auto_mode;
     }
+
+    // M3.A: STOP is an SV TX gate, not a new time authority. Parking the
+    // existing 4-kHz ISR is cheaper and safer than deleting/rearming GPTimer.
+    // Reuse is forbidden after GM/lease, rate/profile, link or mode change.
+    [[nodiscard]] static constexpr bool can_park_running_grid(
+        const bool running_timer, const bool epoch_armed,
+        const bool phase_enabled, const bool source_lease_unchanged,
+        const bool profile_and_rate_unchanged,
+        const bool auto_clock_ready) noexcept {
+        return running_timer && epoch_armed && phase_enabled &&
+            source_lease_unchanged && profile_and_rate_unchanged &&
+            auto_clock_ready;
+    }
 };
 
 // ISR-safe, O(1), no allocation/locks/IOCTL. Each interval differs from the
