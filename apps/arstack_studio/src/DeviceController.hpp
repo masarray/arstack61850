@@ -477,6 +477,8 @@ private:
     QTimer logUpdateTimer_;
     QString pendingPtpRole_;
     QString pendingPtpConfig_;
+    bool pendingPtpBenchRequested_{false};
+    bool ptpPreflightBenchReady_{false};
     bool ptpRuntimeRoleSeen_{false};
     bool ptpRuntimeRunningSeen_{false};
     bool ioWorkerReady_{false};
