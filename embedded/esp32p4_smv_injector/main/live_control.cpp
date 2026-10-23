@@ -321,9 +321,10 @@ void print_ptp_state() noexcept {
         live_tx_running() ? 1U : 0U);
     // Independent actual SOURCE bench readiness. PTP RUNNING alone cannot
     // prove that the active internal GM was time-seeded by Studio.
-    ESP_LOGI(kTag, "PTPGM bench_configured=%u bench_ready=%u",
+    ESP_LOGI(kTag, "PTPGM bench_configured=%u bench_ready=%u source_active=%u",
         config.bench_global_gm ? 1U : 0U,
-        ar_ptp_lab_bench_global_ready() ? 1U : 0U);
+        ar_ptp_lab_bench_global_ready() ? 1U : 0U,
+        ar_ptp_lab_source_generation() != 0U ? 1U : 0U);
     ESP_LOGI(kTag,
              "PTP status=%s Announce=%llu Sync=%llu FollowUp=%llu PdelayFrames=%llu TXfail=%llu",
              status.is_running ? "RUNNING" : "STOPPED",
