@@ -50,7 +50,7 @@ concurrency:
 jobs:
   portable-ptp:
     # Exactly this isolated Draft M3.A runs GCC/Clang phase regression.
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft || github.event.pull_request.head.ref == 'feat/m3a-persistent-sv-grid-20261023' }}
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft || (github.event.pull_request.head.ref == 'feat/m3a-persistent-sv-grid-20261023' || github.event.pull_request.head.ref == 'feat/m3b-boot-timebase-supervisor-20261023') }}
     strategy:
       fail-fast: false
       matrix:
