@@ -725,6 +725,16 @@ def main() -> None:
             and "panel.session.requestPtpAdvancedPolicy(mode)" in expert,
             "M3.D Advanced PTP policy must be firmware-enforced, board-readback and session-owned")
 
+    # M3.D regression: SOURCE policy selection must preserve a still-fresh
+    # bench GM seed. The portable policy test checks positive/negative cases;
+    # this source contract verifies firmware actually uses that policy.
+    ptp_source_task = (project_root / "embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp").read_text(encoding="utf-8")
+    require("may_preserve_bench_seed(" in policy_header
+            and "PtpAdvancedPolicy::may_preserve_bench_seed(" in ptp_facade
+            and "if (!keep_seed)" in ptp_facade
+            and "PtpAdvancedPolicy::kBenchSeedMaxAgeUs" in ptp_source_task,
+            "M3.D must retain only a fresh SOURCE bench GM seed across SOURCE policy selection")
+
     print("Studio operator workspace contract: PASS")
 
 
