@@ -923,9 +923,11 @@ void publisher_task(void* argument) {
             // its first tick, so every START falsely began with missed slots.
             if (reuse_preflight) {
 #if AR_SV_PTP_PHASE_SUPPORTED
-                // Keep the already disciplined sample clock, phase authority,
-                // and SOURCE generation. First SV packet is released exactly
-                // at the next smpCnt=0 epoch, never mid-second.
+                // Flush any already-queued publisher wake from before STOP.
+                // Once parked, no further ISR notifications are issued until
+                // the NEXT PTP-aligned second boundary. The background grid
+                // itself never stops/restarts here.
+                static_cast<void>(ulTaskNotifyTake(pdTRUE, 0U));
                 g_preflight_phase_clock_active.store(false, std::memory_order_release);
                 g_sample_clock_context.launch_on_next_epoch.store(
                     true, std::memory_order_release);
@@ -963,12 +965,46 @@ void publisher_task(void* argument) {
                     (xEventGroupGetBits(g_link_events) & kLinkUpBit) != 0U,
                 runtime_profile_validate(profile), profile.publisher_rate_hz,
                 profile.sample_counter_modulus);
+            // M3.A lifecycle: the operator stopped SV transmission, NOT
+            // the PTP time domain. Keep the already-disciplined GPTimer and
+            // phase observer running silently while the 4I4V output is OFF.
+            // Do not allocate another timer, reset the epoch, or wake the
+            // publisher 4000 times/s. Profile/source faults take the existing
+            // fail-closed teardown path instead of preserving stale proof.
+            if (sample_clock != nullptr && !preflight_clock) {
+                const bool same_lease = same_sv_ptp_clock_lease(
+                    g_sample_clock_context.armed_ptp_clock, lease);
+                const bool park = SvAutoPreflightPolicy::can_park_running_grid(
+                    true, epoch_armed, g_sample_clock_context.phase_enabled,
+                    same_lease,
+                    profile.publisher_rate_hz == active_profile.publisher_rate_hz &&
+                    profile.sample_counter_modulus == active_profile.sample_counter_modulus,
+                    auto_clock_ready);
+                if (park) {
+                    // ISR can have one in-flight wake at this edge; the next
+                    // START explicitly drains it before enabling epoch launch.
+                    g_sample_clock_context.launch_on_next_epoch.store(
+                        false, std::memory_order_release);
+                    g_sample_clock_context.publisher_notifications_enabled.store(
+                        false, std::memory_order_release);
+                    g_preflight_phase_clock_active.store(
+                        true, std::memory_order_release);
+                    preflight_clock = true;
+                    preflight_rate_hz = profile.publisher_rate_hz;
+                    ESP_LOGI(kTag,
+                        "M3A PARKED: SV TX OFF, PTP/SV GPTimer and phase observer continue");
+                } else {
+                    stop_sample_clock(sample_clock);
+                    epoch_armed = false;
+                }
+            }
             if (preflight_clock && (!auto_clock_ready ||
                 preflight_rate_hz != profile.publisher_rate_hz ||
                 !same_sv_ptp_clock_lease(
                     g_sample_clock_context.armed_ptp_clock, lease))) {
                 stop_sample_clock(sample_clock);
                 preflight_clock = false;
+                epoch_armed = false;
             }
             if (sample_clock == nullptr && auto_clock_ready) {
                 bool aligned = false;
@@ -1561,18 +1597,26 @@ void sv_ptp_phase_observer_task(void* argument) {
                     SvSyncLossReason::phase_or_mac, stamp_ms);
             } else {
                 if (preflight_active) {
-                    // No SV packet is transmitted in preflight: this records
-                    // PHASE evidence only and can never advertise smpSynch.
-                    local_acquisition.observe_preflight(
+                    // M3.A: keep *clock* qualification across an SV-only STOP.
+                    // No SV frame exists while TX is off. Preserve a prior
+                    // verified claim only while this SAME timer, lease,
+                    // source generation, fault epoch and measured phase stay
+                    // healthy. A cold preflight cannot create a claim.
+                    const bool healthy_dry_phase =
                         measured_phase_qualified &&
-                            decision.epoch_second_continuous,
+                        decision.epoch_second_continuous &&
+                        no_new_publisher_fault;
+                    local_acquisition.observe_preflight(
+                        healthy_dry_phase,
                         notified_session, current_faults, lease.generation,
                         observation.last_sv_epoch_generation);
+                    if (!healthy_dry_phase)
+                        revoke_sv_auto_claims(SvSyncLossReason::phase_or_mac);
                 } else {
                     local_acquisition.reset();
                     source_fast_acquisition.reset();
+                    revoke_sv_auto_claims(SvSyncLossReason::publisher_stop);
                 }
-                revoke_sv_auto_claims(SvSyncLossReason::publisher_stop);
             }
             committed = true;
         } else if (session_matches) {
