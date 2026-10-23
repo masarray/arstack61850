@@ -224,7 +224,8 @@ def main() -> None:
             in ribbon_qml
             and '!ribbon.injectionRunning && !ribbon.startQueued' in source("WorkflowBar.qml")
             and 'readonly property bool startQueued: Boolean(' in source("WorkflowBar.qml")
-            and 'startIntentPending || (ribbon.device && ribbon.device.scenarioApplying)' in source("WorkflowBar.qml")
+            and 'startIntentPending || (ribbon.device && ribbon.device.scenarioApplying &&' in source("WorkflowBar.qml")
+            and '!ribbon.device.running))' in source("WorkflowBar.qml")
             and 'startWatchdog' not in source("WorkflowBar.qml"),
             "SV STOP must remain actionable while the acknowledged scenario transaction is pending")
     # A prior operator-ui QSettings default hid both plot docks on every new
