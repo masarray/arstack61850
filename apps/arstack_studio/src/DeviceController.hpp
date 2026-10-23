@@ -85,6 +85,10 @@ class DeviceController : public QObject {
     Q_PROPERTY(QString ptpPdelayFrames READ ptpPdelayFrames NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpTxFailures READ ptpTxFailures NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpRole READ ptpRole NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpPolicy READ ptpPolicy NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpPolicyBootAuto READ ptpPolicyBootAuto NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpCandidate READ ptpCandidate NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpSourceGeneration READ ptpSourceGeneration NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpDiscipline READ ptpDiscipline NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpSource READ ptpSource NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpOffsetNs READ ptpOffsetNs NOTIFY ptpStateChanged)
@@ -180,6 +184,10 @@ public:
     [[nodiscard]] QString ptpPdelayFrames() const { return ptpPdelayFrames_; }
     [[nodiscard]] QString ptpTxFailures() const;
     [[nodiscard]] QString ptpRole() const { return ptpRole_; }
+    [[nodiscard]] QString ptpPolicy() const { return ptpPolicy_; }
+    [[nodiscard]] QString ptpPolicyBootAuto() const { return ptpPolicyBootAuto_; }
+    [[nodiscard]] QString ptpCandidate() const { return ptpCandidate_; }
+    [[nodiscard]] QString ptpSourceGeneration() const { return ptpSourceGeneration_; }
     [[nodiscard]] QString ptpDiscipline() const { return ptpDiscipline_; }
     [[nodiscard]] QString ptpSource() const { return ptpSource_; }
     [[nodiscard]] QString ptpOffsetNs() const { return ptpOffsetNs_; }
@@ -257,6 +265,7 @@ public:
     void abandonProfileDeployment();
 
     bool sendPtpShow();
+    bool setPtpAdvancedPolicy(const QString& mode);
     bool startPtp();
     bool startPtpConfigured(const QString& role, const QVariantMap& profile);
     bool stopPtp();
@@ -490,6 +499,10 @@ private:
     QString ptpPdelayFrames_{QStringLiteral("-")};
     QString ptpTxFailures_{QStringLiteral("-")};
     QString ptpRole_{QStringLiteral("SOURCE")};
+    QString ptpPolicy_{QStringLiteral("UNKNOWN")};
+    QString ptpPolicyBootAuto_{QStringLiteral("0")};
+    QString ptpCandidate_{QStringLiteral("0")};
+    QString ptpSourceGeneration_{QStringLiteral("0")};
     QString ptpDiscipline_{QStringLiteral("UNLOCKED")};
     QString ptpSource_{QStringLiteral("NONE")};
     QString ptpOffsetNs_{QStringLiteral("NA")};
