@@ -794,6 +794,7 @@ void sv_boot_clock_supervisor_task(void*) {
     std::uint32_t attempts = 0U;
     std::uint32_t retry_after_ms = 0U;
     bool ready_once = false;
+    bool observed_link_loss = false;
     bool reported_grid = false;
     bool reported_operator_override = false;
     // Let the control and publisher tasks bind before background admission.
@@ -812,6 +813,20 @@ void sv_boot_clock_supervisor_task(void*) {
             ar_ptp_source_runtime_active() || ar_ptp_lab_is_running();
         const auto now_ms =
             static_cast<std::uint32_t>(esp_timer_get_time() / 1000LL);
+        if (ready_once && !link_ready) observed_link_loss = true;
+        if (Boot::may_recover_after_link_cycle(
+                ready_once, observed_link_loss, link_ready, runtime_owned,
+                operator_overrode, source_selected)) {
+            // Only a real Ethernet link cycle may re-arm a lost boot SOURCE.
+            // SOURCE generation changes and SV phase claims requalify rather
+            // than inheriting stale global/LOCAL evidence.
+            ready_once = false;
+            observed_link_loss = false;
+            attempts = 0U;
+            retry_after_ms = now_ms + 2000U;
+            ESP_LOGW(kTag,
+                "M3B PHY recovered with no PTP runtime; retry SOURCE after guard");
+        }
         if (Boot::may_start(
                 !ready_once, operator_overrode, source_selected,
                 link_ready, runtime_owned, attempts, now_ms, retry_after_ms)) {
