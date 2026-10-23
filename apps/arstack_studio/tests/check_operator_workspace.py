@@ -729,7 +729,7 @@ def main() -> None:
     # operator's host UTC epoch is applied. Studio must never silently
     # adopt that running SOURCE as if it were a seeded GM, nor kill PTP on
     # an ordinary SV STOP/START.
-    require("PTPGM bench_configured=%u bench_ready=%u" in live_control
+    require("PTPGM bench_configured=%u bench_ready=%u source_active=%u" in live_control
             and "START rejected: BENCH_GM_NOT_READY" in live_control
             and "CONFIG_AR_SMV_RELAY_BENCH_GLOBAL_GUARD=y" in
                 (project_root / "embedded/esp32p4_smv_injector/sdkconfig.defaults").read_text(encoding="utf-8")
