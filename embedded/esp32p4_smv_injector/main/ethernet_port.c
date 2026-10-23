@@ -207,6 +207,14 @@ bool ar_esp32p4_ptp_start(void)
         return false;
     }
 
+    // M3.B: Studio may send its ordinary explicit PTP START after boot
+    // already verified the SOURCE. This command is idempotent, and must
+    // never tear down/reseed an active shared EMAC timebase.
+    if (ar_ptp_lab_is_running()) return true;
+    if (ar_ptp_source_runtime_active()) {
+        s_ptp_preflight_failure = "PTP_RUNTIME_ALREADY_ACTIVE";
+        return false; // a worker is starting/stopping; do not roll it back
+    }
     // SOURCE start is accepted only after verified Announce + Sync + Follow_Up
     // transmission. A failed start must not leave the shared EMAC in IEEE1588
     // timestamp mode because SMV uses the same MAC immediately afterwards.
