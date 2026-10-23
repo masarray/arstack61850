@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ariec61850/time_sync/sv_ptp_phase_authority.hpp"
 #include "ariec61850/time_sync/sv_boot_clock_policy.hpp"
+#include "ariec61850/time_sync/ptp_external_candidate_policy.hpp"
 #include "ariec61850/time_sync/sv_ptp_clock_lease.hpp"
 #include "ariec61850/sampled_values/rational_schedule.hpp"
 
@@ -162,6 +163,63 @@ void check_m3b_boot_ptp_is_safe_and_operator_owned() {
     // difference for bounded near-wrap retry windows.
     CHECK(Boot::may_start(true, false, true, true, false, 1U, 10U, 0xFFFFFFF0U));
     CHECK(!Boot::may_start(true, false, true, true, false, 1U, 0xFFFFFFF0U, 10U));
+}
+
+void check_m3c_foreign_announce_and_exclusive_emac_handover() {
+    using Guard = PtpExternalHandoverGuard;
+    PtpAnnounceRank local;
+    local.priority1 = 128U; local.clock_class = 248U;
+    local.clock_accuracy = 254U; local.priority2 = 128U;
+    local.gm_identity = {0x10,0,0,0,0,0,0,1};
+    local.steps_removed = 0U;
+    auto foreign = local;
+    foreign.priority1 = 100U;
+    foreign.gm_identity = {0x20,0,0,0,0,0,0,2};
+    foreign.steps_removed = 1U;
+    PtpExternalCandidateGate gate;
+    // One forged packet or a burst of same-time packets cannot switch GM.
+    gate.observe(foreign, local, 1000U);
+    for (int i=0;i<100;i++) gate.observe(foreign, local, 1000U);
+    CHECK(!gate.stable(1000U));
+    gate.observe(foreign, local, 2000U);
+    gate.observe(foreign, local, 3000U);
+    CHECK(!gate.stable(3000U));
+    gate.observe(foreign, local, 4000U);
+    CHECK(gate.stable(4000U));
+    CHECK(!gate.stable(7000U)); // stale 2.5s Announce lease
+    gate.observe(foreign, local, 8000U); // candidate starts fresh
+    CHECK(!gate.stable(8000U));
+    auto self = local;
+    gate.reset();
+    for (std::uint64_t t = 1000; t < 10000; t+=1000)
+        gate.observe(self, local, t);
+    CHECK(!gate.stable(10000U)); // no self-elected external GM
+    auto worse = foreign;
+    worse.priority1 = 200U;
+    for (std::uint64_t t = 1000; t < 10000; t+=1000)
+        gate.observe(worse, local, t);
+    CHECK(!gate.stable(10000U)); // never prefer inferior GM
+    foreign.steps_removed = 256U; // invalid hop depth
+    for (std::uint64_t t = 1000; t < 10000; t+=1000)
+        gate.observe(foreign, local, t);
+    CHECK(!gate.stable(10000U));
+    foreign.steps_removed = 1U;
+    for (std::uint64_t t = 11000; t <= 15000; t+=1000)
+        gate.observe(foreign, local, t);
+    CHECK(gate.stable(15000U));
+    CHECK(Guard::may_handover(true,false,true,false,true,false,true));
+    CHECK(!Guard::may_handover(true,false,true,true,true,false,true));
+    CHECK(!Guard::may_handover(true,true,true,false,true,false,true));
+    CHECK(!Guard::may_handover(true,false,true,false,true,true,true));
+    CHECK(!Guard::may_handover(true,false,true,false,false,false,true));
+    CHECK(!Guard::may_handover(true,false,true,false,true,false,false));
+    CHECK(Guard::may_fallback(true,false,false,true,false,true,15000U));
+    CHECK(!Guard::may_fallback(true,false,false,true,true,true,15000U));
+    CHECK(!Guard::may_fallback(false,false,false,true,false,true,15000U));
+    CHECK(!Guard::may_fallback(true,true,false,true,false,true,15000U));
+    CHECK(!Guard::may_fallback(true,false,true,true,false,true,15000U));
+    CHECK(!Guard::may_fallback(true,false,false,true,false,true,14999U));
+    CHECK(!Guard::may_fallback(true,false,false,true,false,false,20000U));
 }
 
 void check_receiver_preflight_requires_measured_gm_lease() {
@@ -533,6 +591,7 @@ int main() {
         check_auto_preflight_does_not_invent_sync_or_start();
         check_m3a_stop_start_keeps_qualified_sample_grid();
         check_m3b_boot_ptp_is_safe_and_operator_owned();
+        check_m3c_foreign_announce_and_exclusive_emac_handover();
         check_phase_observer_stall_revokes_source_wire_claim();
         check_receiver_preflight_requires_measured_gm_lease();
         check_phase_sign_and_bounded_corrections();
