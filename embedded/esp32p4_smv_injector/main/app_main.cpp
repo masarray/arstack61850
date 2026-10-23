@@ -7,6 +7,7 @@
 #include "ariec61850/sampled_values/live_signal_state.hpp"
 #include "ariec61850/time_sync/sv_ptp_epoch.hpp"
 #include "ariec61850/time_sync/sv_boot_clock_policy.hpp"
+#include "ariec61850/time_sync/ptp_external_candidate_policy.hpp"
 #include "ariec61850/time_sync/sv_ptp_clock_lease.hpp"
 #include "ariec61850/time_sync/ptp_runtime.hpp"
 
@@ -795,6 +796,11 @@ void sv_boot_clock_supervisor_task(void*) {
     std::uint32_t retry_after_ms = 0U;
     bool ready_once = false;
     bool observed_link_loss = false;
+#if defined(CONFIG_AR_PTP_AUTO_PREFER_EXTERNAL) && CONFIG_AR_PTP_AUTO_PREFER_EXTERNAL
+    bool external_runtime_selected = false;
+    std::uint64_t external_quiet_since_ms = 0U;
+    bool handover_failure_latched = false;
+#endif
     bool reported_grid = false;
     bool reported_operator_override = false;
     // Let the control and publisher tasks bind before background admission.
@@ -852,6 +858,101 @@ void sv_boot_clock_supervisor_task(void*) {
                     static_cast<unsigned long>(Boot::kMaxAttempts));
             }
         }
+#if defined(CONFIG_AR_PTP_AUTO_PREFER_EXTERNAL) && CONFIG_AR_PTP_AUTO_PREFER_EXTERNAL
+        // SOURCE's existing hardware-Pdelay RX hook observes foreign
+        // Announce without competing for the EMAC timestamp owner.
+        // Handover is strictly CONTROL PLANE and deferred during active SV.
+        const bool stable_better_gm =
+            ar_ptp_source_external_candidate_stable();
+        const bool may_external = 
+            ar::iec61850::time_sync::PtpExternalHandoverGuard::may_handover(
+                true, operator_overrode, stable_better_gm,
+                live_tx_running(), ar_ptp_source_runtime_active(),
+                external_runtime_selected, link_ready);
+        if (may_external && !handover_failure_latched) {
+            // No SV output, so a GM change explicitly invalidates the old
+            // phase/lease. The dry grid's preflight owner sees generation
+            // change and tears down/re-arms only after RECEIVER is LOCKED.
+            ESP_LOGW(kTag,
+                "M3C external GM candidate stable and superior: drain SOURCE before RECEIVER");
+            ar_ptp_lab_stop();
+            if (!ar_ptp_source_runtime_active() &&
+                ar_ptp_boot_supervisor_autostart_allowed()) {
+                auto follower = config;
+                follower.role = AR_PTP_ROLE_TIME_RECEIVER;
+                follower.bench_global_gm = false;
+                if (ar_ptp_lab_configure(&follower) &&
+                    ar_ptp_boot_supervisor_autostart_allowed() &&
+                    ar_esp32p4_ptp_start()) {
+                    external_runtime_selected = true;
+                    external_quiet_since_ms = 0U;
+                    ESP_LOGI(kTag,
+                        "M3C RECEIVER active; waiting for measured GM/offset/Pdelay LOCK");
+                } else {
+                    // Do not blind-fallback while the foreign GM exists.
+                    // Leave the system unqualified and await an explicit
+                    // operator recovery command. No two EMAC role owners.
+                    handover_failure_latched = true;
+                    ESP_LOGE(kTag,
+                        "M3C external handover rejected; auto SOURCE promotion blocked");
+                }
+            } else {
+                handover_failure_latched = true;
+                ESP_LOGW(kTag, "M3C handover interrupted by runtime/operator ownership");
+            }
+        }
+        if (external_runtime_selected) {
+            ar_ptp_timing_authority_t timing{};
+            const bool valid_status =
+                ar_ptp_lab_get_timing_authority(&timing) &&
+                timing.role == AR_PTP_ROLE_TIME_RECEIVER;
+            if (valid_status && timing.source_selected) {
+                external_quiet_since_ms = 0U;
+            } else if (external_quiet_since_ms == 0U) {
+                external_quiet_since_ms = static_cast<std::uint64_t>(now_ms) + 1U;
+            }
+#if defined(CONFIG_AR_PTP_AUTO_LOCAL_FALLBACK) && CONFIG_AR_PTP_AUTO_LOCAL_FALLBACK
+            const std::uint64_t quiet_duration_ms =
+                external_quiet_since_ms > 0U &&
+                static_cast<std::uint64_t>(now_ms) + 1U >= external_quiet_since_ms
+                ? static_cast<std::uint64_t>(now_ms) + 1U - external_quiet_since_ms
+                : 0U;
+            const bool may_restore =
+                ar::iec61850::time_sync::PtpExternalHandoverGuard::may_fallback(
+                    true, operator_overrode, live_tx_running(),
+                    ar_ptp_lab_is_running(), valid_status && timing.source_selected,
+                    link_ready, quiet_duration_ms);
+            if (may_restore) {
+                ESP_LOGW(kTag,
+                    "M3C no selected external GM for >=15s: explicit lab fallback");
+                ar_ptp_lab_stop(); // fully drain receiver ownership first
+                ar_ptp_lab_config_t local = config;
+                // A stale Studio BENCH_GM epoch must NOT be reused on
+                // fallback. Local oscillator profile makes no GNSS claim.
+                local.role = AR_PTP_ROLE_LAB_SOURCE;
+                local.bench_global_gm = false;
+                local.bench_utc_epoch_seconds = 0U;
+                local.bench_utc_epoch_millisecond = 0U;
+                local.bench_epoch_received_mono_us = 0LL;
+                external_runtime_selected = false;
+                // Prevent indefinite repeated local promotions if startup
+                // fails; only explicit PTP control may reset this latch.
+                handover_failure_latched = true;
+                if (ar_ptp_boot_supervisor_autostart_allowed() &&
+                    ar_ptp_lab_configure(&local) &&
+                    ar_esp32p4_ptp_start()) {
+                    ready_once = true;
+                    ESP_LOGI(kTag,
+                        "M3C restored lab LOCAL SOURCE; new generation requires fresh SV phase");
+                } else {
+                    ESP_LOGE(kTag,
+                        "M3C lab SOURCE restoration FAILED; leave PTP unqualified");
+                }
+            }
+#endif
+        }
+#endif
+
         const bool dry_phase_observed =
             g_preflight_phase_clock_active.load(std::memory_order_acquire) &&
             g_sample_clock_context.epoch_generation.load(
