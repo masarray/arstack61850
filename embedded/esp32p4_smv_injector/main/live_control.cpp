@@ -742,9 +742,11 @@ void handle_line(char* line) noexcept {
         // An active local SOURCE before Studio UTC commissioning is only
         // LOCAL, however healthy its Announce and Sync cadence may look.
         // Do not emit a local-flag SV stream to the relay in FAT mode.
-        if (ar_ptp_lab_get_config(&selected_ptp) &&
-            selected_ptp.role == AR_PTP_ROLE_LAB_SOURCE &&
-            !ar_ptp_lab_bench_global_ready()) {
+        const bool ptp_profile_available =
+            ar_ptp_lab_get_config(&selected_ptp);
+        if (!ptp_profile_available ||
+            (selected_ptp.role == AR_PTP_ROLE_LAB_SOURCE &&
+             !ar_ptp_lab_bench_global_ready())) {
             ESP_LOGE(kTag,
                 "START rejected: BENCH_GM_NOT_READY; open Time Sync, "
                 "Verify / Commission Bench GM while SV STOPPED, then retry");
