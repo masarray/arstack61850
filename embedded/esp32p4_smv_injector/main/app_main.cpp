@@ -176,6 +176,11 @@ constexpr std::uint32_t kEgressEvidenceEveryZeroEpochs =
 portMUX_TYPE g_tx_egress_mux = portMUX_INITIALIZER_UNLOCKED;
 SvTxEgressEvidence g_tx_egress_evidence{};
 SvLocalSyncEvidenceGate g_local_sync_evidence{}; // same critical section as egress tracker
+// SOURCE-only certified resume: the dry GPTimer stays aligned across STOP.
+// The first new MAC baseline is NOT a clock step; any real error revokes.
+// Zero means cold/expired. Never read these atomics from the 4-kHz ISR.
+std::atomic<std::uint32_t> g_warm_resume_first_epoch{0U};
+std::atomic<bool> g_warm_resume_baseline_consumed{false};
 #endif
 #if AR_SV_PTP_PHASE_SUPPORTED
 SemaphoreHandle_t g_phase_timer_mutex = nullptr;
@@ -762,6 +767,9 @@ void stop_sample_clock(gptimer_handle_t& timer) noexcept {
     // Release the wire claim before teardown; old MAC evidence never
     // survives STOP/START, even when the same SOURCE later restarts.
     revoke_sv_auto_claims(SvSyncLossReason::publisher_stop);
+#if AR_SV_TX_EGRESS_SUPPORTED
+    g_warm_resume_first_epoch.store(0U, std::memory_order_release);
+#endif
     if (timer == nullptr) return;
 #if AR_SV_PTP_PHASE_SUPPORTED
     // Serialize teardown with the non-ISR phase observer, so a GPTimer
@@ -1139,6 +1147,21 @@ void publisher_task(void* argument) {
                     preflight_rate_hz == requested_profile.publisher_rate_hz,
                     auto_mode);
             if (!reuse_preflight) stop_sample_clock(sample_clock);
+            // Only previously measured SOURCE synchronization on the exact
+            // same dry-running sample grid may survive START. The 1-Hz
+            // phase observer and per-frame link/fault/lease checks remain
+            // authoritative. Fresh MAC descriptors must follow within 8 s.
+            const bool warm_resume = ar::iec61850::time_sync::SvWarmResumePolicy::may_begin(
+                source_unchanged, reuse_preflight,
+                smp_synch_source_local_qualified(),
+                g_sample_clock_context.phase_authority_valid.load(
+                    std::memory_order_acquire) &&
+                ar::iec61850::time_sync::SvPhaseObservationFreshness::fresh(
+                    g_sample_clock_context.last_phase_observed_epoch.load(
+                        std::memory_order_acquire),
+                    g_sample_clock_context.epoch_generation.load(
+                        std::memory_order_acquire)),
+                now_lease.role == PtpAuthorityRole::source);
 #else
             constexpr bool reuse_preflight = false;
             stop_sample_clock(sample_clock);
@@ -1178,6 +1201,15 @@ void publisher_task(void* argument) {
             g_local_sync_evidence.reset();
             g_tx_egress_evidence.reset();
             portEXIT_CRITICAL(&g_tx_egress_mux);
+#if AR_SV_PTP_PHASE_SUPPORTED
+            g_warm_resume_first_epoch.store(
+                warm_resume
+                    ? g_sample_clock_context.epoch_generation.load(
+                        std::memory_order_acquire) : 0U,
+                std::memory_order_release);
+            g_warm_resume_baseline_consumed.store(
+                false, std::memory_order_release);
+#endif
 #endif
 #if AR_SV_PTP_PHASE_SUPPORTED
             previous_slew_total = 0;
@@ -1385,6 +1417,17 @@ void publisher_task(void* argument) {
             // continue advertising previously measured local synchronization.
             if (smp_synch_source_local_qualified() ||
                 smp_synch_receiver_timeline_qualified()) {
+#if AR_SV_TX_EGRESS_SUPPORTED
+                const auto warm_first = g_warm_resume_first_epoch.load(
+                    std::memory_order_acquire);
+                if (warm_first != 0U &&
+                    !ar::iec61850::time_sync::SvWarmResumePolicy::within_window(
+                        warm_first, g_sample_clock_context.epoch_generation.load(
+                            std::memory_order_acquire))) {
+                    g_warm_resume_first_epoch.store(0U, std::memory_order_release);
+                    revoke_sv_auto_claims(SvSyncLossReason::mac_baseline_reset);
+                }
+#endif
                 const bool phase_ok = g_sample_clock_context.phase_authority_valid.load(
                     std::memory_order_acquire);
                 const bool observer_fresh =
@@ -1502,6 +1545,27 @@ void publisher_task(void* argument) {
                 // once every two seconds, never per-frame or in an ISR.
                 using Evidence = ar::iec61850::time_sync::SvTxEvidenceResult;
                 if (result != Evidence::measured) {
+                    // On a genuinely warm SOURCE restart, the FIRST new MAC
+                    // baseline is expected. It is not lost sample phase.
+                    // One exemption only; repeated baselines or any real
+                    // descriptor/lease/TX fault revoke immediately.
+                    const auto warm_first = g_warm_resume_first_epoch.load(
+                        std::memory_order_acquire);
+                    const bool same_warm_lease =
+                        evidence_lease.role == PtpAuthorityRole::source &&
+                        same_sv_ptp_clock_lease(
+                            evidence_lease, read_ptp_epoch_clock_lease());
+                    bool expected_first_baseline = false;
+                    if (result == Evidence::baseline_established &&
+                        same_warm_lease &&
+                        ar::iec61850::time_sync::SvWarmResumePolicy::within_window(
+                            warm_first, egress.sample_epoch_generation)) {
+                        bool unused = false;
+                        expected_first_baseline =
+                            g_warm_resume_baseline_consumed.compare_exchange_strong(
+                                unused, true, std::memory_order_acq_rel);
+                    }
+                    if (!expected_first_baseline) {
                     const auto cause = result == Evidence::transmit_failed
                         ? SvSyncLossReason::canonical_tx
                         : result == Evidence::missing_hw_timestamp
@@ -1516,6 +1580,8 @@ void publisher_task(void* argument) {
                             ? SvSyncLossReason::mac_baseline_reset
                         : SvSyncLossReason::mac_egress;
                     revoke_sv_auto_claims(cause);
+                    g_warm_resume_first_epoch.store(0U, std::memory_order_release);
+                    }
                 }
             }
 #else
@@ -1833,8 +1899,23 @@ void sv_ptp_phase_observer_task(void* argument) {
                         observation.last_sv_epoch_generation);
                 if (lease.role != PtpAuthorityRole::source)
                     source_fast_acquisition.reset();
+                const std::uint32_t warm_first =
+                    g_warm_resume_first_epoch.load(std::memory_order_acquire);
+                const bool warm_resume_authorized =
+                    lease.role == PtpAuthorityRole::source &&
+                    ar::iec61850::time_sync::SvWarmResumePolicy::retain(
+                        warm_first, observation.last_sv_epoch_generation,
+                        valid_live_phase,
+                        same_sv_ptp_clock_lease(
+                            armed_lease, g_sample_clock_context.armed_ptp_clock),
+                        no_new_publisher_fault, smp_synch_source_local_qualified());
+                if ((stable_source_fast || stable_conservative) && warm_first != 0U)
+                    g_warm_resume_first_epoch.store(0U, std::memory_order_release);
+                else if (warm_first != 0U && !warm_resume_authorized)
+                    g_warm_resume_first_epoch.store(0U, std::memory_order_release);
                 const bool stable_local =
-                    stable_conservative || stable_source_fast;
+                    stable_conservative || stable_source_fast ||
+                    warm_resume_authorized;
                 if (!stable_local &&
                     (smp_synch_source_local_qualified() ||
                      smp_synch_receiver_timeline_qualified())) {

@@ -332,6 +332,38 @@ struct SvAutoPreflightPolicy final {
     }
 };
 
+// A certified, continuously running sample grid keeps its time authority
+// while SV TX is parked. A subsequent START must NOT turn the missing first
+// MAC timestamp BASELINE into a lost PTP lock. The publisher nevertheless
+// must obtain NEW descriptor evidence within a bounded live window.
+// This is a narrow SOURCE-only handoff of prior *measured* sync, never an
+// authorization for a cold START, an external GM step or a TX fault.
+struct SvWarmResumePolicy final {
+    static constexpr std::uint32_t kMaxLiveReacquireEpochs = 8U;
+
+    [[nodiscard]] static constexpr bool may_begin(
+        const bool same_ptp_clock, const bool reusable_grid,
+        const bool previously_measured_sync, const bool fresh_phase,
+        const bool source_role) noexcept {
+        return same_ptp_clock && reusable_grid && previously_measured_sync &&
+            fresh_phase && source_role;
+    }
+    [[nodiscard]] static constexpr bool within_window(
+        const std::uint32_t first_epoch,
+        const std::uint32_t current_epoch) noexcept {
+        return first_epoch != 0U && current_epoch >= first_epoch &&
+            current_epoch - first_epoch <= kMaxLiveReacquireEpochs;
+    }
+    [[nodiscard]] static constexpr bool retain(
+        const std::uint32_t first_epoch, const std::uint32_t current_epoch,
+        const bool phase_measured_and_tracking, const bool same_ptp_clock,
+        const bool no_new_fault, const bool previous_claim_still_valid) noexcept {
+        return within_window(first_epoch, current_epoch) &&
+            phase_measured_and_tracking && same_ptp_clock &&
+            no_new_fault && previous_claim_still_valid;
+    }
+};
+
 // ISR-safe, O(1), no allocation/locks/IOCTL. Each interval differs from the
 // existing rational scheduler by at most ONE 1-MHz timer tick. The complete
 // correction is distributed across one explicitly armed second (4000/4800
