@@ -702,6 +702,29 @@ def main() -> None:
             and "!/^[+-]?" in main_qml,
             "numeric editors must validate local draft and commit only once at edit completion")
 
+    # M3.D is an actual firmware operator-policy transaction, not a cosmetic
+    # Studio selector; generation and current-board readback are mandatory.
+    live_control = (project_root / "embedded/esp32p4_smv_injector/main/live_control.cpp").read_text(encoding="utf-8")
+    policy_header = (project_root / "include/ariec61850/time_sync/ptp_advanced_policy.hpp").read_text(encoding="utf-8")
+    session_header = (STUDIO / "src/SmartSessionController.hpp").read_text(encoding="utf-8")
+    require("PTP-POLICY-M3D-V1" in live_control
+            and "PTP POLICY rejected: STOP_SV_AND_PTP_FIRST" in live_control
+            and "ar_ptp_lab_set_advanced_policy(desired)" in live_control
+            and "PTPPOLICY mode=%s role=%s boot_auto=%u" in live_control
+            and "g_ptp_policy_generation" in ptp_facade
+            and "Advanced::auto_handover(mode)" in firmware_source
+            and "Advanced::starts_receiver(mode)" in firmware_source
+            and "Advanced::starts_monitor(mode)" in firmware_source
+            and "permits_local_fallback" in policy_header
+            and "requestPtpAdvancedPolicy" in session_header
+            and "device_->setPtpAdvancedPolicy(mode)" in session_cpp
+            and "kPtpAdvancedPolicyExpression" in device_cpp
+            and "PTP-POLICY-M3D-V1" in device_cpp
+            and "id: policyCombo" in expert
+            and "panel.device.ptpPolicy" in expert
+            and "panel.session.requestPtpAdvancedPolicy(mode)" in expert,
+            "M3.D Advanced PTP policy must be firmware-enforced, board-readback and session-owned")
+
     print("Studio operator workspace contract: PASS")
 
 
