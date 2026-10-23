@@ -849,17 +849,35 @@ void publisher_task(void* argument) {
 #if AR_SV_PTP_PHASE_SUPPORTED
             const auto now_lease = read_ptp_epoch_clock_lease();
             const auto requested_profile = runtime_profile_snapshot();
+            // A fast STOP→START may arrive before the publisher has run its
+            // 200-ms idle/park branch. There is still exactly one valid timer;
+            // do not destroy that continuously aligned phase grid just
+            // because the control task delivered START first. STOP has
+            // already been verified by the serial control state machine.
+            const bool source_unchanged = same_sv_ptp_clock_lease(
+                g_sample_clock_context.armed_ptp_clock, now_lease);
+            const bool profile_unchanged =
+                requested_profile.publisher_rate_hz == active_profile.publisher_rate_hz &&
+                requested_profile.sample_counter_modulus ==
+                    active_profile.sample_counter_modulus;
+            const bool auto_mode =
+                smp_synch_lab_mode() == SvSyncPolicyMode::external_ptp_auto;
+            const bool hot_stopped_grid =
+                !preflight_clock &&
+                SvAutoPreflightPolicy::can_park_running_grid(
+                    sample_clock != nullptr, epoch_armed,
+                    g_sample_clock_context.phase_enabled, source_unchanged,
+                    profile_unchanged, auto_mode);
             const bool reuse_preflight = sample_clock != nullptr && epoch_armed &&
-                !g_sample_clock_context.publisher_notifications_enabled.load(
-                    std::memory_order_acquire) &&
                 requested_profile.sample_counter_modulus ==
                     requested_profile.publisher_rate_hz &&
                 SvAutoPreflightPolicy::can_reuse(
-                    preflight_clock, g_sample_clock_context.phase_enabled,
-                    same_sv_ptp_clock_lease(
-                        g_sample_clock_context.armed_ptp_clock, now_lease),
+                    preflight_clock || hot_stopped_grid,
+                    g_sample_clock_context.phase_enabled,
+                    source_unchanged,
+                    hot_stopped_grid ||
                     preflight_rate_hz == requested_profile.publisher_rate_hz,
-                    smp_synch_lab_mode() == SvSyncPolicyMode::external_ptp_auto);
+                    auto_mode);
             if (!reuse_preflight) stop_sample_clock(sample_clock);
 #else
             constexpr bool reuse_preflight = false;
@@ -923,10 +941,13 @@ void publisher_task(void* argument) {
             // its first tick, so every START falsely began with missed slots.
             if (reuse_preflight) {
 #if AR_SV_PTP_PHASE_SUPPORTED
-                // Flush any already-queued publisher wake from before STOP.
-                // Once parked, no further ISR notifications are issued until
-                // the NEXT PTP-aligned second boundary. The background grid
-                // itself never stops/restarts here.
+                // Atomic handoff works for both parked and fast STOP→START
+                // cycles. The ISR may have notified once while we disabled
+                // it; clear that stale count BEFORE arming the next epoch.
+                g_sample_clock_context.launch_on_next_epoch.store(
+                    false, std::memory_order_release);
+                g_sample_clock_context.publisher_notifications_enabled.store(
+                    false, std::memory_order_release);
                 static_cast<void>(ulTaskNotifyTake(pdTRUE, 0U));
                 g_preflight_phase_clock_active.store(false, std::memory_order_release);
                 g_sample_clock_context.launch_on_next_epoch.store(
