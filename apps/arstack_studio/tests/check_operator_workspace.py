@@ -725,6 +725,25 @@ def main() -> None:
             and "panel.session.requestPtpAdvancedPolicy(mode)" in expert,
             "M3.D Advanced PTP policy must be firmware-enforced, board-readback and session-owned")
 
+    # Relay bench regression: boot AUTO SOURCE can be LOCAL until the
+    # operator's host UTC epoch is applied. Studio must never silently
+    # adopt that running SOURCE as if it were a seeded GM, nor kill PTP on
+    # an ordinary SV STOP/START.
+    require("PTPGM bench_configured=%u bench_ready=%u" in live_control
+            and "kPtpBenchReadyExpression" in device_cpp
+            and "pendingPtpBenchRequested_" in device_cpp
+            and "PTP STOPPED; selecting SOURCE with a fresh bench UTC epoch" in device_cpp
+            and "QDateTime::currentMSecsSinceEpoch()" in device_cpp
+            and "Verify / Commission Bench GM" in expert
+            and "panel.device.ptpRunning && !commissioningBench" in expert
+            and "SvWarmSourceResumePolicy::may_preserve" in firmware_source
+            and "warm_source_resume_epoch" in firmware_source
+            and "expected_new_baseline" in firmware_source
+            and "g_sample_clock_context.launch_on_next_epoch.store(" in firmware_source
+            and "bench_global_gm = false;" in ptp_facade,
+            "Boot LOCAL PTP must be explicitly UTC commissioned, and healthy "
+            "STOP/START must preserve verified SOURCE phase without faking a cold MAC lock")
+
     print("Studio operator workspace contract: PASS")
 
 
