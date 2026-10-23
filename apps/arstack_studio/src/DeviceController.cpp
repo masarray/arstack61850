@@ -189,7 +189,11 @@ bool DeviceController::shutdown() {
     shuttingDown_ = true;
     pendingAutoDetect_ = false;
     pendingConnectPort_.clear();
-    const bool requestPtpStop = needsPtpStopBeforeShutdown();
+    // M3.B: Studio owns the SV output lease, never the board's persistent
+    // time authority. On USB/Studio shutdown request only SV STOP; stopping
+    // PTP here would destroy clock phase across a simple GUI disconnect.
+    // Explicit operator PTP STOP remains a separate verified command.
+    constexpr bool requestPtpStop = false;
     resetPtpStartup();
     resetScenarioStart();
 
