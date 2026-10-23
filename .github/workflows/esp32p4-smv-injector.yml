@@ -158,6 +158,7 @@ jobs:
           # M3.B must really be linked into the exact shipped ESP32-P4 binary.
           # A disabled dependency would otherwise silently negate sdkconfig.defaults.
           grep -qx 'CONFIG_AR_PTP_BOOT_SOURCE_AUTOSTART=y' sdkconfig
+          grep -qx 'CONFIG_AR_SMV_RELAY_BENCH_GLOBAL_GUARD=y' sdkconfig
           grep -qx 'CONFIG_AR_PTP_AUTO_PREFER_EXTERNAL=y' sdkconfig
           grep -qx 'CONFIG_AR_PTP_AUTO_LOCAL_FALLBACK=y' sdkconfig
           grep -qx 'CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL=y' sdkconfig
