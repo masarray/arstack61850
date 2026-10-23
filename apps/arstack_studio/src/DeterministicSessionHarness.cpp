@@ -91,6 +91,7 @@ public:
             {"wrong device during recovery -> SETUP ERROR", wrongDeviceRecoveryFailsClosed()},
             {"CFG transport exclusivity cannot trigger false health loss", healthProbeDefersDuringScenario()},
             {"control health misses -> bounded failure", healthTimeoutIsBounded()},
+            {"RUNNING SHOW timeout never drops a healthy COM/heartbeat lease", healthTimeoutKeepsRunningTransport()},
             {"worker teardown -> joins cleanly", workerTeardownCompletes()},
         };
 
@@ -1772,6 +1773,35 @@ private:
             device.missedHealthReplies_ == StudioDeviceController::controlHealthMaxMisses() &&
             !device.controlResponsive_ &&
             !device.healthProbeOutstanding_;
+    }
+
+    static bool healthTimeoutKeepsRunningTransport() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        seedVerified(fixture, identity(), QStringLiteral("COM7"), true);
+        auto& d = fixture.device;
+        d.controlHealthTimer_.stop();
+        d.controlResponsive_ = true;
+        d.healthProbeOutstanding_ = true;
+        d.missedHealthReplies_ = 0;
+
+        int failureNotifications = 0;
+        QObject::connect(&d, &StudioDeviceController::controlHealthFailed, &d,
+            [&failureNotifications] { ++failureNotifications; });
+        // Two missing SHOW replies are telemetry uncertainty, NOT USB loss.
+        d.serviceControlHealth();
+        d.serviceControlHealth();
+        const bool sessionPreserved = d.connected() && d.running() &&
+            !d.controlResponsive_ && d.healthFailureNotified_ &&
+            d.missedHealthReplies_ == StudioDeviceController::controlHealthMaxMisses() &&
+            failureNotifications == 1;
+        d.serviceControlHealth();
+        if (!sessionPreserved || failureNotifications != 1 || !d.running())
+            return false;
+        // A late positive structured reply recovers S6 without re-START.
+        d.confirmControlHealth();
+        return d.connected() && d.running() && d.controlResponsive_ &&
+            !d.healthFailureNotified_ && d.missedHealthReplies_ == 0;
     }
 
     static bool firmwareFailureRemainsDiagnosable() {

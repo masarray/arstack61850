@@ -218,6 +218,7 @@ private:
     void establishControlHealth() {
         healthProbeOutstanding_ = false;
         missedHealthReplies_ = 0;
+        healthFailureNotified_ = false;
         setControlResponsive(true);
         if (!controlHealthTimer_.isActive()) controlHealthTimer_.start();
     }
@@ -225,9 +226,10 @@ private:
     void resetControlHealth() {
         controlHealthTimer_.stop();
         healthProbeOutstanding_ = false;
-        const bool changed = controlResponsive_ || missedHealthReplies_ != 0;
+        const bool changed = controlResponsive_ || missedHealthReplies_ != 0 || healthFailureNotified_;
         controlResponsive_ = false;
         missedHealthReplies_ = 0;
+        healthFailureNotified_ = false;
         if (changed) emit controlHealthChanged();
     }
 
@@ -239,10 +241,11 @@ private:
 
     void confirmControlHealth() {
         if (!connected() || !deviceVerified()) return;
-        const bool changed = !controlResponsive_ || missedHealthReplies_ != 0;
+        const bool changed = !controlResponsive_ || missedHealthReplies_ != 0 || healthFailureNotified_;
         healthProbeOutstanding_ = false;
         controlResponsive_ = true;
         missedHealthReplies_ = 0;
+        healthFailureNotified_ = false;
         if (changed) emit controlHealthChanged();
     }
 
@@ -263,13 +266,20 @@ private:
             setControlResponsive(false);
             emit controlHealthChanged();
             if (missedHealthReplies_ >= controlHealthMaxMisses()) {
-                controlHealthTimer_.stop();
+                missedHealthReplies_ = controlHealthMaxMisses();
                 healthProbeOutstanding_ = false;
-                emit deviceMessage(QStringLiteral(
-                    "Device control health timed out after bounded probes. Reconnecting without restarting SMV automatically."));
-                emit controlHealthFailed();
-                disconnectPort();
-                return;
+                if (!healthFailureNotified_) {
+                    healthFailureNotified_ = true;
+                    emit deviceMessage(QStringLiteral(
+                        "Device SHOW readbacks are delayed or missing; control is degraded. "
+                        "Keeping COM and the independent firmware HEARTBEAT active. "
+                        "Copy diagnostics; a real USB failure is handled by the serial worker."));
+                    emit controlHealthFailed();
+                }
+                // An application-level SHOW timeout is not proof of USB loss.
+                // Closing a healthy COM here disables HEARTBEAT and causes a
+                // real 6-second firmware LEASE_EXPIRED STOP. Keep probing;
+                // serial errors/port disappearance still close the session.
             }
         }
 
@@ -348,4 +358,5 @@ private:
     bool frequencyPending_{false};
     bool controlResponsive_{false};
     bool healthProbeOutstanding_{false};
+    bool healthFailureNotified_{false};
 };
