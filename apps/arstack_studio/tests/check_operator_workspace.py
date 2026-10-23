@@ -448,13 +448,13 @@ def main() -> None:
             and "requestApplyLiveScenario(snapshot)" in main_qml
             and "function onLiveScenarioApplied()" in main_qml
             and "liveSubmissionRevision === root.scenarioRevision" in main_qml
-            and "text: device.scenarioApplying ? \"Verifying...\" : \"Apply live\"" in main_qml
+            and 'text: device.scenarioApplying ? "LIVE · VERIFYING" : "LIVE · AUTO"' in main_qml
             and "return submitScenario(scenario, false);" in device_src
             and "scenarioLiveUpdate_ = !starting" in device_src
             and "emit liveScenarioApplied();" in device_src
             and "signalFrequencyHz_ = scenarioPendingFrequencyHz_" in device_src
             and "requestApplyLiveScenario(const QVariantMap& scenario)" in session_src,
-            "RUNNING 4I4V updates must use an explicit one-shot atomic CFG with verified ACK")
+            "RUNNING 4I4V auto-apply must use a coalesced atomic CFG with verified ACK")
     require("g_scenario_txn.began_running()" in firmware_live
             and "Live edit rejected: use atomic CFG transaction while RUNNING" in firmware_live
             and "if (scenarioLiveUpdate_)" in device_src
