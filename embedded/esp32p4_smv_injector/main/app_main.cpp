@@ -129,6 +129,13 @@ constexpr std::uint16_t kDiagnosticEtherType = 0x88B5U;
 constexpr std::uint32_t kStatsMergeEvery = 400U;
 constexpr std::uint32_t kTransportFailureStopThreshold = 400U; // 100 ms at 4 kHz
 constexpr std::uint32_t kTimerResolutionHz = 1000000U;
+#if AR_SV_PTP_PHASE_SUPPORTED
+// Separate clock authority from SV TX session state. During SV STOP the
+// exact 4-kHz grid/phase servo and PTP SOURCE continue uninterrupted;
+// remember only a PREVIOUSLY MEASURED SOURCE certification. Never use this
+// latch to qualify a cold start or a changed GM/clock/rate.
+std::atomic<bool> g_parked_source_clock_certified{false};
+#endif
 
 // A single fail-closed operation for both AUTO roles. In particular, keep
 // receiver invalidation INSIDE the same conditional as SOURCE invalidation:
@@ -136,6 +143,11 @@ constexpr std::uint32_t kTimerResolutionHz = 1000000U;
 // RECEIVER qualification impossible at every evidence epoch.
 inline void revoke_sv_auto_claims(
     const SvSyncLossReason reason = SvSyncLossReason::other) noexcept {
+#if AR_SV_PTP_PHASE_SUPPORTED
+    // Every genuine timing/lease/transport fault revokes any parked
+    // certificate as well; only a verified SV-only STOP may preserve it.
+    g_parked_source_clock_certified.store(false, std::memory_order_release);
+#endif
     // Only timestamp an actual lock transition; ordinary 4kHz frame
     // processing keeps its existing work budget.
     const bool was_qualified = smp_synch_source_local_qualified() ||
@@ -1151,17 +1163,34 @@ void publisher_task(void* argument) {
             // same dry-running sample grid may survive START. The 1-Hz
             // phase observer and per-frame link/fault/lease checks remain
             // authoritative. Fresh MAC descriptors must follow within 8 s.
-            const bool warm_resume = ar::iec61850::time_sync::SvWarmResumePolicy::may_begin(
-                source_unchanged, reuse_preflight,
-                smp_synch_source_local_qualified(),
+            const bool current_phase_healthy =
                 g_sample_clock_context.phase_authority_valid.load(
-                    std::memory_order_acquire) &&
+                    std::memory_order_acquire);
+            const bool phase_observer_fresh =
                 ar::iec61850::time_sync::SvPhaseObservationFreshness::fresh(
                     g_sample_clock_context.last_phase_observed_epoch.load(
                         std::memory_order_acquire),
                     g_sample_clock_context.epoch_generation.load(
-                        std::memory_order_acquire)),
-                now_lease.role == PtpAuthorityRole::source);
+                        std::memory_order_acquire));
+            // STOP can occur between two control-plane phase observations.
+            // Do not treat the SV session switch as loss of the time domain:
+            // prior measured clock authority was captured when we PARKED.
+            const bool resume_certified =
+                smp_synch_source_local_qualified() ||
+                g_parked_source_clock_certified.load(std::memory_order_acquire);
+            const bool warm_resume =
+                ar::iec61850::time_sync::SvParkedClockAuthority::may_resume(
+                    resume_certified, source_unchanged,
+                    reuse_preflight && profile_unchanged,
+                    current_phase_healthy, phase_observer_fresh,
+                    now_lease.role == PtpAuthorityRole::source, auto_mode);
+            // WarmResumePolicy remains an independent admission guard:
+            // no new MAC exception on a cold start.
+            const bool warm_admitted =
+                ar::iec61850::time_sync::SvWarmResumePolicy::may_begin(
+                    source_unchanged, reuse_preflight, warm_resume,
+                    current_phase_healthy && phase_observer_fresh,
+                    now_lease.role == PtpAuthorityRole::source);
 #else
             constexpr bool reuse_preflight = false;
             stop_sample_clock(sample_clock);
@@ -1203,7 +1232,7 @@ void publisher_task(void* argument) {
             portEXIT_CRITICAL(&g_tx_egress_mux);
 #if AR_SV_PTP_PHASE_SUPPORTED
             g_warm_resume_first_epoch.store(
-                warm_resume
+                warm_admitted
                     ? g_sample_clock_context.epoch_generation.load(
                         std::memory_order_acquire) : 0U,
                 std::memory_order_release);
@@ -1213,6 +1242,22 @@ void publisher_task(void* argument) {
 #endif
 #if AR_SV_PTP_PHASE_SUPPORTED
             previous_slew_total = 0;
+            // Restore only an ALREADY CERTIFIED clock on the same live PTP
+            // lease and phase grid. The descriptor tracker will acquire a
+            // fresh MAC baseline within its existing bounded warm window.
+            // This happens before the first resumed SV packet; never force
+            // smpSynch 2 or bypass the bench-global/source-readiness gate.
+            if (warm_admitted) {
+                smp_synch_set_source_local_qualified(
+                    true, SvSyncLossReason::none);
+            }
+            g_parked_source_clock_certified.store(
+                false, std::memory_order_release);
+            ESP_LOGI(kTag, "SV CLOCK RESUME %s: same PTP lease=%u phase=%u fresh=%u",
+                warm_admitted ? "WARM CERTIFIED" : "COLD REQUALIFY",
+                source_unchanged ? 1U : 0U,
+                current_phase_healthy ? 1U : 0U,
+                phase_observer_fresh ? 1U : 0U);
 #endif
             ESP_LOGI(kTag,
                      "PROFILE armed generation=%llu svID=%s APPID=0x%04X rate=%lu wrap=%u confRev=%lu VLAN=%u/%u/%u frameLen=%u",
@@ -1294,6 +1339,21 @@ void publisher_task(void* argument) {
                     profile.sample_counter_modulus == active_profile.sample_counter_modulus,
                     auto_clock_ready);
                 if (park) {
+                    const bool clock_was_certified =
+                        ar::iec61850::time_sync::SvParkedClockAuthority::may_preserve(
+                            smp_synch_source_local_qualified(),
+                            lease.role == PtpAuthorityRole::source, same_lease,
+                            true,
+                            g_sample_clock_context.phase_authority_valid.load(
+                                std::memory_order_acquire),
+                            ar::iec61850::time_sync::SvPhaseObservationFreshness::fresh(
+                                g_sample_clock_context.last_phase_observed_epoch.load(
+                                    std::memory_order_acquire),
+                                g_sample_clock_context.epoch_generation.load(
+                                    std::memory_order_acquire)),
+                            smp_synch_lab_mode() == SvSyncPolicyMode::external_ptp_auto);
+                    g_parked_source_clock_certified.store(
+                        clock_was_certified, std::memory_order_release);
                     // ISR can have one in-flight wake at this edge; the next
                     // START explicitly drains it before enabling epoch launch.
                     g_sample_clock_context.launch_on_next_epoch.store(
@@ -1305,7 +1365,8 @@ void publisher_task(void* argument) {
                     preflight_clock = true;
                     preflight_rate_hz = profile.publisher_rate_hz;
                     ESP_LOGI(kTag,
-                        "M3A PARKED: SV TX OFF, PTP/SV GPTimer and phase observer continue");
+                        "M3E PARKED: SV TX OFF, PTP/4k clock continuous certified=%u",
+                        clock_was_certified ? 1U : 0U);
                 } else {
                     stop_sample_clock(sample_clock);
                     epoch_armed = false;
@@ -1972,8 +2033,16 @@ void sv_ptp_phase_observer_task(void* argument) {
                         healthy_dry_phase,
                         notified_session, current_faults, lease.generation,
                         observation.last_sv_epoch_generation);
-                    if (!healthy_dry_phase)
+                    if (!healthy_dry_phase) {
                         revoke_sv_auto_claims(SvSyncLossReason::phase_or_mac);
+                    } else if (lease.role == PtpAuthorityRole::source &&
+                               smp_synch_source_local_qualified()) {
+                        // Keep the established SOURCE certificate across
+                        // arbitrarily many healthy parked PTP seconds.
+                        // Preflight cannot promote an unqualified cold clock.
+                        g_parked_source_clock_certified.store(
+                            true, std::memory_order_release);
+                    }
                 } else {
                     local_acquisition.reset();
                     source_fast_acquisition.reset();

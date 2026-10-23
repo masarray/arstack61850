@@ -332,6 +332,37 @@ struct SvAutoPreflightPolicy final {
     }
 };
 
+// IEC 61850-9-2 smpSynch describes the SAMPLING TIMEBASE, not an Ethernet
+// publisher session. A STOP can park the grid while the phase servo and PTP
+// SOURCE remain alive; a subsequent START must use the SAME certified clock.
+// In particular, deleting a serial TX/MAC observation baseline must never
+// by itself invalidate a still-measured sample-clock authority. This policy
+// has no clock-quality or traceability promotion function.
+struct SvParkedClockAuthority final {
+    [[nodiscard]] static constexpr bool may_preserve(
+        const bool previously_certified, const bool is_internal_source,
+        const bool same_ptp_lease, const bool parked_grid_unchanged,
+        const bool measured_phase_healthy, const bool phase_observer_fresh,
+        const bool auto_mode) noexcept {
+        return previously_certified && is_internal_source && same_ptp_lease &&
+            parked_grid_unchanged && measured_phase_healthy &&
+            phase_observer_fresh && auto_mode;
+    }
+
+    // A prior certification may be reused across STOP/START, but only after
+    // checking the current 1-Hz observer, source generation, exact GPTimer
+    // and runtime profile. A cold start or a new GM NEVER inherits a claim.
+    [[nodiscard]] static constexpr bool may_resume(
+        const bool certified_before_stop,
+        const bool same_ptp_lease, const bool unchanged_grid_and_profile,
+        const bool healthy_phase, const bool fresh_observer,
+        const bool internal_source, const bool auto_mode) noexcept {
+        return may_preserve(certified_before_stop, internal_source,
+            same_ptp_lease, unchanged_grid_and_profile,
+            healthy_phase, fresh_observer, auto_mode);
+    }
+};
+
 // A certified, continuously running sample grid keeps its time authority
 // while SV TX is parked. A subsequent START must NOT turn the missing first
 // MAC timestamp BASELINE into a lost PTP lock. The publisher nevertheless
