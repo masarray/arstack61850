@@ -3,6 +3,7 @@
 #include "ptp_lab_task.hpp"
 #include "ariec61850/time_sync/ptp_advanced_policy.hpp"
 #include "ptp_receiver_task.hpp"
+#include "live_control.hpp"
 #include "smp_synch_lab.hpp"
 
 #include "ariec61850/time_sync/ptp_discipline.hpp"
@@ -287,7 +288,8 @@ extern "C" bool ar_ptp_lab_set_advanced_policy(
     // Shared EMAC owner arbitration: never reconfigure SOURCE under a
     // receiver, even if a worker START/STOP is still being cleaned up.
     ar::esp32p4::smv::RoleControlClaim transaction{};
-    if (!transaction.held || !ar::esp32p4::smv::emac_role_free())
+    if (!transaction.held || !ar::esp32p4::smv::emac_role_free() ||
+        ar::esp32p4::smv::live_tx_running())
         return false;
     auto config = ar::esp32p4::smv::selected_config();
     config.role = requested == AR_PTP_POLICY_MONITOR_ONLY
@@ -304,7 +306,8 @@ extern "C" bool ar_ptp_lab_set_advanced_policy(
     if (!ar::esp32p4::smv::valid_public_config(config) ||
         !ar_ptp_source_configure(&config)) return false;
     portENTER_CRITICAL(&ar::esp32p4::smv::g_ptp_facade_mux);
-    if (!ar::esp32p4::smv::emac_role_free()) {
+    if (!ar::esp32p4::smv::emac_role_free() ||
+        ar::esp32p4::smv::live_tx_running()) {
         portEXIT_CRITICAL(&ar::esp32p4::smv::g_ptp_facade_mux);
         return false;
     }
