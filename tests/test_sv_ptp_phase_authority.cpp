@@ -101,6 +101,12 @@ void check_m3a_stop_start_keeps_qualified_sample_grid() {
             CHECK(!SvAutoPreflightPolicy::can_advertise_local(false, true));
             CHECK(SvAutoPreflightPolicy::can_reuse(
                 parked, true, true, true, true));
+            // Rapid STOP→START, before the 200-ms idle loop can park:
+            // a still-owned, source-identical grid is equally reusable.
+            const bool hot_stopped = SvAutoPreflightPolicy::can_park_running_grid(
+                true, true, true, true, true, auto_ready);
+            CHECK(SvAutoPreflightPolicy::can_reuse(
+                false || hot_stopped, true, true, true, true));
             CHECK(timer_rearms == 1U);
             CHECK(source_generation == 7U && phase_session == 3U);
         }
