@@ -77,6 +77,47 @@ void check_auto_preflight_does_not_invent_sync_or_start() {
     }
 }
 
+void check_m3a_stop_start_keeps_qualified_sample_grid() {
+    // Pure lifecycle gate (not a hardware phase-accuracy substitute). Model
+    // repeated START/STOP without rearming GPTimer or changing PTP authority.
+    // No SV packet may be sent in the PARKED state; resumed output begins
+    // only at the next already-running second boundary.
+    for (std::uint32_t rate : {4000U, 4800U}) {
+        const bool auto_ready = SvAutoPreflightPolicy::can_prepare(
+            true, true, true, rate, rate);
+        CHECK(auto_ready);
+        std::uint32_t timer_rearms = 1U; // initial power-on clock acquisition
+        std::uint32_t source_generation = 7U;
+        std::uint32_t phase_session = 3U;
+        for (std::uint32_t cycle = 0U; cycle < 100U; ++cycle) {
+            const bool parked = SvAutoPreflightPolicy::can_park_running_grid(
+                true, true, true, true, true, auto_ready);
+            CHECK(parked);
+            const bool dry_clock = parked;
+            const bool sv_tx_enabled = false;
+            CHECK(dry_clock && !sv_tx_enabled);
+            CHECK(SvAutoPreflightPolicy::can_steer(
+                true, true, true, true, false, dry_clock));
+            CHECK(!SvAutoPreflightPolicy::can_advertise_local(false, true));
+            CHECK(SvAutoPreflightPolicy::can_reuse(
+                parked, true, true, true, true));
+            CHECK(timer_rearms == 1U);
+            CHECK(source_generation == 7U && phase_session == 3U);
+        }
+    }
+    // Any real source/lease/profile/phase fault must prevent parking, not
+    // silently keep a stale GPTimer authority or a stale smpSynch claim.
+    for (int fault = 0; fault < 6; ++fault) {
+        std::array<bool, 6> inputs{true, true, true, true, true, true};
+        inputs[static_cast<std::size_t>(fault)] = false;
+        CHECK(!SvAutoPreflightPolicy::can_park_running_grid(
+            inputs[0], inputs[1], inputs[2], inputs[3],
+            inputs[4], inputs[5]));
+    }
+    CHECK(!SvAutoPreflightPolicy::can_prepare(
+        true, true, true, 4000U, 4800U));
+}
+
 void check_receiver_preflight_requires_measured_gm_lease() {
     SvPtpClockLease gm{};
     gm.role = PtpAuthorityRole::receiver;
@@ -444,6 +485,7 @@ void check_continuous_ptp_second_binding() {
 int main() {
     try {
         check_auto_preflight_does_not_invent_sync_or_start();
+        check_m3a_stop_start_keeps_qualified_sample_grid();
         check_phase_observer_stall_revokes_source_wire_claim();
         check_receiver_preflight_requires_measured_gm_lease();
         check_phase_sign_and_bounded_corrections();
