@@ -156,6 +156,12 @@ def main() -> None:
             "running 4I4V edits must auto-apply once after commit without STOP/START, "
             "not on each keystroke, and queue the newest revision while ACK pending")
     controller = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
+    # M3.B: the ESP owns PTP across USB/Studio exit; the host may withdraw
+    # its 4I4V output lease but must never silently send PTP STOP.
+    require("constexpr bool requestPtpStop = false;" in controller
+            and "const bool requestSvStop = running_;" in controller
+            and "ioWorker_->shutdown(requestSvStop, requestPtpStop);" in controller,
+            "Studio session retirement must stop SV without killing always-on PTP")
     require("logUpdateTimer_.setInterval(100)" in controller
             and "if (!logUpdateTimer_.isActive()) logUpdateTimer_.start();" in controller,
             "serial log QML notification must be coalesced to avoid GUI stutter")
