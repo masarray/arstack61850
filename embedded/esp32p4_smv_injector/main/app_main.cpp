@@ -8,6 +8,7 @@
 #include "ariec61850/time_sync/sv_ptp_epoch.hpp"
 #include "ariec61850/time_sync/sv_boot_clock_policy.hpp"
 #include "ariec61850/time_sync/ptp_external_candidate_policy.hpp"
+#include "ariec61850/time_sync/ptp_advanced_policy.hpp"
 #include "ariec61850/time_sync/sv_ptp_clock_lease.hpp"
 #include "ariec61850/time_sync/ptp_runtime.hpp"
 
@@ -811,9 +812,21 @@ void sv_boot_clock_supervisor_task(void*) {
         const bool operator_overrode =
             !ar_ptp_boot_supervisor_autostart_allowed();
         ar_ptp_lab_config_t config{};
-        const bool source_selected =
-            ar_ptp_lab_get_config(&config) &&
-            config.role == AR_PTP_ROLE_LAB_SOURCE;
+        const bool have_config = ar_ptp_lab_get_config(&config);
+        const auto mode = static_cast<
+            ar::iec61850::time_sync::PtpAdvancedMode>(
+                ar_ptp_lab_advanced_policy());
+        using Advanced = ar::iec61850::time_sync::PtpAdvancedPolicy;
+        // A role and an intent must both match. This is a fail-closed guard
+        // against manual PTPROLE commands leaving a stale AUTO mode behind.
+        const bool source_selected = have_config &&
+            config.role == AR_PTP_ROLE_LAB_SOURCE &&
+            Advanced::starts_source(mode);
+        const bool auto_role_eligible = source_selected ||
+            (have_config && config.role == AR_PTP_ROLE_TIME_RECEIVER &&
+                Advanced::starts_receiver(mode)) ||
+            (have_config && config.role == AR_PTP_ROLE_MONITOR &&
+                Advanced::starts_monitor(mode));
         const bool link_ready =
             (xEventGroupGetBits(g_link_events) & kLinkUpBit) != 0U;
         const bool runtime_owned =
@@ -840,7 +853,7 @@ void sv_boot_clock_supervisor_task(void*) {
                 "M3B PHY recovered with no PTP runtime; retry SOURCE after guard");
         }
         if (Boot::may_start(
-                !ready_once, operator_overrode, source_selected,
+                !ready_once, operator_overrode, auto_role_eligible,
                 link_ready, runtime_owned, attempts, now_ms, retry_after_ms)) {
             ++attempts;
             // Blocking verified SOURCE start is allowed only in this
@@ -867,7 +880,7 @@ void sv_boot_clock_supervisor_task(void*) {
             ar_ptp_source_external_candidate_stable();
         const bool may_external = 
             ar::iec61850::time_sync::PtpExternalHandoverGuard::may_handover(
-                true, operator_overrode, stable_better_gm,
+                Advanced::auto_handover(mode), operator_overrode, stable_better_gm,
                 live_tx_running(), ar_ptp_source_runtime_active(),
                 external_runtime_selected, link_ready);
         if (may_external && !handover_failure_latched &&
@@ -927,7 +940,8 @@ void sv_boot_clock_supervisor_task(void*) {
                 : 0U;
             const bool may_restore =
                 ar::iec61850::time_sync::PtpExternalHandoverGuard::may_fallback(
-                    true, operator_overrode, live_tx_running(),
+                    Advanced::permits_local_fallback(mode, true),
+                    operator_overrode, live_tx_running(),
                     ar_ptp_lab_is_running(), valid_status && timing.source_selected,
                     link_ready, quiet_duration_ms);
             if (may_restore) {
