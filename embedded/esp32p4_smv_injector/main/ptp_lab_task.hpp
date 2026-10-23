@@ -139,6 +139,8 @@ void ar_ptp_boot_supervisor_operator_override(void);
 bool ar_ptp_boot_supervisor_autostart_allowed(void);
 // Runtime ownership is not equivalent to verified SOURCE READY.
 bool ar_ptp_source_runtime_active(void);
+// Passive SOURCE-side foreign Announce monitor: evidence only, never PTP LOCK.
+bool ar_ptp_source_external_candidate_stable(void);
 
 /**
  * Legacy start entry point retained for P1.5 source ABI compatibility.
