@@ -233,6 +233,8 @@ struct SampleClockContext final {
     std::atomic<std::int32_t> requested_slew_ticks{0};
     std::atomic<std::int32_t> cumulative_slew_ticks{0};
     std::atomic<std::uint32_t> publisher_fault_generation{0U};
+    // Qualified SOURCE continuity across operator SV STOP only.
+    std::atomic<std::uint32_t> warm_source_resume_epoch{0U};
     std::atomic<bool> phase_authority_valid{false};
     // Last successfully observed sample epoch (published only by the 1Hz
     // control-plane observer). The 4kHz producer checks freshness without
@@ -674,6 +676,8 @@ gptimer_handle_t start_sample_clock(
     g_sample_clock_context.publisher_task = publisher_task_handle;
     g_sample_clock_context.next_alarm = {};
     g_sample_clock_context.epoch_generation.store(0U, std::memory_order_relaxed);
+    g_sample_clock_context.warm_source_resume_epoch.store(
+        0U, std::memory_order_release);
     g_sample_clock_context.session_generation.store(
         g_phase_session_serial.fetch_add(1U, std::memory_order_relaxed) + 1U,
         std::memory_order_release);
@@ -759,8 +763,12 @@ void stop_sample_clock(gptimer_handle_t& timer) noexcept {
 #if AR_SV_PTP_PHASE_SUPPORTED
     g_preflight_phase_clock_active.store(false, std::memory_order_release);
 #endif
-    // Release the wire claim before teardown; old MAC evidence never
-    // survives STOP/START, even when the same SOURCE later restarts.
+    // This is actual GPTimer teardown (not ordinary M3.A SV STOP).
+    // Never allow warm SOURCE continuity across a destroyed timer.
+#if AR_SV_PTP_PHASE_SUPPORTED
+    g_sample_clock_context.warm_source_resume_epoch.store(
+        0U, std::memory_order_release);
+#endif
     revoke_sv_auto_claims(SvSyncLossReason::publisher_stop);
     if (timer == nullptr) return;
 #if AR_SV_PTP_PHASE_SUPPORTED
@@ -1111,6 +1119,13 @@ void publisher_task(void* argument) {
                     sample_clock != nullptr, epoch_armed,
                     g_sample_clock_context.phase_enabled, source_unchanged,
                     profile_unchanged, auto_mode);
+            const bool warm_source_verified =
+                (preflight_clock || hot_stopped_grid) &&
+                g_sample_clock_context.phase_authority_valid.load(
+                    std::memory_order_acquire) &&
+                smp_synch_source_local_qualified() &&
+                now_lease.role == PtpAuthorityRole::source &&
+                ar_ptp_lab_bench_global_ready();
             const bool reuse_preflight = sample_clock != nullptr && epoch_armed &&
                 requested_profile.sample_counter_modulus ==
                     requested_profile.publisher_rate_hz &&
@@ -1178,6 +1193,16 @@ void publisher_task(void* argument) {
                      static_cast<unsigned>(active_profile.vlan_priority),
                      static_cast<unsigned>(canonical.bytes.size()));
 
+            // Preserve a previously verified SOURCE/phase claim only when
+            // the very same GPTimer+PTP lease is reused. Fresh MAC TX
+            // evidence must replace this continuity within seven epochs.
+            // All cold starts and real SOURCE changes start unqualified.
+            const std::uint32_t resume_epoch =
+                reuse_preflight && warm_source_verified
+                ? g_sample_clock_context.epoch_generation.load(
+                    std::memory_order_acquire) : 0U;
+            g_sample_clock_context.warm_source_resume_epoch.store(
+                resume_epoch, std::memory_order_release);
             // Timer commit is the final operation in this branch.
             // Formatting the profile log after timer enable previously queued
             // dozens of ISR notifications before the publisher could consume
@@ -1485,6 +1510,24 @@ void publisher_task(void* argument) {
                 // once every two seconds, never per-frame or in an ISR.
                 using Evidence = ar::iec61850::time_sync::SvTxEvidenceResult;
                 if (result != Evidence::measured) {
+                    const auto warm_epoch =
+                        g_sample_clock_context.warm_source_resume_epoch.load(
+                            std::memory_order_acquire);
+                    // First descriptor of a new publisher session only
+                    // establishes a baseline. It is not a PTP clock fault.
+                    const bool expected_new_baseline =
+                        result == Evidence::baseline_established &&
+                        ar::iec61850::time_sync::SvWarmSourceResumePolicy::may_preserve(
+                            smp_synch_source_local_qualified(),
+                            evidence_lease.role == PtpAuthorityRole::source &&
+                                same_sv_ptp_clock_lease(
+                                    evidence_lease, read_ptp_epoch_clock_lease()),
+                            g_sample_clock_context.phase_authority_valid.load(
+                                std::memory_order_acquire),
+                            g_sample_clock_context.publisher_fault_generation.load(
+                                std::memory_order_acquire) == fault_generation_before,
+                            warm_epoch, egress.sample_epoch_generation);
+                    if (!expected_new_baseline) {
                     const auto cause = result == Evidence::transmit_failed
                         ? SvSyncLossReason::canonical_tx
                         : result == Evidence::missing_hw_timestamp
@@ -1499,6 +1542,9 @@ void publisher_task(void* argument) {
                             ? SvSyncLossReason::mac_baseline_reset
                         : SvSyncLossReason::mac_egress;
                     revoke_sv_auto_claims(cause);
+                    g_sample_clock_context.warm_source_resume_epoch.store(
+                        0U, std::memory_order_release);
+                    }
                 }
             }
 #else
@@ -1816,8 +1862,27 @@ void sv_ptp_phase_observer_task(void* argument) {
                         observation.last_sv_epoch_generation);
                 if (lease.role != PtpAuthorityRole::source)
                     source_fast_acquisition.reset();
+                const auto warm_resume_epoch =
+                    g_sample_clock_context.warm_source_resume_epoch.load(
+                        std::memory_order_acquire);
+                const bool warm_source_continuity =
+                    lease.role == PtpAuthorityRole::source &&
+                    ar::iec61850::time_sync::SvWarmSourceResumePolicy::may_preserve(
+                        smp_synch_source_local_qualified(),
+                        same_sv_ptp_clock_lease(armed_lease, lease),
+                        measured_phase_qualified &&
+                            decision.epoch_second_continuous &&
+                            decision.software_tracking,
+                        no_new_publisher_fault,
+                        warm_resume_epoch,
+                        observation.last_sv_epoch_generation);
                 const bool stable_local =
-                    stable_conservative || stable_source_fast;
+                    stable_conservative || stable_source_fast ||
+                    warm_source_continuity;
+                if (stable_conservative || stable_source_fast ||
+                    (warm_resume_epoch != 0U && !warm_source_continuity))
+                    g_sample_clock_context.warm_source_resume_epoch.store(
+                        0U, std::memory_order_release);
                 if (!stable_local &&
                     (smp_synch_source_local_qualified() ||
                      smp_synch_receiver_timeline_qualified())) {
