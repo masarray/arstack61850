@@ -126,9 +126,35 @@ def main() -> None:
             and "model.setProperty(0, \"phase\"" in main_qml
             and "model.setProperty(1, \"phase\"" in main_qml
             and "model.setProperty(2, \"phase\"" in main_qml
-            and "const snapshot = startScenarioSnapshot()" in main_qml
+            and "const snapshot = startScenarioSnapshot(false)" in main_qml
+            and "function startScenarioSnapshot(flushDrafts)" in main_qml
             and "requestApplyLiveScenario(snapshot)" in main_qml,
             "edited 3-phase angles must enter the same complete atomic 4I4V snapshot, never partial SETs")
+    # Regression: Enter, Tab or clicking away immediately schedules one
+    # atomic CFG 4I4V commit with independent firmware readback. The 40ms
+    # event-turn coalescing does not auto-send while a cell is still typed.
+    # A newer edit arriving during an in-flight commit is drained on ACK.
+    require("id: autoLiveApplyTimer" in main_qml
+            and "interval: 40" in main_qml
+            and "scheduleAutoLiveEdit()" in main_qml
+            and "autoLiveQueuedRevision = scenarioRevision" in main_qml
+            and "function drainAutoLiveEdits()" in main_qml
+            and "device.scenarioApplying) return" in main_qml
+            and "function onScenarioApplicationFinished()" in main_qml
+            and "autoLiveApplyTimer.restart()" in main_qml
+            and "function onRunningChanged()" in main_qml
+            and "autoLiveQueuedRevision = -1" in main_qml
+            and "const snapshot = startScenarioSnapshot(false)" in main_qml
+            and "requestApplyLiveScenario(snapshot)" in main_qml
+            and 'text: device.scenarioApplying ? "LIVE · VERIFYING" : "LIVE · AUTO"' in main_qml
+            and 'text: device.scenarioApplying ? "Verifying..." : "Apply live"' not in main_qml
+            and "function commitFrequencyEditor()" in main_qml
+            and "onEditingFinished: root.commitFrequencyEditor()" in main_qml
+            and "onAccepted: root.commitFrequencyEditor()" in main_qml
+            and "if (!activeFocus) root.commitFrequencyEditor()" in main_qml
+            and "if (flushDrafts !== false &&" in main_qml,
+            "running 4I4V edits must auto-apply once after commit without STOP/START, "
+            "not on each keystroke, and queue the newest revision while ACK pending")
     controller = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
     require("logUpdateTimer_.setInterval(100)" in controller
             and "if (!logUpdateTimer_.isActive()) logUpdateTimer_.start();" in controller,
@@ -198,7 +224,8 @@ def main() -> None:
             in ribbon_qml
             and '!ribbon.injectionRunning && !ribbon.startQueued' in source("WorkflowBar.qml")
             and 'readonly property bool startQueued: Boolean(' in source("WorkflowBar.qml")
-            and 'startIntentPending || (ribbon.device && ribbon.device.scenarioApplying)' in source("WorkflowBar.qml")
+            and 'startIntentPending || (ribbon.device && ribbon.device.scenarioApplying &&' in source("WorkflowBar.qml")
+            and '!ribbon.device.running))' in source("WorkflowBar.qml")
             and 'startWatchdog' not in source("WorkflowBar.qml"),
             "SV STOP must remain actionable while the acknowledged scenario transaction is pending")
     # A prior operator-ui QSettings default hid both plot docks on every new
@@ -321,7 +348,7 @@ def main() -> None:
     ribbon = source("ModernRibbon.qml")
     cmake_icons = (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8")
     require("scenarioSnapshot()" in main_qml and "restoreLocalScenario()" in main_qml
-            and "startScenarioSnapshot()" in main_qml and "offlinePreviewRunning" in main_qml,
+            and "function startScenarioSnapshot(flushDrafts)" in main_qml and "offlinePreviewRunning" in main_qml,
             "offline-first scenario must persist and support one-click Start")
     require("Apply to board" not in main_qml and "requestApplyDraft()" not in main_qml,
             "operator UI must not expose a redundant Apply-to-board action")
@@ -422,13 +449,13 @@ def main() -> None:
             and "requestApplyLiveScenario(snapshot)" in main_qml
             and "function onLiveScenarioApplied()" in main_qml
             and "liveSubmissionRevision === root.scenarioRevision" in main_qml
-            and "text: device.scenarioApplying ? \"Verifying...\" : \"Apply live\"" in main_qml
+            and 'text: device.scenarioApplying ? "LIVE · VERIFYING" : "LIVE · AUTO"' in main_qml
             and "return submitScenario(scenario, false);" in device_src
             and "scenarioLiveUpdate_ = !starting" in device_src
             and "emit liveScenarioApplied();" in device_src
             and "signalFrequencyHz_ = scenarioPendingFrequencyHz_" in device_src
             and "requestApplyLiveScenario(const QVariantMap& scenario)" in session_src,
-            "RUNNING 4I4V updates must use an explicit one-shot atomic CFG with verified ACK")
+            "RUNNING 4I4V auto-apply must use a coalesced atomic CFG with verified ACK")
     require("g_scenario_txn.began_running()" in firmware_live
             and "Live edit rejected: use atomic CFG transaction while RUNNING" in firmware_live
             and "if (scenarioLiveUpdate_)" in device_src
