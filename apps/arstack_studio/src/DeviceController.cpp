@@ -77,6 +77,9 @@ const QRegularExpression kIdentityExpression{
         "(?:build=([A-Fa-f0-9]{16}) )?"
         "(?:boot_id=([A-Fa-f0-9]{16}) )?capabilities=([A-Z0-9_,.\\-]+)"),
     QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kPtpBenchReadyExpression{
+    QStringLiteral("PTPGM bench_configured=([01]) bench_ready=([01])"),
+    QRegularExpression::CaseInsensitiveOption};
 const QRegularExpression kPtpStatusExpression{
     QStringLiteral("PTP status=(RUNNING|STOPPED) Announce=(\\d+) Sync=(\\d+) FollowUp=(\\d+) PdelayFrames=(\\d+) TXfail=(\\d+)"),
     QRegularExpression::CaseInsensitiveOption};
@@ -1441,6 +1444,8 @@ void DeviceController::resetPtpStartup() noexcept {
     ptpStartStage_ = PtpStartStage::idle;
     pendingPtpRole_.clear();
     pendingPtpConfig_.clear();
+    pendingPtpBenchRequested_ = false;
+    ptpPreflightBenchReady_ = false;
     ptpRuntimeRoleSeen_ = false;
     ptpRuntimeRunningSeen_ = false;
 }
@@ -1451,6 +1456,8 @@ bool DeviceController::beginPtpStopVerification() {
     ptpStartStage_ = PtpStartStage::awaiting_stop_ack;
     pendingPtpRole_.clear();
     pendingPtpConfig_.clear();
+    pendingPtpBenchRequested_ = false;
+    ptpPreflightBenchReady_ = false;
     ptpRuntimeRoleSeen_ = false;
     ptpRuntimeRunningSeen_ = false;
     ptpStatus_ = QStringLiteral("Stopping PTP; waiting for board confirmation...");
@@ -1495,8 +1502,14 @@ void DeviceController::failPtpStartup(const QString& reason, const bool rollback
 bool DeviceController::startPtpConfigured(const QString& requestedRole,
                                            const QVariantMap& profile) {
     const QString role = requestedRole.trimmed().toUpper();
+    const bool benchRequested = profile.value(QStringLiteral("benchGlobalGm")).toBool();
+    // Boot PTP SOURCE is intentionally conservative before a Studio UTC
+    // seed arrives. An *explicit* bench START may commission it once with
+    // a verified stop/reconfigure, never on a routine SV STOP/START.
+    const bool mayCommission = role == QStringLiteral("SOURCE") &&
+        benchRequested && !running_ && scenarioStage_ == ScenarioStage::idle;
     if (!deviceVerified_ || !connected_ || !ioWorkerReady_ || !ptpAvailable_ ||
-        ptpRunning_ || ptpStarting() ||
+        (ptpRunning_ && !mayCommission) || ptpStarting() ||
         (role != QStringLiteral("SOURCE") &&
          role != QStringLiteral("RECEIVER") &&
          role != QStringLiteral("MONITOR"))) {
@@ -1532,6 +1545,8 @@ bool DeviceController::startPtpConfigured(const QString& requestedRole,
     ptpLastStartFailure_.clear();
     pendingPtpRole_ = role;
     pendingPtpConfig_ = command;
+    pendingPtpBenchRequested_ = benchRequested;
+    ptpPreflightBenchReady_ = false;
     // Verify actual firmware runtime before selecting another role. A stale
     // local OFF flag after reconnect must not provoke a rejected PTPROLE or
     // force-stop a transmitter still running on the board.
@@ -1549,6 +1564,9 @@ bool DeviceController::startPtpConfigured(const QString& requestedRole,
 void DeviceController::advancePtpStartup(const QString& line) {
     if (!ptpStarting() || ptpStartStage_ == PtpStartStage::stop_unconfirmed) return;
     if (ptpStartStage_ == PtpStartStage::awaiting_preflight) {
+        const auto benchProof = kPtpBenchReadyExpression.match(line);
+        if (benchProof.hasMatch())
+            ptpPreflightBenchReady_ = benchProof.captured(2) == QStringLiteral("1");
         // PTP SHOW provides measured PTP2 role before status. Only adopt an
         // already-active transmitter if THIS preflight saw the expected role;
         // historical UI role cannot authorize mutation or claim an exact role.
@@ -1559,11 +1577,33 @@ void DeviceController::advancePtpStartup(const QString& line) {
         if (!actual.hasMatch()) return;
         if (actual.captured(1).compare(QStringLiteral("RUNNING"), Qt::CaseInsensitive) == 0) {
             if (ptpRuntimeRoleSeen_) {
+                if (pendingPtpBenchRequested_ && !ptpPreflightBenchReady_) {
+                    if (running_ || scenarioStage_ != ScenarioStage::idle) {
+                        failPtpStartup(QStringLiteral(
+                            "Cannot commission bench GM while SV is running. STOP SV first."), false);
+                        return;
+                    }
+                    // The operator specifically requested bench-GM START.
+                    // Replace the early LOCAL SOURCE with a UTC-seeded GM
+                    // ONCE, not on any subsequent SV injection restart.
+                    ptpStartStage_ = PtpStartStage::awaiting_stop_ack;
+                    ptpStatus_ = QStringLiteral(
+                        "Commissioning bench GM: verifying PTP STOP before UTC reseed...");
+                    emit ptpStateChanged();
+                    if (!sendCommand(QStringLiteral("PTP STOP"))) {
+                        markPtpStopUnconfirmed(QStringLiteral(
+                            "Could not queue PTP STOP for bench GM commissioning."));
+                        return;
+                    }
+                    ptpStartTimer_.start(5000);
+                    return;
+                }
                 const QString existingRole = pendingPtpRole_;
                 resetPtpStartup();
-                ptpStatus_ = QStringLiteral("PTP %1 already active on board; external sync unqualified").arg(existingRole);
+                ptpStatus_ = QStringLiteral(
+                    "PTP %1 already active with verified requested timing profile.").arg(existingRole);
                 emit ptpStateChanged();
-                return; // No redundant role/config/start, no surprise STOP.
+                return;
             }
             ptpLastStartFailure_ = QStringLiteral(
                 "Board PTP is already RUNNING. Click Stop PTP, wait for verified STOPPED, then retry Start.");
@@ -1608,10 +1648,33 @@ void DeviceController::advancePtpStartup(const QString& line) {
         // still deferred. It cannot verify the requested STOP.
         if (!readback.hasMatch() || deferredPtpShow_) return;
         if (readback.captured(1).compare(QStringLiteral("STOPPED"), Qt::CaseInsensitive) == 0) {
-            resetPtpStartup();
             ptpRunning_ = false;
-            ptpStatus_ = QStringLiteral("PTP stopped — confirmed by board");
-            emit ptpStateChanged();
+            if (pendingPtpBenchRequested_ && !pendingPtpConfig_.isEmpty() &&
+                pendingPtpRole_ == QStringLiteral("SOURCE")) {
+                // UTC must be sampled after STOP confirmation: never seed
+                // from a host timestamp already stale in the serial queue.
+                const int marker = pendingPtpConfig_.lastIndexOf(QStringLiteral(" 1 "));
+                if (marker < 0) {
+                    failPtpStartup(QStringLiteral("Bench GM UTC seed missing."), false);
+                    return;
+                }
+                pendingPtpConfig_ = pendingPtpConfig_.left(marker) +
+                    QStringLiteral(" 1 %1").arg(QDateTime::currentMSecsSinceEpoch());
+                ptpStartStage_ = PtpStartStage::awaiting_role_ack;
+                ptpStatus_ = QStringLiteral(
+                    "PTP STOPPED; selecting SOURCE with a fresh bench UTC epoch...");
+                emit ptpStateChanged();
+                if (!sendCommand(QStringLiteral("PROFILE PTPROLE SOURCE"))) {
+                    failPtpStartup(QStringLiteral(
+                        "Could not select PTP SOURCE after verified STOP."), false);
+                    return;
+                }
+                ptpStartTimer_.start(5000);
+            } else {
+                resetPtpStartup();
+                ptpStatus_ = QStringLiteral("PTP stopped — confirmed by board");
+                emit ptpStateChanged();
+            }
         } else if (!ptpStopPollTimer_.isActive()) {
             // Firmware stop is asynchronous. Poll on Qt timers without
             // extending the absolute five-second verification deadline.
