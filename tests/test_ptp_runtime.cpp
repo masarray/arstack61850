@@ -2,6 +2,7 @@
 
 #include "ariec61850/time_sync/ptp_runtime.hpp"
 #include "ariec61850/time_sync/ptp_source_policy.hpp"
+#include "ariec61850/time_sync/ptp_external_candidate_policy.hpp"
 
 #include <array>
 #include <chrono>
@@ -114,6 +115,41 @@ void scheduler_sequence_and_status_match_runtime_contract() {
     CHECK(parsed.header.message_type == PtpMessageType::announce);
     CHECK(parsed.header.transport_specific == std::uint8_t{1U});
     CHECK(parsed.vlan_id == std::optional<std::uint16_t>{std::uint16_t{100U}});
+    // M3.C actual encoded Announce (not synthetic struct) must pass the
+    // precise SOURCE passive-watch domain, transport, VLAN and PCP gate.
+    const PtpForeignWireProfile profile{0U, 1U, true, 100U, 4U};
+    CHECK(profile.matches(parsed, announce->ethernet_frame));
+    CHECK(!PtpForeignWireProfile{1U,1U,true,100U,4U}.matches(
+        parsed, announce->ethernet_frame));
+    CHECK(!PtpForeignWireProfile{0U,0U,true,100U,4U}.matches(
+        parsed, announce->ethernet_frame));
+    CHECK(!PtpForeignWireProfile{0U,1U,true,101U,4U}.matches(
+        parsed, announce->ethernet_frame));
+    CHECK(!PtpForeignWireProfile{0U,1U,true,100U,5U}.matches(
+        parsed, announce->ethernet_frame));
+    CHECK(!PtpForeignWireProfile{0U,1U,false,0U,0U}.matches(
+        parsed, announce->ethernet_frame));
+    auto corrupted_pcp = announce->ethernet_frame;
+    CHECK(corrupted_pcp.size() > 16U);
+    corrupted_pcp[14] = static_cast<std::uint8_t>(
+        (corrupted_pcp[14] & 0x1FU) | 0xA0U); // PCP 5
+    CHECK(!profile.matches(parsed, corrupted_pcp));
+    const auto& foreign_announce = *parsed.announce;
+    PtpAnnounceRank foreign{
+        foreign_announce.priority1, foreign_announce.clock_class,
+        static_cast<std::uint8_t>(foreign_announce.clock_accuracy),
+        foreign_announce.offset_scaled_log_variance, foreign_announce.priority2,
+        foreign_announce.grandmaster_identity, foreign_announce.steps_removed,
+        parsed.header.source_port_identity.clock_identity,
+        parsed.header.source_port_identity.port_number,
+    };
+    auto local_rank = foreign;
+    local_rank.priority1 = 200U;
+    local_rank.gm_identity = {0x66U,0,0,0,0,0,0,1U};
+    PtpExternalCandidateGate foreign_gate;
+    for (std::uint64_t t=1000U; t<=5000U; t+=1000U)
+        foreign_gate.observe(foreign, local_rank, t);
+    CHECK(foreign_gate.stable(5000U));
 
     const auto sync = runtime.prepare_sync(PtpTimestamp{});
     CHECK(sync.has_value());
