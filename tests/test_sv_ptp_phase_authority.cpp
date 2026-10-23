@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ariec61850/time_sync/sv_ptp_phase_authority.hpp"
+#include "ariec61850/time_sync/sv_boot_clock_policy.hpp"
 #include "ariec61850/time_sync/sv_ptp_clock_lease.hpp"
 #include "ariec61850/sampled_values/rational_schedule.hpp"
 
@@ -122,6 +123,31 @@ void check_m3a_stop_start_keeps_qualified_sample_grid() {
     }
     CHECK(!SvAutoPreflightPolicy::can_prepare(
         true, true, true, 4000U, 4800U));
+}
+
+void check_m3b_boot_ptp_is_safe_and_operator_owned() {
+    using Boot = SvBootClockPolicy;
+    static_assert(Boot::kMaxAttempts == 4U);
+    // SOURCE-only and explicitly enabled; never auto-become SOURCE in the
+    // presence of an external RECEIVER or MONITOR configuration.
+    CHECK(Boot::may_start(true, false, true, true, false, 0U, 100U, 0U));
+    CHECK(!Boot::may_start(false, false, true, true, false, 0U, 100U, 0U));
+    CHECK(!Boot::may_start(true, true, true, true, false, 0U, 100U, 0U));
+    CHECK(!Boot::may_start(true, false, false, true, false, 0U, 100U, 0U));
+    CHECK(!Boot::may_start(true, false, true, false, false, 0U, 100U, 0U));
+    CHECK(!Boot::may_start(true, false, true, true, true, 0U, 100U, 0U));
+    CHECK(!Boot::may_start(true, false, true, true, false, 4U, 100U, 0U));
+    CHECK(!Boot::may_start(true, false, true, true, false, 2U, 100U, 4000U));
+    CHECK(Boot::may_start(true, false, true, true, false, 2U, 4000U, 4000U));
+    CHECK(Boot::retry_delay_ms(0U) == 1000U);
+    CHECK(Boot::retry_delay_ms(1U) == 2000U);
+    CHECK(Boot::retry_delay_ms(2U) == 4000U);
+    CHECK(Boot::retry_delay_ms(4U) == 16000U);
+    CHECK(Boot::retry_delay_ms(100U) == 16000U);
+    // The monotonic unsigned timestamp wraps after ~49 days; use signed
+    // difference for bounded near-wrap retry windows.
+    CHECK(Boot::may_start(true, false, true, true, false, 1U, 10U, 0xFFFFFFF0U));
+    CHECK(!Boot::may_start(true, false, true, true, false, 1U, 0xFFFFFFF0U, 10U));
 }
 
 void check_receiver_preflight_requires_measured_gm_lease() {
@@ -492,6 +518,7 @@ int main() {
     try {
         check_auto_preflight_does_not_invent_sync_or_start();
         check_m3a_stop_start_keeps_qualified_sample_grid();
+        check_m3b_boot_ptp_is_safe_and_operator_owned();
         check_phase_observer_stall_revokes_source_wire_claim();
         check_receiver_preflight_requires_measured_gm_lease();
         check_phase_sign_and_bounded_corrections();
