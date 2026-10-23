@@ -144,6 +144,20 @@ void check_m3b_boot_ptp_is_safe_and_operator_owned() {
     CHECK(Boot::retry_delay_ms(2U) == 4000U);
     CHECK(Boot::retry_delay_ms(4U) == 16000U);
     CHECK(Boot::retry_delay_ms(100U) == 16000U);
+    CHECK(Boot::may_recover_after_link_cycle(
+        true, true, true, false, false, true));
+    CHECK(!Boot::may_recover_after_link_cycle(
+        true, false, true, false, false, true)); // SV STOP is not PHY loss
+    CHECK(!Boot::may_recover_after_link_cycle(
+        true, true, true, true, false, true)); // existing valid SOURCE
+    CHECK(!Boot::may_recover_after_link_cycle(
+        true, true, true, false, true, true)); // operator manual PTP STOP
+    CHECK(!Boot::may_recover_after_link_cycle(
+        true, true, true, false, false, false)); // RECEIVER/MONITOR
+    CHECK(!Boot::may_recover_after_link_cycle(
+        true, true, false, false, false, true)); // still unplugged
+    CHECK(!Boot::may_recover_after_link_cycle(
+        false, true, true, false, false, true)); // never had SOURCE
     // The monotonic unsigned timestamp wraps after ~49 days; use signed
     // difference for bounded near-wrap retry windows.
     CHECK(Boot::may_start(true, false, true, true, false, 1U, 10U, 0xFFFFFFF0U));
