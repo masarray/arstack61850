@@ -78,7 +78,7 @@ const QRegularExpression kIdentityExpression{
         "(?:boot_id=([A-Fa-f0-9]{16}) )?capabilities=([A-Z0-9_,.\\-]+)"),
     QRegularExpression::CaseInsensitiveOption};
 const QRegularExpression kPtpBenchReadyExpression{
-    QStringLiteral("PTPGM bench_configured=([01]) bench_ready=([01])"),
+    QStringLiteral("PTPGM bench_configured=([01]) bench_ready=([01]) source_active=([01])"),
     QRegularExpression::CaseInsensitiveOption};
 const QRegularExpression kPtpStatusExpression{
     QStringLiteral("PTP status=(RUNNING|STOPPED) Announce=(\\d+) Sync=(\\d+) FollowUp=(\\d+) PdelayFrames=(\\d+) TXfail=(\\d+)"),
@@ -1565,8 +1565,14 @@ void DeviceController::advancePtpStartup(const QString& line) {
     if (!ptpStarting() || ptpStartStage_ == PtpStartStage::stop_unconfirmed) return;
     if (ptpStartStage_ == PtpStartStage::awaiting_preflight) {
         const auto benchProof = kPtpBenchReadyExpression.match(line);
-        if (benchProof.hasMatch())
+        if (benchProof.hasMatch()) {
             ptpPreflightBenchReady_ = benchProof.captured(2) == QStringLiteral("1");
+            // This is live SOURCE generation, not merely a saved role. It
+            // arrives before the authoritative PTP RUNNING line in SHOW.
+            if (pendingPtpRole_ == QStringLiteral("SOURCE") &&
+                benchProof.captured(3) == QStringLiteral("1"))
+                ptpRuntimeRoleSeen_ = true;
+        }
         // PTP SHOW provides measured PTP2 role before status. Only adopt an
         // already-active transmitter if THIS preflight saw the expected role;
         // historical UI role cannot authorize mutation or claim an exact role.
