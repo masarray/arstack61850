@@ -278,6 +278,33 @@ void check_m3d_advanced_ptp_policy_prevents_implicit_role_promotion() {
     CHECK(!Policy::permits_local_fallback(Mode::auto_prefer_external,false));
     CHECK(!Policy::permits_local_fallback(Mode::external_only,true));
     CHECK(!Policy::permits_local_fallback(Mode::monitor_only,true));
+
+    // M3.D regression: an already-provisioned bench GM cannot silently
+    // revert to LOCAL on SOURCE->SOURCE Advanced policy selection.
+    constexpr std::int64_t now = 50'000'000LL;
+    const auto keeps = [&](Mode mode, bool was_source, bool bench,
+                           std::int64_t age) {
+        return Policy::may_preserve_bench_seed(
+            mode, was_source, bench, 1792800000U, 250U, now - age, now);
+    };
+    CHECK(keeps(Mode::internal_gm_only, true, true, 0LL));
+    CHECK(keeps(Mode::auto_prefer_external, true, true,
+                Policy::kBenchSeedMaxAgeUs));
+    CHECK(!keeps(Mode::auto_prefer_external, true, true,
+                 Policy::kBenchSeedMaxAgeUs + 1LL));
+    CHECK(!keeps(Mode::external_only, true, true, 0LL));
+    CHECK(!keeps(Mode::monitor_only, true, true, 0LL));
+    CHECK(!keeps(Mode::internal_gm_only, false, true, 0LL));
+    CHECK(!keeps(Mode::internal_gm_only, true, false, 0LL));
+    CHECK(!Policy::may_preserve_bench_seed(
+        Mode::internal_gm_only, true, true, 1792800000U, 250U, 0LL, now));
+    CHECK(!Policy::may_preserve_bench_seed(
+        Mode::internal_gm_only, true, true, 1792800000U, 250U,
+        now + 1LL, now));
+    CHECK(!Policy::may_preserve_bench_seed(
+        Mode::internal_gm_only, true, true, 1500000000U, 250U, now, now));
+    CHECK(!Policy::may_preserve_bench_seed(
+        Mode::internal_gm_only, true, true, 1792800000U, 1000U, now, now));
 }
 
 void check_receiver_preflight_requires_measured_gm_lease() {
