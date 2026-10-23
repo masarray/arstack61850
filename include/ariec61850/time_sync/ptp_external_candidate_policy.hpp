@@ -149,6 +149,14 @@ private:
 };
 
 struct PtpExternalHandoverGuard final {
+    static constexpr std::uint32_t kMinSwitchDwellMs = 30000U;
+    [[nodiscard]] static constexpr bool cooldown_expired(
+        const std::uint32_t now_ms,
+        const std::uint32_t not_before_ms) noexcept {
+        // Bounded 30-s deadline survives ESP32's 32-bit ms wrap.
+        return static_cast<std::int32_t>(now_ms - not_before_ms) >= 0;
+    }
+
     // No forced SV shutdown; an operator's SV START owns output. Handover is
     // deferred until TX has really stopped, and SOURCE/RECEIVER must be
     // mutually exclusive. Manual PTP action always wins.
