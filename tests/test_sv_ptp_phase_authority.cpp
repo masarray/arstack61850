@@ -229,6 +229,11 @@ void check_m3c_foreign_announce_and_exclusive_emac_handover() {
     gate.observe(degraded, local, 25000U);
     CHECK(gate.stable(25000U));
     CHECK(Guard::may_handover(true,false,true,false,true,false,true));
+    CHECK(Guard::kMinSwitchDwellMs == 30000U);
+    CHECK(Guard::cooldown_expired(30000U, 30000U));
+    CHECK(!Guard::cooldown_expired(29999U, 30000U));
+    CHECK(!Guard::cooldown_expired(0xFFFFFFF0U, 20U));
+    CHECK(Guard::cooldown_expired(30U, 20U));
     CHECK(!Guard::may_handover(true,false,true,true,true,false,true));
     CHECK(!Guard::may_handover(true,true,true,false,true,false,true));
     CHECK(!Guard::may_handover(true,false,true,false,true,true,true));
