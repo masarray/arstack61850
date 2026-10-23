@@ -132,6 +132,14 @@ bool ar_ptp_lab_get_config(ar_ptp_lab_config_t* config);
  */
 bool ar_ptp_lab_try_start(esp_eth_handle_t eth_handle);
 
+// M3.B boot-only supervisor. Operator PTP START/STOP/CONFIG permanently
+// disables background SOURCE-start attempts until the next device boot.
+// It never disables the actual timebase or SV sample grid on SV STOP.
+void ar_ptp_boot_supervisor_operator_override(void);
+bool ar_ptp_boot_supervisor_autostart_allowed(void);
+// Runtime ownership is not equivalent to verified SOURCE READY.
+bool ar_ptp_source_runtime_active(void);
+
 /**
  * Legacy start entry point retained for P1.5 source ABI compatibility.
  * New user-facing control paths should call ar_ptp_lab_try_start().
