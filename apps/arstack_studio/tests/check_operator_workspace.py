@@ -347,7 +347,7 @@ def main() -> None:
     ribbon = source("ModernRibbon.qml")
     cmake_icons = (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8")
     require("scenarioSnapshot()" in main_qml and "restoreLocalScenario()" in main_qml
-            and "startScenarioSnapshot()" in main_qml and "offlinePreviewRunning" in main_qml,
+            and "function startScenarioSnapshot(flushDrafts)" in main_qml and "offlinePreviewRunning" in main_qml,
             "offline-first scenario must persist and support one-click Start")
     require("Apply to board" not in main_qml and "requestApplyDraft()" not in main_qml,
             "operator UI must not expose a redundant Apply-to-board action")
