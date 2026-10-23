@@ -79,8 +79,11 @@ SurfacePanel {
     }
 
     function startRole(role) {
+        const commissioningBench = role === "SOURCE" && benchGmCheck.checked &&
+            !panel.device.running && !panel.startPending
         if (!panel.session || !panel.device.ptpAvailable || !panel.device.deviceVerified
-                || panel.device.ptpRunning || panel.startPending || panel.session.updatingFirmware)
+                || (panel.device.ptpRunning && !commissioningBench) ||
+                panel.startPending || panel.session.updatingFirmware)
             return false
         const accepted = panel.session.requestStartPtpConfigured(role, panel.ptpProfile(role))
         if (!accepted && panel.controller)
@@ -431,9 +434,15 @@ SurfacePanel {
                     tone: "accent"
                     text: panel.stopPending ? "Stop pending…"
                         : panel.startPending ? "Starting…"
+                        : modeCombo.currentIndex === 0 && panel.device.ptpRunning &&
+                            benchGmCheck.checked ? "Verify / Commission Bench GM"
                         : modeCombo.currentIndex === 0 ? "Start PTP Source"
                         : modeCombo.currentIndex === 1 ? "Start PTP Receiver" : "Start Monitor"
-                    enabled: panel.session && panel.device.ptpAvailable && !panel.device.ptpRunning && !panel.startPending && !panel.session.updatingFirmware
+                    enabled: panel.session && panel.device.ptpAvailable &&
+                        (!panel.device.ptpRunning ||
+                         (modeCombo.currentIndex === 0 && benchGmCheck.checked &&
+                          !panel.device.running)) &&
+                        !panel.startPending && !panel.session.updatingFirmware
                     onClicked: panel.startSelectedMode()
                 }
                 CalmButton {
