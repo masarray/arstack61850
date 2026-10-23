@@ -407,6 +407,7 @@ void handle_ptp_command(char* save) noexcept {
             ESP_LOGE(kTag, "Usage: PTP START");
             return;
         }
+        ar_ptp_boot_supervisor_operator_override();
         if (!ar_esp32p4_ptp_start()) {
             ar_ptp_lab_config_t active{};
             const bool is_source = ar_ptp_lab_get_config(&active) &&
@@ -433,11 +434,13 @@ void handle_ptp_command(char* save) noexcept {
             ESP_LOGE(kTag, "Usage: PTP STOP");
             return;
         }
+        ar_ptp_boot_supervisor_operator_override();
         ar_ptp_lab_stop();
         ESP_LOGI(kTag, "PTP stop requested");
         return;
     }
     if (std::strcmp(subcommand, "CONFIG") == 0) {
+        ar_ptp_boot_supervisor_operator_override();
         std::array<std::uint32_t, 8> values{};
         for (auto& value : values) {
             if (!parse_u32(strtok_r(nullptr, kTokenDelimiters.data(), &save), value)) {
