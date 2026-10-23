@@ -814,6 +814,11 @@ void sv_boot_clock_supervisor_task(void*) {
         const auto now_ms =
             static_cast<std::uint32_t>(esp_timer_get_time() / 1000LL);
         if (ready_once && !link_ready) observed_link_loss = true;
+        // If the original runtime survived the PHY cycle, it remains the
+        // sole time authority. Do not retain a stale link-loss permission
+        // that could restart it after an unrelated future task failure.
+        if (observed_link_loss && link_ready && runtime_owned)
+            observed_link_loss = false;
         if (Boot::may_recover_after_link_cycle(
                 ready_once, observed_link_loss, link_ready, runtime_owned,
                 operator_overrode, source_selected)) {
