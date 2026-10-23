@@ -686,6 +686,11 @@ void handle_line(char* line) noexcept {
             ESP_LOGE(kTag, "START rejected: Studio control-session lease is unavailable");
             return;
         }
+        // Capture the counter BEFORE RUNNING becomes visible to the 4 Hz
+        // control-lease watchdog. Otherwise an immediate post-START expiry
+        // could increment stop_seq before the ACK print and be mistaken by
+        // Studio for a historical STOP.
+        const auto stop_seq_at_accept = g_sv_stop_seq.load(std::memory_order_acquire);
         profile_control_abort_staging();
         g_scenario_txn.consume_start();
         g_start_request.store(true, std::memory_order_release);
@@ -693,7 +698,7 @@ void handle_line(char* line) noexcept {
         wake_publisher();
         ESP_LOGI(kTag, "START accepted: profile armed token=%llu hash=%016llX stop_seq=%lu, phase and smpCnt reset at first sample boundary",
                  static_cast<unsigned long long>(token), static_cast<unsigned long long>(hash),
-                 static_cast<unsigned long>(g_sv_stop_seq.load(std::memory_order_acquire)));
+                 static_cast<unsigned long>(stop_seq_at_accept));
         return;
     }
     if (std::strcmp(command, "STOP") == 0) {
