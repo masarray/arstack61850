@@ -86,6 +86,12 @@ const QRegularExpression kPtpEthernetExpression{
 const QRegularExpression kPtpConfigExpression{
     QStringLiteral("PTP config domain=(\\d+) transportSpecific=0x([0-9A-Fa-f]+) VLAN=(\\S+) Announce=(\\d+) ms Sync=(\\d+) ms Pdelay=(ON|OFF)"),
     QRegularExpression::CaseInsensitiveOption};
+const QRegularExpression kPtpAdvancedPolicyExpression{
+    QStringLiteral(
+        "PTPPOLICY mode=(INTERNAL_GM_ONLY|AUTO_PREFER_EXTERNAL|EXTERNAL_ONLY|MONITOR_ONLY) "
+        "role=(SOURCE|RECEIVER|MONITOR) boot_auto=([01]) ext_candidate=([01]) "
+        "source_generation=(\\d+) sv_running=([01])"),
+    QRegularExpression::CaseInsensitiveOption};
 const QRegularExpression kPtpRoleExpression{
     QStringLiteral("PTPROLE role=(SOURCE|RECEIVER|MONITOR) value=(\\d+) running=([01])"),
     QRegularExpression::CaseInsensitiveOption};
@@ -1354,6 +1360,32 @@ bool DeviceController::setCtSaturation(
 }
 
 bool DeviceController::sendPtpShow() { return sendCommand(QStringLiteral("PTP SHOW")); }
+
+bool DeviceController::setPtpAdvancedPolicy(const QString& requested) {
+    const QString mode = requested.trimmed().toUpper();
+    if (mode != QStringLiteral("INTERNAL_GM_ONLY") &&
+        mode != QStringLiteral("AUTO_PREFER_EXTERNAL") &&
+        mode != QStringLiteral("EXTERNAL_ONLY") &&
+        mode != QStringLiteral("MONITOR_ONLY")) {
+        setError(QStringLiteral("Invalid PTP source policy."));
+        return false;
+    }
+    // The host preflight is not proof of board STOP; the firmware repeats
+    // this gate against live PTP/SV ownership and reports its exact refusal.
+    if (!deviceVerified_ || !connected_ || !ptpAvailable_ ||
+        running_ || ptpRunning_ || ptpStarting() ||
+        scenarioStage_ != ScenarioStage::idle || profileDeploying_) {
+        setError(QStringLiteral(
+            "STOP SV injection and verify PTP STOPPED before changing time source policy."));
+        return false;
+    }
+    if (!identity_.capabilities.contains(
+            QStringLiteral("PTP-POLICY-M3D-V1"), Qt::CaseInsensitive)) {
+        setError(QStringLiteral("Firmware lacks M3.D runtime timing-source policy support."));
+        return false;
+    }
+    return sendCommand(QStringLiteral("PTP POLICY %1").arg(mode));
+}
 bool DeviceController::startPtp() {
     // Legacy direct START must not bypass a guided START, in-flight STOP,
     // or an unverified cancellation. Both paths share this device authority.
@@ -2356,6 +2388,19 @@ void DeviceController::processLine(const QString& rawLine) {
         emit ptpStateChanged();
     }
 
+    match = kPtpAdvancedPolicyExpression.match(line);
+    if (match.hasMatch()) {
+        ptpAvailable_ = true;
+        ptpPolicy_ = match.captured(1).toUpper();
+        ptpRole_ = match.captured(2).toUpper();
+        ptpPolicyBootAuto_ = match.captured(3);
+        ptpCandidate_ = match.captured(4);
+        ptpSourceGeneration_ = match.captured(5);
+        // A policy readback does not authorize any claim about actual relay
+        // PTP LOCK, nor override measured PTP2 DISCIPLINE state.
+        emit ptpStateChanged();
+    }
+
     match = kPtpRoleExpression.match(line);
     if (match.hasMatch()) {
         ptpAvailable_ = true;
@@ -2473,6 +2518,10 @@ void DeviceController::resetPtpState() {
     ptpPdelayFrames_ = QStringLiteral("-");
     ptpTxFailures_ = QStringLiteral("-");
     ptpRole_ = QStringLiteral("SOURCE");
+    ptpPolicy_ = QStringLiteral("UNKNOWN");
+    ptpPolicyBootAuto_ = QStringLiteral("0");
+    ptpCandidate_ = QStringLiteral("0");
+    ptpSourceGeneration_ = QStringLiteral("0");
     ptpDiscipline_ = QStringLiteral("UNLOCKED");
     ptpSource_ = QStringLiteral("NONE");
     ptpOffsetNs_ = QStringLiteral("NA");
