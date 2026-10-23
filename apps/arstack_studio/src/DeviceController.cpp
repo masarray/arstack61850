@@ -2449,6 +2449,18 @@ void DeviceController::processLine(const QString& rawLine) {
         ptpStatus_ = QStringLiteral("Not enabled in firmware");
         emit ptpStateChanged();
     }
+    if (line.contains(QStringLiteral("PTP POLICY rejected:"), Qt::CaseInsensitive)) {
+        setError(QStringLiteral("Board rejected timing policy: %1").arg(line));
+        // Board's previous mode is still authoritative. Do not silently
+        // adopt a requested GUI setting after firmware rejected it.
+        static_cast<void>(sendPtpShow());
+    }
+    if (line.contains(QStringLiteral("PTP POLICY accepted mode="),
+                      Qt::CaseInsensitive) && !ptpStarting()) {
+        emit deviceMessage(QStringLiteral(
+            "PTP source policy accepted by board; verifying live mode/role."));
+        static_cast<void>(sendPtpShow());
+    }
     if (line.contains(QStringLiteral("PTP configuration accepted"), Qt::CaseInsensitive) && !ptpStarting()) {
         emit deviceMessage(QStringLiteral("PTP expert profile accepted."));
         static_cast<void>(sendPtpShow());
