@@ -155,6 +155,9 @@ jobs:
         run: |
           set -euo pipefail
           grep -qx 'CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y' sdkconfig
+          # M3.B must really be linked into the exact shipped ESP32-P4 binary.
+          # A disabled dependency would otherwise silently negate sdkconfig.defaults.
+          grep -qx 'CONFIG_AR_PTP_BOOT_SOURCE_AUTOSTART=y' sdkconfig
           grep -qx 'CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL=y' sdkconfig
           grep -qx '# CONFIG_AR_SMV_BROADCAST_MIRROR is not set' sdkconfig
           grep -qx 'CONFIG_AR_PTP_OPERATING_ROLE=0' sdkconfig
