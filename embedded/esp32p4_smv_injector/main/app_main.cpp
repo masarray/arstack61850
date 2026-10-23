@@ -179,10 +179,10 @@ SvLocalSyncEvidenceGate g_local_sync_evidence{}; // same critical section as egr
 // SOURCE-only certified resume: the dry GPTimer stays aligned across STOP.
 // The first new MAC baseline is NOT a clock step; any real error revokes.
 // Zero means cold/expired. Never read these atomics from the 4-kHz ISR.
-std::atomic<std::uint32_t> g_warm_resume_first_epoch{0U};
 std::atomic<bool> g_warm_resume_baseline_consumed{false};
 #endif
 #if AR_SV_PTP_PHASE_SUPPORTED
+std::atomic<std::uint32_t> g_warm_resume_first_epoch{0U};
 SemaphoreHandle_t g_phase_timer_mutex = nullptr;
 gptimer_handle_t g_monitored_sample_clock = nullptr; // under mutex, never in ISR
 TaskHandle_t g_phase_observer_task = nullptr;
