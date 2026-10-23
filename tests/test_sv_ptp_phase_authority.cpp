@@ -153,6 +153,36 @@ void check_m3a_stop_start_keeps_qualified_sample_grid() {
         true, true, true, 4000U, 4800U));
 }
 
+void check_m3e_parked_certified_ptp_authority_survives_100_restarts() {
+    // IEC 61850-9-2: SmpSynch describes the sampled TIMEBASE, not whether
+    // the publisher is presently transmitting SV frames.
+    using Park = SvParkedClockAuthority;
+    using Resume = SvWarmResumePolicy;
+    CHECK(!Park::may_preserve(false, true, true, true, true, true, true));
+    CHECK(!Park::may_resume(false, true, true, true, true, true, true));
+    for (std::uint32_t cycle = 0U; cycle < 100U; ++cycle) {
+        // The old certificate came from a measured MAC and qualified phase.
+        // The phase observer runs for sixty more seconds while SV TX is off.
+        bool certified = true;
+        CHECK(Park::may_preserve(certified, true, true, true, true, true, true));
+        for (std::uint32_t second = 0U; second < 60U; ++second)
+            CHECK(Park::may_preserve(certified, true, true, true, true, true, true));
+        CHECK(Park::may_resume(certified, true, true, true, true, true, true));
+        CHECK(Resume::may_begin(true, true, certified, true, true));
+        CHECK(Resume::retain(100U, 101U, true, true, true, true));
+        CHECK(Resume::retain(100U, 105U, true, true, true, true));
+        CHECK(!Resume::retain(100U, 109U, true, true, true, true));
+    }
+    // A real PTP lease change, lost phase, invalid freshness, non-SOURCE
+    // mode, non-AUTO policy, or cold clock cannot inherit smpSynch.
+    for (int gate = 0; gate < 7; ++gate) {
+        std::array<bool, 7> checks{true, true, true, true, true, true, true};
+        checks[static_cast<std::size_t>(gate)] = false;
+        CHECK(!Park::may_resume(checks[0], checks[1], checks[2],
+                                checks[3], checks[4], checks[5], checks[6]));
+    }
+}
+
 void check_m3b_boot_ptp_is_safe_and_operator_owned() {
     using Boot = SvBootClockPolicy;
     static_assert(Boot::kMaxAttempts == 4U);
@@ -701,6 +731,7 @@ int main() {
     try {
         check_auto_preflight_does_not_invent_sync_or_start();
         check_m3a_stop_start_keeps_qualified_sample_grid();
+        check_m3e_parked_certified_ptp_authority_survives_100_restarts();
         check_m3b_boot_ptp_is_safe_and_operator_owned();
         check_m3c_foreign_announce_and_exclusive_emac_handover();
         check_m3d_advanced_ptp_policy_prevents_implicit_role_promotion();
