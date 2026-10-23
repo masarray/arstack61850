@@ -800,6 +800,7 @@ void sv_boot_clock_supervisor_task(void*) {
     bool external_runtime_selected = false;
     std::uint64_t external_quiet_since_ms = 0U;
     bool handover_failure_latched = false;
+    std::uint32_t next_external_handover_ms = 0U;
 #endif
     bool reported_grid = false;
     bool reported_operator_override = false;
@@ -869,7 +870,8 @@ void sv_boot_clock_supervisor_task(void*) {
                 true, operator_overrode, stable_better_gm,
                 live_tx_running(), ar_ptp_source_runtime_active(),
                 external_runtime_selected, link_ready);
-        if (may_external && !handover_failure_latched) {
+        if (may_external && !handover_failure_latched &&
+            static_cast<std::int32_t>(now_ms - next_external_handover_ms) >= 0) {
             // No SV output, so a GM change explicitly invalidates the old
             // phase/lease. The dry grid's preflight owner sees generation
             // change and tears down/re-arms only after RECEIVER is LOCKED.
@@ -877,6 +879,7 @@ void sv_boot_clock_supervisor_task(void*) {
                 "M3C external GM candidate stable and superior: drain SOURCE before RECEIVER");
             ar_ptp_lab_stop();
             if (!ar_ptp_source_runtime_active() &&
+                !live_tx_running() &&
                 ar_ptp_boot_supervisor_autostart_allowed()) {
                 auto follower = config;
                 follower.role = AR_PTP_ROLE_TIME_RECEIVER;
@@ -886,6 +889,9 @@ void sv_boot_clock_supervisor_task(void*) {
                     ar_esp32p4_ptp_start()) {
                     external_runtime_selected = true;
                     external_quiet_since_ms = 0U;
+                    // Avoid repeated GM oscillation when several clocks
+                    // advertise near-equal priority or a flaky PHY bounces.
+                    next_external_handover_ms = now_ms + 30000U;
                     ESP_LOGI(kTag,
                         "M3C RECEIVER active; waiting for measured GM/offset/Pdelay LOCK");
                 } else {
@@ -942,6 +948,8 @@ void sv_boot_clock_supervisor_task(void*) {
                     ar_ptp_lab_configure(&local) &&
                     ar_esp32p4_ptp_start()) {
                     ready_once = true;
+                    handover_failure_latched = false;
+                    next_external_handover_ms = now_ms + 30000U;
                     ESP_LOGI(kTag,
                         "M3C restored lab LOCAL SOURCE; new generation requires fresh SV phase");
                 } else {
