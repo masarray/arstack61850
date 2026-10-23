@@ -691,8 +691,9 @@ void handle_line(char* line) noexcept {
         g_start_request.store(true, std::memory_order_release);
         g_running.store(true, std::memory_order_release);
         wake_publisher();
-        ESP_LOGI(kTag, "START accepted: profile armed token=%llu hash=%016llX, phase and smpCnt reset at first sample boundary",
-                 static_cast<unsigned long long>(token), static_cast<unsigned long long>(hash));
+        ESP_LOGI(kTag, "START accepted: profile armed token=%llu hash=%016llX stop_seq=%lu, phase and smpCnt reset at first sample boundary",
+                 static_cast<unsigned long long>(token), static_cast<unsigned long long>(hash),
+                 static_cast<unsigned long>(g_sv_stop_seq.load(std::memory_order_acquire)));
         return;
     }
     if (std::strcmp(command, "STOP") == 0) {

@@ -59,6 +59,7 @@ public:
             {"legacy bare SV START refuses stale eight-channel state", legacyBareStartFailsClosed()},
             {"SV commit ACK/readback START chain is generation bound", svTransactionAckChain()},
             {"SV stale ACK and mismatched firmware readback fail closed", svTransactionNegativeAcks()},
+            {"delayed STOPPED cannot bounce START without a newer board stop counter", staleStoppedReadbackCannotReleaseStart()},
             {"RUNNING 4I4V live commit verifies ACK without START or SV stop", svLiveTransactionAckNoRestart()},
             {"RUNNING live rejected readback retains existing SV stream", svLiveTransactionRejectKeepsRunning()},
             {"STOP cancels pending SV commit-to-START chain", svStopCancelsPendingStart()},
@@ -587,8 +588,38 @@ private:
         if (d.scenarioStage_ != DeviceController::ScenarioStage::awaiting_start_ack ||
             d.running()) return false;
         d.processLine(QStringLiteral(
-            "START accepted: profile armed token=4242 hash=ABCDEF1234567890"));
+            "START accepted: profile armed token=4242 hash=ABCDEF1234567890 stop_seq=0"));
         return d.running() && d.scenarioStage_ == DeviceController::ScenarioStage::idle;
+    }
+
+    static bool staleStoppedReadbackCannotReleaseStart() {
+        Fixture f;
+        seedScenarioAck(f);
+        auto& d = f.device;
+        d.processLine(QStringLiteral(
+            "CFG COMMITTED token=4242 hash=ABCDEF1234567890 generation=91 boot=0123456789ABCDEF"));
+        d.processLine(QStringLiteral(
+            "CFG READBACK token=4242 hash=ABCDEF1234567890 generation=91 boot=0123456789ABCDEF"));
+        d.processLine(QStringLiteral(
+            "START accepted: profile armed token=4242 hash=ABCDEF1234567890 stop_seq=5"));
+        if (!d.running() || !d.svStopSeqAtStartValid_ || d.svStopSeqAtStart_ != 5U)
+            return false;
+
+        // These were queued before START: no evidence the active publisher stopped.
+        d.processLine(QStringLiteral(
+            "state=STOPPED generation=91 signal_frequency=50000 mHz"));
+        d.processLine(QStringLiteral(
+            "SVLIFE state=STOPPED stop_cause=LEASE_EXPIRED stop_seq=5"));
+        if (!d.running() || !d.svStopReason_.isEmpty()) return false;
+
+        // A later board event increments stop_seq and must now revoke RUNNING.
+        d.processLine(QStringLiteral(
+            "state=STOPPED generation=91 signal_frequency=50000 mHz"));
+        d.processLine(QStringLiteral(
+            "SVLIFE state=STOPPED stop_cause=LEASE_EXPIRED stop_seq=6"));
+        return !d.running() && d.svStopReason_ == QStringLiteral("LEASE_EXPIRED") &&
+            d.logText_.contains(QStringLiteral("STALE_STOP_HISTORY_IGNORED")) &&
+            d.logText_.contains(QStringLiteral("UNSEQUENCED_STOPPED_READBACK"));
     }
 
     static bool svStopCancelsPendingStart() {
@@ -601,7 +632,7 @@ private:
         d.processLine(QStringLiteral(
             "CFG COMMITTED token=4242 hash=ABCDEF1234567890 generation=91 boot=0123456789ABCDEF"));
         d.processLine(QStringLiteral(
-            "START accepted: profile armed token=4242 hash=ABCDEF1234567890"));
+            "START accepted: profile armed token=4242 hash=ABCDEF1234567890 stop_seq=0"));
         return !d.running() && d.scenarioStage_ == DeviceController::ScenarioStage::idle;
     }
 
@@ -648,7 +679,7 @@ private:
             return false;
         // A stale subsequent START/CFG ACK cannot mutate a live stream.
         d.processLine(QStringLiteral(
-            "START accepted: profile armed token=4242 hash=ABCDEF1234567890"));
+            "START accepted: profile armed token=4242 hash=ABCDEF1234567890 stop_seq=0"));
         return d.running() && d.scenarioStage_ == DeviceController::ScenarioStage::idle;
     }
 

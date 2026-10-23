@@ -280,6 +280,7 @@ private:
                 // Closing a healthy COM here disables HEARTBEAT and causes a
                 // real 6-second firmware LEASE_EXPIRED STOP. Keep probing;
                 // serial errors/port disappearance still close the session.
+                return; // next timer tick probes again; never aborts the lease
             }
         }
 

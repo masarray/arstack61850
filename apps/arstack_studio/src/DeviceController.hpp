@@ -438,6 +438,10 @@ private:
     QString svStopReason_;
     QString svLastStopCause_;
     quint64 lastSvStopSeq_{0};
+    // START ACK carries the firmware stop counter baseline. Older SHOW
+    // replies cannot revoke a newer verified START.
+    quint64 svStopSeqAtStart_{0};
+    bool svStopSeqAtStartValid_{false};
     bool connected_{false};
     bool discovering_{false};
     bool deviceVerified_{false};

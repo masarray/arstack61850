@@ -46,7 +46,7 @@ const QRegularExpression kScenarioCommitExpression{
 const QRegularExpression kScenarioReadbackExpression{
     QStringLiteral("CFG READBACK token=(\\d+) hash=([0-9A-Fa-f]{16}) generation=(\\d+) boot=([0-9A-Fa-f]{16})")};
 const QRegularExpression kScenarioStartExpression{
-    QStringLiteral("START accepted: profile armed token=(\\d+) hash=([0-9A-Fa-f]{16})")};
+    QStringLiteral("START accepted: profile armed token=(\\d+) hash=([0-9A-Fa-f]{16}) stop_seq=(\\d+)")};
 const QRegularExpression kBinaryCommitExpression{
     QStringLiteral("PROFILE BINCOMMIT transaction=(\\d+)\\s+committed generation=(\\d+)\\s+svID=(\\S+)\\s+APPID=0x([0-9A-Fa-f]+)\\s+rate=(\\d+)\\s+wrap=(\\d+)"),
     QRegularExpression::CaseInsensitiveOption};
@@ -2112,18 +2112,22 @@ void DeviceController::processLine(const QString& rawLine) {
         return;
     }
     if (scenarioStart.hasMatch()) {
-        bool tokenOk = false, hashOk = false;
+        bool tokenOk = false, hashOk = false, stopSeqOk = false;
         const auto token = scenarioStart.captured(1).toULongLong(&tokenOk);
         const auto hash = scenarioStart.captured(2).toULongLong(&hashOk, 16);
+        const auto stopSeq = scenarioStart.captured(3).toULongLong(&stopSeqOk);
         if (scenarioStage_ != ScenarioStage::awaiting_start_ack ||
             scenarioSessionGeneration_ != sessionGeneration_ ||
             scenarioBoot_ != identity_.bootId ||
-            !tokenOk || !hashOk || token != scenarioToken_ || hash != scenarioHash_) {
+            !tokenOk || !hashOk || !stopSeqOk ||
+            token != scenarioToken_ || hash != scenarioHash_) {
             if (scenarioStage_ != ScenarioStage::idle)
                 failScenarioStart(QStringLiteral("Unexpected SV START ACK identity/hash."));
             return;
         }
         operatorStopPending_ = false;
+        svStopSeqAtStart_ = stopSeq;
+        svStopSeqAtStartValid_ = true;
         if (!svStopReason_.isEmpty()) {
             svStopReason_.clear();
             emit svStopReasonChanged();
@@ -2133,9 +2137,9 @@ void DeviceController::processLine(const QString& rawLine) {
         // Otherwise QML can briefly see neither RUNNING nor STARTING and
         // bounce the button back to START during a successful ACK handoff.
         appendLog(QStringLiteral("SVTX"), QStringLiteral(
-            "START_ACK_VERIFIED session=%1 boot=%2 token=%3 signal_generation=%4")
+            "START_ACK_VERIFIED session=%1 boot=%2 token=%3 signal_generation=%4 stop_seq_at_start=%5")
             .arg(sessionGeneration_).arg(scenarioBoot_).arg(scenarioToken_)
-            .arg(scenarioSignalGeneration_));
+            .arg(scenarioSignalGeneration_).arg(svStopSeqAtStart_));
         setRunning(true);
         resetScenarioStart();
         return;
@@ -2197,8 +2201,20 @@ void DeviceController::processLine(const QString& rawLine) {
                 emit svStopReasonChanged();
             }
             const bool boardStopped = svLife.captured(1) == QStringLiteral("STOPPED");
-            const QString effective = boardStopped && lastReason != QStringLiteral("OPERATOR_STOP") &&
+            const bool stopAfterStart = !svStopSeqAtStartValid_ ||
+                seq > svStopSeqAtStart_;
+            if (boardStopped && !stopAfterStart && running_) {
+                appendLog(QStringLiteral("SVTX"), QStringLiteral(
+                    "STALE_STOP_HISTORY_IGNORED session=%1 start_seq=%2 reply_seq=%3")
+                    .arg(sessionGeneration_).arg(svStopSeqAtStart_).arg(seq));
+            }
+            const QString effective = boardStopped && stopAfterStart &&
+                lastReason != QStringLiteral("OPERATOR_STOP") &&
                 lastReason != QStringLiteral("NONE") ? lastReason : QString{};
+            // Unlike an unsequenced STATE line, this readback proves whether
+            // STOP happened AFTER the START acknowledged by this firmware.
+            if (boardStopped && stopAfterStart && running_)
+                setRunning(false);
             if (svStopReason_ != effective) {
                 svStopReason_ = effective;
                 appendLog(QStringLiteral("SVTX"), QStringLiteral(
@@ -2220,7 +2236,18 @@ void DeviceController::processLine(const QString& rawLine) {
                 .arg(sessionGeneration_).arg(identity_.bootId)
                 .arg(observedRunning ? 1 : 0).arg(running_ ? 1 : 0)
                 .arg(match.captured(2)));
-            setRunning(observedRunning);
+            if (!observedRunning && running_ &&
+                svStopSeqAtStartValid_ && !operatorStopPending_) {
+                // STATUS is not tagged with its SHOW request generation. A
+                // delayed pre-START SHOW can report STOPPED after START_ACK.
+                // Wait for SVLIFE stop_seq > START_ACK stop_seq instead of
+                // falsely releasing START or suppressing a working SV stream.
+                appendLog(QStringLiteral("SVTX"), QStringLiteral(
+                    "UNSEQUENCED_STOPPED_READBACK session=%1 start_seq=%2; awaiting SVLIFE")
+                    .arg(sessionGeneration_).arg(svStopSeqAtStart_));
+            } else {
+                setRunning(observedRunning);
+            }
         }
         signalGeneration_ = match.captured(2);
         emit telemetryChanged();
@@ -2436,6 +2463,8 @@ void DeviceController::processLine(const QString& rawLine) {
 void DeviceController::resetTelemetry() {
     operatorStopPending_ = false;
     lastSvStopSeq_ = 0;
+    svStopSeqAtStart_ = 0;
+    svStopSeqAtStartValid_ = false;
     svLastStopCause_.clear();
     if (!svStopReason_.isEmpty()) {
         svStopReason_.clear();
