@@ -4,8 +4,33 @@
 #include <array>
 #include <cstdint>
 #include <tuple>
+#include <span>
+#include "ariec61850/time_sync/ptp.hpp"
 
 namespace ar::iec61850::time_sync {
+
+// A single strict source for foreign-PTP wire admission. Matching only
+// domain number is insufficient on a utility bus carrying multiple profiles.
+struct PtpForeignWireProfile final {
+    std::uint8_t domain{};
+    std::uint8_t transport_specific{};
+    bool vlan_enabled{};
+    std::uint16_t vlan_id{};
+    std::uint8_t vlan_priority{};
+
+    [[nodiscard]] bool matches(
+        const PtpFrame& frame,
+        const std::span<const std::uint8_t> ethernet) const noexcept {
+        if (frame.header.domain_number != domain ||
+            frame.header.transport_specific != transport_specific ||
+            frame.outer_vlan_id.has_value()) return false;
+        if (!vlan_enabled) return !frame.vlan_id.has_value();
+        return frame.vlan_id.has_value() && *frame.vlan_id == vlan_id &&
+            ethernet.size() >= 18U &&
+            ethernet[12] == 0x81U && ethernet[13] == 0x00U &&
+            (ethernet[14] >> 5U) == vlan_priority;
+    }
+};
 
 // A comparison of announced clock datasets is only *candidate selection*.
 // It cannot prove external offset, path delay, servo lock or UTC traceability.
