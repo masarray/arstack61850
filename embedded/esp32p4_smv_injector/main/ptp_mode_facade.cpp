@@ -45,6 +45,7 @@ bool g_facade_override_valid = false;
 std::atomic_bool g_receiver_stop_pending{false};
 // Cancel only automatic boot attempts; operator PTP actions are authoritative.
 std::atomic_bool g_boot_source_autostart_allowed{true};
+std::atomic<std::uint32_t> g_ptp_policy_generation{1U};
 #if defined(CONFIG_AR_PTP_AUTO_PREFER_EXTERNAL) && CONFIG_AR_PTP_AUTO_PREFER_EXTERNAL
 std::atomic<ar_ptp_advanced_mode_t> g_advanced_ptp_mode{
     AR_PTP_POLICY_AUTO_PREFER_EXTERNAL};
@@ -272,6 +273,11 @@ extern "C" ar_ptp_advanced_mode_t ar_ptp_lab_advanced_policy(void) {
         std::memory_order_acquire);
 }
 
+extern "C" uint32_t ar_ptp_lab_advanced_policy_generation(void) {
+    return ar::esp32p4::smv::g_ptp_policy_generation.load(
+        std::memory_order_acquire);
+}
+
 extern "C" bool ar_ptp_lab_set_advanced_policy(
     const ar_ptp_advanced_mode_t requested) {
     using ar::iec61850::time_sync::PtpAdvancedMode;
@@ -310,6 +316,10 @@ extern "C" bool ar_ptp_lab_set_advanced_policy(
         requested, std::memory_order_release);
     ar::esp32p4::smv::g_boot_source_autostart_allowed.store(
         true, std::memory_order_release);
+    // Wake supervisory policy reset with a monotonic generation;
+    // old ready_once and handover-failure flags cannot survive a new mode.
+    ar::esp32p4::smv::g_ptp_policy_generation.fetch_add(
+        1U, std::memory_order_release);
     portEXIT_CRITICAL(&ar::esp32p4::smv::g_ptp_facade_mux);
     return transaction.finish();
 }
