@@ -795,6 +795,7 @@ void sv_boot_clock_supervisor_task(void*) {
     std::uint32_t retry_after_ms = 0U;
     bool ready_once = false;
     bool reported_grid = false;
+    bool reported_operator_override = false;
     // Let the control and publisher tasks bind before background admission.
     vTaskDelay(pdMS_TO_TICKS(1000));
     ESP_LOGI(kTag, "M3B boot timebase: enabled for isolated SOURCE profile; SV remains OFF");
@@ -844,13 +845,14 @@ void sv_boot_clock_supervisor_task(void*) {
         } else if (!dry_phase_observed) {
             reported_grid = false; // SOURCE/GM fault, operator STOP or relock
         }
-        if (operator_overrode && !ready_once && attempts == 0U) {
-            // Manual PTP control has taken over and there is no boot session
-            // to observe. One-time task can retire cleanly.
-            ESP_LOGI(kTag, "M3B boot autostart cancelled by operator PTP control");
-            vTaskDelete(nullptr);
+        if (operator_overrode && !reported_operator_override) {
+            ESP_LOGI(kTag,
+                "M3B operator owns PTP; boot SOURCE autostart disabled until reboot");
+            reported_operator_override = true;
         }
-        vTaskDelay(pdMS_TO_TICKS(Boot::kPollPeriodMs));
+        // Monitoring continues quietly even after manual PTP role control.
+        vTaskDelay(pdMS_TO_TICKS(
+            operator_overrode || ready_once ? 1000U : Boot::kPollPeriodMs));
     }
 }
 #endif
