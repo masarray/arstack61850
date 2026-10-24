@@ -8,7 +8,7 @@ The portable C++20 stack remains rooted in the ARIEC61850 behavioral model, but 
 
 ## Public release — Process Bus Simulator M3.H (2026-10-24)
 
-**Current public laboratory edition: [M3.H Experimental](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h-20261024).** This is an open-source engineering simulator, **not** a certified merging unit or UTC time reference. No GPS, Omicron, or protection relay is required for an isolated-lab experiment.
+**Current public laboratory edition: [M3.H Public Stable](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h-20261024).** This is an open-source engineering simulator, **not** a certified merging unit or UTC time reference. No GPS, Omicron, or protection relay is required for an isolated-lab experiment.
 
 **[Download Setup EXE](https://github.com/masarray/arstack61850/releases/download/processbus-sim-m3h-20261024/ARStack-ProcessBus-M3H-win-x64-setup.exe)** · **[Portable ZIP](https://github.com/masarray/arstack61850/releases/download/processbus-sim-m3h-20261024/ARStack-ProcessBus-M3H-win-x64-portable.zip)** · **[ESP32-P4 firmware](https://github.com/masarray/arstack61850/releases/download/processbus-sim-m3h-20261024/ARStack-ESP32P4-ProcessBus-M3H-firmware.bin)** · [Release notes and engineer quick start](docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md)
 
@@ -41,7 +41,7 @@ The project deliberately separates **wire facts**, **configured expectations**, 
 
 ## Current process-bus simulator milestone
 
-**M3.H Lab Edition is published publicly** as an experimental engineer-facing SV publisher + internal PTP grandmaster emulator. The 40.76-second raw PCAP validates stable lab traffic and hardware-evidence-qualified `smpSynch=2`; it does not prove a subscriber relay would accept or lock without alarms. No external GPS/certification is a dependency for running or releasing this lab simulator.
+**M3.H Lab Edition is published publicly** as a stable lab-simulator SV publisher + internal PTP grandmaster emulator. The 40.76-second raw PCAP validates stable lab traffic and hardware-evidence-qualified `smpSynch=2`; it does not prove a subscriber relay would accept or lock without alarms. No external GPS/certification is a dependency for running or releasing this lab simulator.
 
 The older v0.1.0/v0.1.1 products remain available as historical releases. Further work: independent relay/IED interoperability when hardware is available, deeper 120-second and multi-cycle captures, alternate SV profiles, and optional external time references—not blockers for M3.H public distribution.
 
