@@ -51,6 +51,30 @@ public:
         prioritize(verifiedPort);
         return visible;
     }
+    // Once USB metadata identifies a physical ESP32/CH343 candidate (or
+    // a previous port answered semantic IDENTIFY), never spend five retries
+    // apiece on unrelated Bluetooth/legacy COM ports before returning to
+    // that device. When Windows exposes NO qualified physical metadata,
+    // keep the existing generic fallback so first-time/generic bridges work.
+    // This narrows *candidate selection* only; IDENTIFY remains mandatory.
+    [[nodiscard]] static QStringList focusedAutomaticPorts(
+        const QStringList& allVisible, const QStringList& physicalCandidates,
+        const QString& verifiedPort, const QString& recommended) {
+        QStringList focused;
+        for (const QString& port : physicalCandidates) {
+            if (allVisible.contains(port, Qt::CaseInsensitive) &&
+                !focused.contains(port, Qt::CaseInsensitive))
+                focused.push_back(port);
+        }
+        const auto previous = verifiedPort.trimmed();
+        if (!previous.isEmpty() &&
+            allVisible.contains(previous, Qt::CaseInsensitive) &&
+            !focused.contains(previous, Qt::CaseInsensitive))
+            focused.push_back(previous);
+        if (focused.isEmpty()) focused = allVisible;
+        return orderedDiscoveryPorts(focused, verifiedPort, recommended);
+    }
+
     [[nodiscard]] static constexpr int heartbeatIntervalMs() noexcept { return 700; }
     // Allow the ESP32-P4 line-oriented console to drain a complete command
     // before accepting the next command, even when the host USB buffer emptied.
@@ -198,6 +222,7 @@ private:
     QTimer* writeGapTimer_{nullptr};
 
     QStringList ports_;
+    QStringList physicallyPlausiblePorts_;
     QString recommendedPort_;
     QStringList probeQueue_;
     QByteArray pendingRx_;
