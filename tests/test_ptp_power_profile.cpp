@@ -110,6 +110,30 @@ void check_ptp_positive_evidence_retains_clock_across_isolated_tx_faults() {
         REQUIRE(recent);
         REQUIRE(Continuity::ready(cold.ready(), true, recent, true, false));
     }
+    // 100 consecutive 1-Hz SOURCE epochs with a bounded isolated
+    // timestamp/peer-delay failure on every seventh epoch. The last
+    // genuinely successful pair, not an invented counter, is carried.
+    PtpSourceReadinessGate many;
+    bool previous_ready = false;
+    std::int64_t last_announce = 0, last_pair = 0;
+    for (std::int64_t epoch = 1; epoch <= 100; ++epoch) {
+        const std::int64_t now = 10000000 + epoch * 1000000;
+        const bool isolated_fault = epoch > 1 && (epoch % 7) == 0;
+        if (isolated_fault) {
+            many.observe_peer_delay(false);
+        } else {
+            many.observe_announce(true);
+            many.observe_sync_pair(true);
+            last_announce = now - 150;
+            last_pair = now - 30;
+        }
+        const bool wire_fresh = Fresh::fresh(
+            now, last_announce, last_pair, kFreshnessUs);
+        const bool current_ready = Continuity::ready(
+            many.ready(), previous_ready, wire_fresh, true, false);
+        REQUIRE(current_ready);
+        previous_ready = current_ready;
+    }
     // Never give an unqualified COLD board credit for previous TX.
     REQUIRE(!Continuity::ready(false, false, true, true, false));
     // The finite freshness budget must eventually expire.
