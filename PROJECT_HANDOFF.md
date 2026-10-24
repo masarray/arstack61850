@@ -2,7 +2,7 @@
 
 > **Latest public simulator milestone — 2026-10-24:** [ARStack Process Bus Simulator M3.H Lab Edition](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h-20261024) is PUBLIC STABLE as an engineering lab simulator. The verified release firmware/Studio source is `a922e9bdba4e57a4e88406eb83344455dd8ff142` (10/10 CI PASS), with `main` carrying documentation synchronization rather than unreviewed integration of the large 636-commit active implementation chain. For source work use [PR #298](https://github.com/masarray/arstack61850/pull/298) (Draft) and the [public M3.H evidence/quick start](docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md). Real PCAP: 163,048 SV over 40.763 s, all `smpSynch=2`, zero missing/duplicate/malformed; 44 Announce + 43 each Sync/Follow_Up. Capture truncated by SV STOP before requested 120 s. **No relay/GPS is needed to run the lab simulator; no physical relay lock test was performed.**
 >
-> **M3.H release vs source integration:** Public Stable means the verified engineering lab simulator **binary** is released, not that Draft PRs #295–#298 or the 600+ commit source stack are merged into `main`. The firmware baseline remains `a922e9bdba4e57a4e88406eb83344455dd8ff142`. Earlier v0.1.0 `smpSynch=0` is historical—not M3.H behavior (100% `smpSynch=2` in the valid 40.76-second capture). A physical relay lock test, GPS traceability, and 120-second endurance are not claimed.
+> **M3.H release and source integration — DONE (2026-10-24):** [PR #299](https://github.com/masarray/arstack61850/pull/299) merged the exact tested M3.H SV/PTP Studio/ESP32-P4 source into `main` at `ad2ebd0e7696dcbc389f1241fedbec5ecf504881` after **14/14 exact-candidate CI PASS**. Both tested source `a922e9bdba4e57a4e88406eb83344455dd8ff142` and official release tag commit `a4b6e53d0dbbcababc55ba8a4ff97ade6f2a6200` are now Git ancestors of main. Ancestor PRs #290–#293/#295–#298 were closed with source preserved. Stable release Setup/Portable/firmware SHA-256 remain immutable. Earlier v0.1.0 `smpSynch=0` is historical—not M3.H behavior (100% `smpSynch=2` in the valid 40.76-second capture). Physical relay lock, GPS traceability and a full 120-second run remain unclaimed.
 
 > **Do not confuse product tracks:** the Workbench/Browser SSOT handoff below and historical SMV `v0.1.0` results are separate from the latest published M3.H SV + simulated PTP Grandmaster instrument. The realtime M3.H firmware remains pinned; do not merge all experimental branches just to update web pages.
 
@@ -19,7 +19,7 @@ Last public simulator milestone: **2026-10-24 — Public Stable Process Bus M3.H
 - Repository: `masarray/arstack61850`
 - Production branch: `main`
 - SMV production merge: `9c7fc7300220db4643e5643081240b955cfe12df` — PR #79
-- Latest Public Stable lab SV/PTP simulator: [`processbus-sim-m3h-20261024`](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h-20261024); tested source `a922e9bd...` on active Draft PR #298
+- Latest Public Stable lab SV/PTP simulator: [`processbus-sim-m3h-20261024`](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h-20261024); tested source `a922e9bd...` now integrated into `main` through merged PR #299
 - Historical stable SMV-only release: [`v0.1.0`](https://github.com/masarray/arstack61850/releases/tag/v0.1.0)
 - P0.5 supervisor/physical release issue: #83 — closed
 - Legacy first-trial SV PR #15 — archived/superseded, not merged
