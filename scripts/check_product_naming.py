@@ -49,6 +49,17 @@ for item in tracked:
             violations.append(
                 f"{relative}:{number}: public source contains restricted commercial naming"
             )
+tracked_names = {
+    x.decode("utf-8", errors="surrogateescape")
+    for x in tracked if x
+}
+for required in (
+    "docs/GETTING_STARTED.md", "docs/COMMUNITY_TESTING.md",
+    "CONTRIBUTING.md", "SUPPORT.md",
+):
+    if required not in tracked_names:
+        violations.append("missing public entrypoint: " + required)
+
 if violations:
     print("REPOSITORY_NAMING_GUARD_FAIL", file=sys.stderr)
     print("\n".join(violations), file=sys.stderr)
