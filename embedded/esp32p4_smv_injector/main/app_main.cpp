@@ -1914,7 +1914,14 @@ void sv_ptp_phase_observer_task(void* argument) {
             g_monitored_sample_clock != nullptr &&
             g_sample_clock_context.session_generation.load(
                 std::memory_order_acquire) == notified_session;
-        const bool injecting = live_tx_running();
+        // Serial START becomes RUNNING before the next PTP-second gate
+        // physically enables publisher notifications. Until that ISR edge,
+        // continue observing a DRY synchronized clock, not a missing MAC
+        // stream. Also covers STOP arriving before the PARK control pass.
+        const bool injecting = SvAutoPreflightPolicy::live_publisher_active(
+            live_tx_running(),
+            g_sample_clock_context.publisher_notifications_enabled.load(
+                std::memory_order_acquire));
         const bool clock_timer_owned_and_enabled =
             g_monitored_sample_clock != nullptr &&
             g_sample_clock_context.phase_enabled;
