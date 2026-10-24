@@ -850,6 +850,14 @@ def main() -> None:
                 (STUDIO.parents[1] / "tests/test_ptp_power_profile.cpp").read_text(encoding="utf-8"),
             "PTP TX failure must never erase fresh positive wire evidence or force a 1Hz SV loss")
 
+    require("focusedAutomaticPorts(" in io_header
+            and "physicallyPlausiblePorts_" in io_header
+            and "physicallyPlausiblePorts_ = std::move(highConfidence)" in io_worker
+            and "focusedAutomaticPorts(" in io_worker
+            and "fastPhysicalUsbCandidateSelection()" in
+                (STUDIO / "src/DeterministicSessionHarness.cpp").read_text(encoding="utf-8"),
+            "verified USB reconnect must not wait for unrelated Bluetooth COM retry sweeps")
+
     print("Studio operator workspace contract: PASS")
 
 
