@@ -305,6 +305,14 @@ struct SvAutoPreflightPolicy final {
             faults_unchanged && (injecting || preflight);
     }
 
+    // The serial control state may say RUNNING *before* the ISR has opened
+    // the next PTP-second SV TX gate. Live MAC measurement may start only
+    // after that physical gate opened; until then the grid is still dry.
+    [[nodiscard]] static constexpr bool live_publisher_active(
+        const bool logical_running, const bool tx_notifications_enabled) noexcept {
+        return logical_running && tx_notifications_enabled;
+    }
+
     // Servo authority is the owned GPTimer + PTP clock lease, NOT a
     // transient publisher RUNNING/preflight flag. They can both be false
     // during a legitimate STOP->PARK handoff with a continuous 1-Hz clock.
