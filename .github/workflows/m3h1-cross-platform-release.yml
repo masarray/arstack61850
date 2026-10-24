@@ -1,0 +1,166 @@
+name: Publish M3.H.1 Cross-Platform Packaging Release
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/m3h1-cross-platform-release.yml'
+      - 'docs/releases/M3H1_CROSS_PLATFORM_RELEASE.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/m3h1-cross-platform-release.yml'
+      - 'docs/releases/M3H1_CROSS_PLATFORM_RELEASE.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: m3h1-once-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate immutable cross-platform packaging plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify release notes and pinned Linux acceptance
+        run: |
+          set -euo pipefail
+          grep -Fq 'same verified M3.H SV/PTP core' docs/releases/M3H1_CROSS_PLATFORM_RELEASE.md
+          grep -Fq 'Linux x86_64' docs/releases/M3H1_CROSS_PLATFORM_RELEASE.md
+          test -s docs/INSTALL.md
+          test ! -e scripts/generate_winget_manifest.py
+          test ! -e .github/workflows/arstack-winget-manifest.yml
+          echo 'PASS: packaging-only plan and direct downloads'
+
+  publish:
+    name: Publish Windows + verified Linux with exact SHA provenance
+    needs: validate
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ORIGINAL_TAG: processbus-sim-m3h-20261024
+      CROSS_PLATFORM_TAG: processbus-sim-m3h1-20261024
+      ORIGINAL_SOURCE_TAG_SHA: a4b6e53d0dbbcababc55ba8a4ff97ade6f2a6200
+      LINUX_ACCEPTANCE_RUN: '40089029880'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Confirm original release and accepted Linux run
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse "$ORIGINAL_TAG^{commit}")" = "$ORIGINAL_SOURCE_TAG_SHA"
+          gh api "repos/$GITHUB_REPOSITORY/releases/latest" > /tmp/release-latest.json
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$ORIGINAL_TAG" > /tmp/release-original.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$LINUX_ACCEPTANCE_RUN" > /tmp/linux-run.json
+          python3 - <<'PY'
+          import json
+          original=json.load(open('/tmp/release-original.json'))
+          latest=json.load(open('/tmp/release-latest.json'))
+          linux=json.load(open('/tmp/linux-run.json'))
+          assert original['id']==422544367 and not original['prerelease'] and not original['draft']
+          assert latest['id']==original['id'], 'A newer stable release already exists; do not supersede'
+          assert linux['conclusion']=='success' and linux['path'].endswith('m3h-exact-tag-linux-artifact.yml'), 'Linux candidate not accepted'
+          assert linux['head_sha']=='95d846e7c2ca06878f4a301c5e477002c4e00f77', 'Unexpected acceptance head'
+          expected={
+            'ARStack-ProcessBus-M3H-win-x64-setup.exe':'4902e8bf44e78fc55a139ce84a1273f0768ef6fe10000f5d0f85d75d2f6c736e',
+            'ARStack-ProcessBus-M3H-win-x64-portable.zip':'ca01424e4102aa65e353737024ebf3258b4d2f614fa60d932c95c353ee228d8f',
+            'ARStack-ESP32P4-ProcessBus-M3H-firmware.bin':'61c508e9bf1357eb964d2b817b260b6a0e985446ddd68de1d45d9467e25c4607',
+            'firmware-manifest.json':'b2878148a1cda30f11a4c93a200bcba07bb63548aa571de8d05260c2ef630f9a',
+            'SHA256SUMS.txt':'c7674d1a97b77b66adda12216f7d5e460f86da5cb07fd1d1f02bf3011b99c876',
+          }
+          assets={x['name']:(x.get('digest') or '').removeprefix('sha256:') for x in original['assets']}
+          assert assets==expected, 'Original five release artifacts do not match accepted hashes'
+          print('PASS: original stable release untouched and exact Linux acceptance validated')
+          PY
+          if gh release view "$CROSS_PLATFORM_TAG" >/dev/null 2>&1; then
+            echo 'Cross-platform release tag already exists; refusing overwrite' >&2
+            exit 1
+          fi
+
+      - name: Download five original verified release assets
+        run: |
+          set -euo pipefail
+          mkdir -p staging
+          gh release download "$ORIGINAL_TAG" --dir staging
+
+      - name: Fetch independently accepted M3.H Linux CI package
+        uses: actions/download-artifact@v4
+        with:
+          name: m3h-exact-tag-linux-candidate
+          run-id: 40089029880
+          github-token: ${{ github.token }}
+          path: linux-candidate
+
+      - name: Verify Linux artifact and build cross-platform checksum manifest
+        run: |
+          set -euo pipefail
+          (cd linux-candidate && sha256sum -c ARStack-Studio-M3H-exact-tag-linux-x86_64.sha256)
+          cp linux-candidate/ARStack-Studio-M3H-exact-tag-linux-x86_64.AppImage staging/ARStack-Studio-linux-x86_64.AppImage
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          root=Path('staging')
+          expected={
+            'ARStack-ProcessBus-M3H-win-x64-setup.exe':'4902e8bf44e78fc55a139ce84a1273f0768ef6fe10000f5d0f85d75d2f6c736e',
+            'ARStack-ProcessBus-M3H-win-x64-portable.zip':'ca01424e4102aa65e353737024ebf3258b4d2f614fa60d932c95c353ee228d8f',
+            'ARStack-ESP32P4-ProcessBus-M3H-firmware.bin':'61c508e9bf1357eb964d2b817b260b6a0e985446ddd68de1d45d9467e25c4607',
+            'firmware-manifest.json':'b2878148a1cda30f11a4c93a200bcba07bb63548aa571de8d05260c2ef630f9a'
+          }
+          for n,d in expected.items():
+            assert hashlib.sha256((root/n).read_bytes()).hexdigest()==d, f'Immutable original bytes changed: {n}'
+          assert json.loads((root/'firmware-manifest.json').read_text())['buildId']=='a922e9bdba4e57a4'
+          # Old original checksum file is retained in the source M3.H release;
+          # replace it ONLY in this new cross-platform release to include Linux.
+          (root/'SHA256SUMS.txt').unlink()
+          names=sorted(x.name for x in root.iterdir() if x.is_file() and x.name!='SHA256SUMS.txt')
+          (root/'SHA256SUMS.txt').write_text(''.join(
+              hashlib.sha256((root/n).read_bytes()).hexdigest()+'  '+n+'\n' for n in names))
+          linux='ARStack-Studio-linux-x86_64.AppImage'
+          (root/'ARStack-Studio-linux-x86_64.sha256').write_text(
+              hashlib.sha256((root/linux).read_bytes()).hexdigest()+'  '+linux+'\n')
+          print('PASS: same Windows/firmware bytes, verified Linux, new checksums')
+          PY
+          (cd staging && sha256sum -c SHA256SUMS.txt && sha256sum -c ARStack-Studio-linux-x86_64.sha256)
+          test "$(find staging -maxdepth 1 -type f | wc -l)" = 7
+
+      - name: Publish new stable packaging-only release
+        run: |
+          set -euo pipefail
+          gh release create "$CROSS_PLATFORM_TAG" staging/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$ORIGINAL_SOURCE_TAG_SHA" \
+            --title "ARStack Process Bus Simulator M3.H.1 — Cross-Platform Edition" \
+            --notes-file docs/releases/M3H1_CROSS_PLATFORM_RELEASE.md \
+            --latest
+
+      - name: Verify published release is complete without mutating original
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$CROSS_PLATFORM_TAG" > /tmp/release-cross-platform.json
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$ORIGINAL_TAG" > /tmp/release-original-after.json
+          python3 - <<'PY'
+          import json,hashlib
+          before=json.load(open('/tmp/release-original.json'))
+          old=json.load(open('/tmp/release-original-after.json'))
+          new=json.load(open('/tmp/release-cross-platform.json'))
+          assert not new['draft'] and not new['prerelease'] and new['tag_name']=='processbus-sim-m3h1-20261024'
+          def records(r):
+              return sorted((a['id'],a['name'],a['size'],a.get('digest')) for a in r['assets'])
+          assert records(before)==records(old), 'Original M3.H assets changed'
+          assert len(new['assets'])==7
+          for a in new['assets']:
+              actual=hashlib.sha256(open('staging/'+a['name'],'rb').read()).hexdigest()
+              assert a.get('digest')=='sha256:'+actual, 'New release hash mismatch: '+a['name']
+          print('PASS: new stable Windows+Linux release verified; original M3.H assets and identity preserved')
+          PY

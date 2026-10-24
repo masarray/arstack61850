@@ -2,7 +2,7 @@
 
 Have you tried ARStack with a simulator, analyzer, protection relay or bay controller in your own lab? Your results can help the international IEC 61850 community discover useful configurations and improve ARStack.
 
-**[Share an interoperability report](https://github.com/masarray/arstack61850/issues/new?template=interoperability.yml)** · [Ask for help](../SUPPORT.md)
+**[Share an interoperability report](https://github.com/masarray/arstack61850/issues/new?template=interoperability.yml)** · [Browse community reports](community/README.md) · [Ask for help](../SUPPORT.md)
 
 ## What is helpful to share?
 
