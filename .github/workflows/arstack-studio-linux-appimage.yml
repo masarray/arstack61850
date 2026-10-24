@@ -52,7 +52,7 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.10.3'
-          arch: gcc_64
+          arch: linux_gcc_64
           modules: 'qtserialport'
           cache: true
 
@@ -124,7 +124,7 @@ jobs:
             --appdir AppDir \
             --executable AppDir/usr/bin/ARStackStudio \
             --desktop-file arstack-studio.desktop \
-            --icon-file assets/studio_icon/android-chrome-512x512.png \
+            --icon-file AppDir/usr/share/icons/hicolor/512x512/apps/arstack-studio.png \
             --plugin qt --output appimage
           shopt -s nullglob
           images=( ./*.AppImage )
