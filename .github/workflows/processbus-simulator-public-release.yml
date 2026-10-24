@@ -35,7 +35,7 @@ jobs:
           # Tag may add public documentation/workflow only. Never silently
           # rebuild or change the on-board realtime code after the wire FAT.
           if git diff --name-only "$ACCEPTED_SOURCE_SHA" HEAD |
-             grep -Ev '^(docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024\.md|\.github/workflows/processbus-simulator-public-release\.yml)$'; then
+             grep -Ev '^(docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024\.md|apps/arstack_studio/README\.md|\.github/workflows/processbus-simulator-public-release\.yml)$'; then
             echo 'REJECT: tagged source modified beyond release evidence/packaging' >&2
             exit 1
           fi
