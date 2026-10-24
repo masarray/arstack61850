@@ -1229,8 +1229,8 @@ void arstack_untagged_lab_reference_compiles_without_vlan_tag() {
     const auto reference_document = SclParser{}.load(reference_path);
     CHECK(reference_document.sampled_values_streams.size() == 1U);
     const auto& reference = reference_document.sampled_values_streams.front();
-    CHECK(reference.address.vlan_id == std::optional<std::uint16_t>{0U});
-    CHECK(reference.address.vlan_priority == std::optional<std::uint8_t>{4U});
+    CHECK(reference.address.vlan_id == std::optional<std::uint16_t>{static_cast<std::uint16_t>(0U)});
+    CHECK(reference.address.vlan_priority == std::optional<std::uint8_t>{static_cast<std::uint8_t>(4U)});
     CHECK(stream.address.destination_mac == reference.address.destination_mac);
     CHECK(stream.address.app_id == reference.address.app_id);
     CHECK(stream.sv_id == reference.sv_id);
