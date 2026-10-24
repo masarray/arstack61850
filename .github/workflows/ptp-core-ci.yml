@@ -131,6 +131,7 @@ jobs:
           Build-Target 'sv_ptp_clock_lease_tests'
           Build-Target 'sv_ptp_phase_authority_tests'
           Build-Target 'sv_tx_egress_evidence_tests'
+          Build-Target 'sv_tx_fault_burst_tests'
           Build-Target 'ptp_profile_analyze'
 
       - name: Run PTP regression and analyzer smoke tests on MSVC
