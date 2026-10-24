@@ -25,6 +25,17 @@ public:
 
     [[nodiscard]] static constexpr int commandQueueCapacity() noexcept { return 64; }
     [[nodiscard]] static constexpr int presencePollIntervalMs() noexcept { return 750; }
+    // USB removal may not emit QSerialPort::ResourceError on every Windows
+    // driver. Use the EXISTING low-rate port inventory (no extra poll) and
+    // require two consecutive missing observations to ignore enumeration
+    // flicker. This releases only the stale GUI COM handle, never SV/PTP.
+    [[nodiscard]] static constexpr int missingPortConfirmationPolls() noexcept { return 2; }
+    [[nodiscard]] static constexpr bool verifiedPortPhysicallyGone(
+        const bool serialOpen, const bool identityConfirmed,
+        const int consecutiveMissingSnapshots) noexcept {
+        return serialOpen && identityConfirmed &&
+            consecutiveMissingSnapshots >= missingPortConfirmationPolls();
+    }
     [[nodiscard]] static constexpr int identityMaxAttempts() noexcept { return 5; }
     [[nodiscard]] static constexpr int identityRetryIntervalMs() noexcept { return 1100; }
 
@@ -197,6 +208,7 @@ private:
     quint64 activeGeneration_{0};
     int highConfidenceCount_{0};
     int identifyAttempts_{0};
+    int consecutiveMissingPortPolls_{0};
     int exclusiveCommandsRemaining_{0};
     bool initialized_{false};
     bool shuttingDown_{false};
