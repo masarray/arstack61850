@@ -19,7 +19,9 @@ You can contribute without writing C++: improve a tutorial, report a reproducibl
 4. Attach a screenshot for user-interface changes when possible.
 5. Keep public copy **vendor-neutral**, friendly to first-time users, and accurate about supported workflows.
 
-Please do not submit proprietary firmware, confidential substation configurations or credentials.
+Never submit proprietary firmware, confidential substation configurations, credentials, or private customer captures. Security vulnerabilities should be reported privately using [SECURITY.md](SECURITY.md), not in public issues.
+
+Keep new work on current `main` and do not modify immutable release tags or published binaries. For changes involving hardware timing or packet behavior, include measured evidence when available.
 
 ## Product and engineering documentation
 

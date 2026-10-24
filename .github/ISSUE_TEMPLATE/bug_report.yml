@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for testing ARStack! Short reports are welcome. Please remove confidential details from screenshots and configuration files.
+        Thanks for testing ARStack! Short reports are welcome. Remove confidential details from screenshots and files. For security vulnerabilities, follow the private reporting process in [SECURITY.md](../../SECURITY.md) rather than creating a public issue.
   - type: textarea
     id: problem
     attributes:
@@ -35,9 +35,11 @@ body:
     attributes:
       label: Where did it happen?
       options:
-        - ARStack Studio
+        - ARStack Studio (Windows / Linux)
         - ESP32-P4 firmware / device connection
         - SCL or engineering file import
+        - IED Browser / Workbench
+        - IED Simulator
         - SV / PTP traffic
         - Build / installation
         - Other

@@ -38,7 +38,7 @@ For active SV/PTP transmission, use an **isolated laboratory Ethernet network**,
 | Windows Portable ZIP | **Available** in the [latest release](https://github.com/masarray/arstack61850/releases/latest) |
 | Matched ESP32-P4 firmware | **Available** with the same release |
 | Linux AppImage | Shown in the [latest release](https://github.com/masarray/arstack61850/releases/latest) when a tested package is published |
-| Windows package manager | [WinGet preparation and status](docs/INSTALL.md#windowspackage-manager--winget) |
+| Windows package manager | [WinGet preparation and status](docs/INSTALL.md#windows-package-manager--winget) |
 
 Every published Windows release includes the application dependencies and a matched firmware package; no C++ build environment is required for ordinary installation.
 
