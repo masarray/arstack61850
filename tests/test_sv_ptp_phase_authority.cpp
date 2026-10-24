@@ -159,6 +159,12 @@ void check_m3e_transition_flags_cannot_revoke_owned_sample_clock() {
     // after a legitimate serial SV STOP and before publisher PARK.
     CHECK(!Policy::can_steer(true, true, true, true, false, false));
     CHECK(Policy::can_steer_owned_grid(true, true, true, true, true, true));
+    // Serial control can become RUNNING before the actual second-boundary
+    // ISR launch. A dry clock is not an SV publication fault.
+    CHECK(!Policy::live_publisher_active(true, false));
+    CHECK(!Policy::live_publisher_active(false, true));
+    CHECK(!Policy::live_publisher_active(false, false));
+    CHECK(Policy::live_publisher_active(true, true));
     // 100 STOP/START cycles; all four flag orderings share one GPTimer.
     for (std::uint32_t cycle = 0U; cycle < 100U; ++cycle) {
         for (bool sv_running : {true, false}) {
