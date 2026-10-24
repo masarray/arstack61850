@@ -35,7 +35,7 @@ jobs:
           assert any(n.lower().endswith('.bin') for n in assets), 'Matched board firmware not published yet'
           available=any(n.endswith('.AppImage') for n in assets)
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:
-              out.write(f"dispatch={'false' if available else 'true'}\\n")
+              out.write(f"dispatch={'false' if available else 'true'}\n")
           if available:
               print('SKIP: release already contains a Linux AppImage')
           else:
