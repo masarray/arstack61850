@@ -1,15 +1,10 @@
 name: Bootstrap Public M3.H Process Bus Simulator Release
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/processbus-simulator-bootstrap-publish.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   actions: read
 
 jobs:
@@ -109,23 +104,27 @@ jobs:
           print((out / 'SHA256SUMS.txt').read_text())
           PY
 
-      - name: Publish public experimental release with verified assets
+      - name: Audit existing Stable release (read-only; immutable assets)
         shell: bash
         run: |
           set -euo pipefail
-          # A release created through the GitHub UI may already exist by
-          # the time the tag-triggered job begins. Attach verified binaries
-          # idempotently rather than failing or replacing an unrelated tag.
-          if gh release view "processbus-sim-m3h-20261024" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "processbus-sim-m3h-20261024" dist/* --repo "$GITHUB_REPOSITORY" --clobber
-            gh release edit "processbus-sim-m3h-20261024" --repo "$GITHUB_REPOSITORY" \
-              --title 'ARStack Process Bus Simulator — M3.H Lab Edition (2026-10-24)' \
-              --notes-file docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md \
-              --prerelease --latest=false
-          else
-            gh release create "processbus-sim-m3h-20261024" dist/* \
-              --repo "$GITHUB_REPOSITORY" \
-              --title 'ARStack Process Bus Simulator — M3.H Lab Edition (2026-10-24)' \
-              --notes-file docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md \
-              --prerelease --latest=false --target "$(git rev-parse HEAD)"
-          fi
+          # Retain historical packaging verification above, but NEVER re-upload
+          # files or downgrade already promoted Public Stable release metadata.
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/processbus-sim-m3h-20261024" > current.json
+          python3 - <<'PY'
+          import json
+          r=json.load(open('current.json'))
+          assert r['id'] == 422544367
+          assert r['draft'] is False and r['prerelease'] is False
+          assert r['tag_name'] == 'processbus-sim-m3h-20261024'
+          expected={
+            'ARStack-ProcessBus-M3H-win-x64-setup.exe':'4902e8bf44e78fc55a139ce84a1273f0768ef6fe10000f5d0f85d75d2f6c736e',
+            'ARStack-ProcessBus-M3H-win-x64-portable.zip':'ca01424e4102aa65e353737024ebf3258b4d2f614fa60d932c95c353ee228d8f',
+            'ARStack-ESP32P4-ProcessBus-M3H-firmware.bin':'61c508e9bf1357eb964d2b817b260b6a0e985446ddd68de1d45d9467e25c4607',
+            'firmware-manifest.json':'b2878148a1cda30f11a4c93a200bcba07bb63548aa571de8d05260c2ef630f9a',
+            'SHA256SUMS.txt':'c7674d1a97b77b66adda12216f7d5e460f86da5cb07fd1d1f02bf3011b99c876',
+          }
+          actual={a['name']:a['digest'].removeprefix('sha256:') for a in r['assets']}
+          assert actual==expected, 'Stable release asset identity changed'
+          print('PASS: Stable M3.H unchanged. Legacy bootstrap will not upload, clobber or downgrade any asset.')
+          PY
