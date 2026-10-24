@@ -17,6 +17,8 @@ The portable C++20 stack remains rooted in the ARIEC61850 behavioral model, but 
 * **ARStack Studio on Windows:** 4I+4V waveform/phasor controls, capture/reporting, SCL input within supported profile, supervised firmware flashing, verified COM identity and USB hotplug recovery.
 * **Actual independent M3.H capture:** **163,048 SV in 40.763 seconds**, 100% `smpSynch=2`, **zero missing, duplicate, counter-reset or malformed SV**, measured **3999.884 fps**, plus 44 PTP Announce and 43 each Sync/Follow_Up. A STOP truncated the requested 120-second capture; 120-second endurance and physical relay locking were **not** tested.
 * **Source pinned:** `a922e9bdba4e57a4e88406eb83344455dd8ff142`; **10/10 CI workflows PASS** for the shipped Studio/firmware pairing. The public tag includes only documentation/packaging deltas from that tested build.
+* **Release = main:** [PR #299](https://github.com/masarray/arstack61850/pull/299) merged the exact tested source and the public release-tag ancestry into `main` with **14/14 integration CI PASS**; no SV/PTP source drift, no binary re-upload, no loss of newer main docs. Original source Build ID remains `a922e9bdba4e57a4`. See [source-in-main audit](docs/integration/M3H_SOURCE_STACK_AUDIT_2026-10-24.md).
+
 
 For electrical safety, transmit PTP and SV only on an isolated lab switch/VLAN: never introduce an unsolicited PTP grandmaster or SV publisher onto an operating substation LAN.
 
