@@ -2,9 +2,17 @@
 
 ARStack Studio is the **canonical native desktop operator surface** for the first ARStack61850 public Sampled Values release. It is a Qt 6 / C++ / QML application; the ESP32-P4 remains the deterministic real-time publisher.
 
-> **v0.1.1 is the latest public ARStack Studio release.** Download: https://github.com/masarray/arstack61850/releases/tag/v0.1.1
+> **Newest public process-bus simulator:** [M3.H Lab Edition · 2026-10-24](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h-20261024) (experimental engineer edition). Earlier standalone Studio release: [v0.1.1](https://github.com/masarray/arstack61850/releases/tag/v0.1.1); historical P0 v0.1.0 is unchanged.
 >
-> Public v0.1.1 tag source: `2bcf28dd948161bb70fdc6d5b338e9a600670bc1`. The earlier `9c7fc730...` / `d9b5b684...` pair remains the historical v0.1.0 P0 acceptance anchor, not the current development baseline.
+> Install M3.H Setup **and flash its matched ESP32-P4 firmware** (build `a922e9bdba4e57a4`) to use the new PTP SOURCE continuity and simulated Global GM. The older firmware does not gain those features by updating Windows Studio alone.
+>
+> [Windows Setup EXE](https://github.com/masarray/arstack61850/releases/download/processbus-sim-m3h-20261024/ARStack-ProcessBus-M3H-win-x64-setup.exe) · [Portable](https://github.com/masarray/arstack61850/releases/download/processbus-sim-m3h-20261024/ARStack-ProcessBus-M3H-win-x64-portable.zip) · [firmware BIN](https://github.com/masarray/arstack61850/releases/download/processbus-sim-m3h-20261024/ARStack-ESP32P4-ProcessBus-M3H-firmware.bin)
+
+## M3.H laboratory SV + PTP mode
+
+Set **PTP SOURCE** (`INTERNAL_GM_ONLY`) and **`SMPSYNCH AUTO`** on an isolated Ethernet test bench. PTP continues across operator SV STOP/START; `smpSynch=2` is qualified from local EMAC hardware-TX/phase evidence. This is a **simulated global-grandmaster profile**, not UTC/GNSS calibration. The independent M3.H PCAP recorded **163,048 consecutive SV at 3,999.884 fps over 40.763 s, all `smpSynch=2`, zero malformed/missing/duplicate and 44 PTP Announce + 43 Sync/Follow_Up pairs**. Its intended 120 s capture was interrupted by SV STOP; relay interoperability and alarm-free lock remain untested.
+
+[Full released simulator contract, measured capture and quick start](../../docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md).
 
 ## P0 public boundary
 
@@ -78,7 +86,7 @@ A release package contains:
 ARStackStudio.exe
 firmware/
   firmware-manifest.json
-  arstack-esp32p4-smv-0.1.0.bin
+  arstack-esp32p4-smv-0.1.1.bin
   SHA256SUMS.txt
 tools/
   espflash.exe
@@ -86,43 +94,23 @@ licenses/
   espflash/
 ```
 
-Manifest schema `arstack.studio.firmware.v1` binds the image to chip `esp32p4`, firmware version `0.1.0`, protocol `1`, flash offset `0`, the exact image filename, image SHA-256, ESP-IDF build version, and source commit.
+Manifest schema `arstack.studio.firmware.v1` binds the image to chip `esp32p4`, firmware version `0.1.1` in M3.H, protocol `1`, flash offset `0`, the exact image filename, image SHA-256, ESP-IDF build version, and source commit.
 
 Protocol `1` is the P0 GUI/firmware capability contract for the supported `SMV-4I4V`, profile deployment, and live setpoint workflow.
 
 ## Windows release artifacts
 
-The latest public native Studio release is `v0.1.1`; the normal operator path is the Windows installer:
+**Current Process Bus Simulator release:** [M3.H Lab Edition](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h-20261024), with matching `ARStack-ProcessBus-M3H-win-x64-setup.exe`, `ARStack-ProcessBus-M3H-win-x64-portable.zip`, and `ARStack-ESP32P4-ProcessBus-M3H-firmware.bin`. Windows Setup and Portable bundle Qt, firmware manifest/hash and a pinned flasher. Build ID `a922e9bdba4e57a4` and source `a922e9bdba4e57a4e88406eb83344455dd8ff142` are the tested public binary identity. M3.H is marked **experimental**, available publicly, and has **10/10 CI workflows PASS**.
 
-- [GitHub Release — ARStack Studio v0.1.1](https://github.com/masarray/arstack61850/releases/tag/v0.1.1)
-- `ARStack-Studio-0.1.1-win-x64-setup.exe` — recommended installation
-- `ARStack-Studio-0.1.1-win-x64-portable.zip` — portable package
+The historical releases [v0.1.1](https://github.com/masarray/arstack61850/releases/tag/v0.1.1) and [v0.1.0](https://github.com/masarray/arstack61850/releases/tag/v0.1.0) are still available. v0.1.0 recorded an independent 3600-second SV endurance run at `smpSynch=0`, which is **not** M3.H simulated-GM acceptance.
 
-The original bounded `v0.1.0` milestone remains documented below for historical acceptance evidence:
-
-- [GitHub Release — ARStack Studio / SMV Injector v0.1.0](https://github.com/masarray/arstack61850/releases/tag/v0.1.0)
-- `ARStack-Studio-0.1.0-win-x64-setup.exe` — recommended normal installation
-- `ARStack-Studio-0.1.0-win-x64-portable.zip` — portable package
-- `arstack-esp32p4-smv-0.1.0.bin` — standalone ESP32-P4 firmware asset
-- `firmware-manifest.json`
-- `RELEASE-SHA256SUMS.txt`
-
-Published SHA-256 values:
-
-```text
-877a35dbbe110cc8ab740d3fcdc44a63f348405dc509da3164d9aaa92e9e2622  ARStack-Studio-0.1.0-win-x64-setup.exe
-1487e90254ddc5cab0f7b917580be951311c1697bec6dc19d2e2720683f00f83  ARStack-Studio-0.1.0-win-x64-portable.zip
-fae413d7b6f65b7d10ca65dc277fbf586d487f21209a29875036791088afa9c7  arstack-esp32p4-smv-0.1.0.bin
-```
-
-Both Windows packages contain the Qt runtime, verified ESP32-P4 firmware bundle, and pinned standalone flasher. The installer is per-user and does not require administrator elevation. The release is **stable**, not draft and not prerelease.
 ## Truthfulness boundary
 
 Phasor and waveform views are generated setpoint previews, not independent Ethernet capture evidence. `smpSynch` remains an embedded synchronization truth and must not be promoted to a synchronization claim without measured evidence.
 
 CI can prove parser/compiler behavior, firmware manifest/hash enforcement, native START/DEPLOY guards, Qt instantiation, high-DPI launch, firmware build/package generation, Windows portable construction, installer construction, and packaged-app smoke execution. CI cannot prove physical Ethernet waveform or timing behavior.
 
-The final physical gate is maintained in [`../../docs/SMV_STUDIO_P0_RELEASE.md`](../../docs/SMV_STUDIO_P0_RELEASE.md).
+For M3.H lab release evidence, see [`../../docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md`](../../docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md). Real-IED acceptance is optional future interoperability testing, not a prerequisite for public simulation use.
 
 ## Development build
 
