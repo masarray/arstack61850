@@ -8,7 +8,7 @@ Use the [simple bug-report form](https://github.com/masarray/arstack61850/issues
 
 Useful details include the Studio release, Windows version, ESP32-P4 firmware build if connected, the exact error shown and the last action you tried.
 
-**SCL import issue?** Share a screenshot of the validation result and, if permissible, a sanitized SCL/CID/SCD/IID file that reproduces it. Never share confidential installation data.
+**SCL import issue?** Follow the [SCL import troubleshooting steps](docs/SCL_TROUBLESHOOTING.md). Share the Studio version, stream selection and a sanitized sample if possible. Never share confidential installation data.
 
 **Can't find the board?** Check the USB data cable and serial device selection; use **Configuration → Firmware** to verify the ESP32-P4 and install matching firmware.
 

@@ -65,7 +65,7 @@ Adjust a voltage or current setpoint and observe the generated waveform. Open a 
 
 ## Need help?
 
-Check the [installation guide](INSTALL.md) or [support guide](../SUPPORT.md). If a file does not import or a device will not connect, share the Studio version, the error message and a sanitized example file if possible.
+Check the [installation guide](INSTALL.md) or [support guide](../SUPPORT.md). For an SCL import where SV ID or MAC address does not appear, follow the [SCL troubleshooting guide](SCL_TROUBLESHOOTING.md). If a device will not connect, share the Studio version and the displayed error.
 
 Want to publish observations from another IEC 61850 tool or device? See the [community testing guide](COMMUNITY_TESTING.md).
 

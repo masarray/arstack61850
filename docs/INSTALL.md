@@ -18,7 +18,7 @@ To download a verified copy without starting the installer, run `& $script -Down
 
 ## Linux (x86_64)
 
-When the latest GitHub release offers `ARStack-Studio-linux-x86_64.AppImage`, download it, mark it executable (`chmod +x`) and open it. You can also install it into your home folder with:
+For Linux x86_64, download `ARStack-Studio-linux-x86_64.AppImage` from the [latest stable release](https://github.com/masarray/arstack61850/releases/latest) when listed. Mark it executable (`chmod +x`) and open it. You can also install it into your home folder with:
 
 ```bash
 curl -fLsS https://raw.githubusercontent.com/masarray/arstack61850/main/scripts/install-linux.sh -o /tmp/arstack-install-linux.sh
@@ -26,18 +26,6 @@ bash /tmp/arstack-install-linux.sh
 ```
 
 The install script checks the matching published SHA-256. It will explain when the current release does not yet contain a Linux build rather than downloading an older or unverified binary. The AppImage build is only published after Linux CI succeeds.
-
-## Windows Package Manager / WinGet
-
-WinGet uses an indexed, versioned package manifest. The release tooling prepares a manifest from the actual installer and SHA-256 once a release is final. The Microsoft community repository must accept the package **before** a public `winget install MasArray.ARStackStudio` command works; until then, use the Windows command above. A script or README alone does not register a WinGet package.
-
-Maintainer command (requires a tagged release with a unique Windows package version):
-
-```bash
-python3 scripts/generate_winget_manifest.py --version X.Y.Z --installer-type inno
-```
-
-Review the generated YAML, validate with WinGet tooling, and submit it to [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs). Use `--installer-type nullsoft` for the earlier NSIS installer format.
 
 ## First lab experiment
 

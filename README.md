@@ -44,7 +44,6 @@ For active SV/PTP transmission, use an **isolated laboratory Ethernet network**,
 | Windows Portable ZIP | **Available** in the [latest release](https://github.com/masarray/arstack61850/releases/latest) |
 | Matched ESP32-P4 firmware | **Available** with the same release |
 | Linux AppImage | Shown in the [latest release](https://github.com/masarray/arstack61850/releases/latest) when a tested package is published |
-| Windows package manager | [WinGet preparation and status](docs/INSTALL.md#windows-package-manager--winget) |
 
 Every published Windows release includes the application dependencies and a matched firmware package; no C++ build environment is required for ordinary installation.
 
@@ -53,7 +52,8 @@ Every published Windows release includes the application dependencies and a matc
 ARStack is built to make IEC 61850 experiments more accessible to engineers, students and automation enthusiasts around the world.
 
 - **[Ask a question or report a problem](SUPPORT.md)** — share what you tried and what happened.
-- **[Share an interoperability experiment](docs/COMMUNITY_TESTING.md)** — feedback from independent laboratory setups helps improve the project.
+- **[Share an interoperability experiment](docs/COMMUNITY_TESTING.md)** — independent lab experiences help improve the project; [browse community reports](docs/community/README.md).
+- **[SCL import help](docs/SCL_TROUBLESHOOTING.md)** — a practical path when imported SV fields do not appear.
 - **[Contribute](CONTRIBUTING.md)** — improvements to documentation, software, tests and examples are welcome.
 
 ARStack uses the [GPL-3.0 license](LICENSE). It is a laboratory simulation and engineering tool, not a certified primary measurement or UTC reference device.
