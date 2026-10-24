@@ -1,0 +1,46 @@
+name: Publish M3.H Stable Product Landing to Project Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'index.html'
+      - '.github/workflows/m3h-project-pages-publish.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: arstack-m3h-project-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.repository == 'masarray/arstack61850'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify only the stable simulator landing is being deployed
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'Public Stable' index.html
+          grep -Fq 'a922e9bdba4e57a4' index.html
+          grep -Fq 'processbus-sim-m3h-20261024' index.html
+          grep -Fq 'simulated Global PTP Grandmaster' index.html
+          mkdir -p _site
+          cp index.html _site/index.html
+          touch _site/.nojekyll
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+      - name: Deploy project Pages route /arstack61850/
+        id: deployment
+        uses: actions/deploy-pages@v4
