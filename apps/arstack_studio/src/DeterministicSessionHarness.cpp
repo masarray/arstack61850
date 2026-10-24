@@ -86,6 +86,7 @@ public:
             {"PTP STOP during exclusive CFG/BIN defers proof, never invents OFF", ptpStopReadbackDeferredDuringExclusive()},
             {"UART paced but STOP remains reserved queue preemption", serialPacingDoesNotRemoveSafetySlot()},
             {"binary progress -> per-step deadline rearmed", binaryProfileProgressRearmsDeadline()},
+            {"USB port loss requires two verified misses; replug emits one arrival", usbPhysicalPortLossAndArrivalGate()},
             {"READY unplug/replug COM renumber -> READY stopped", readyReplugRecoversWithoutStart()},
             {"RUNNING unplug/replug -> never auto-restarts", runningReplugNeverAutoStarts()},
             {"wrong device during recovery -> SETUP ERROR", wrongDeviceRecoveryFailsClosed()},
@@ -1670,6 +1671,31 @@ private:
         session.profileSyncTimer_.stop();
         session.profileSyncStage_ = SmartSessionController::ProfileSyncStage::idle;
         return armed;
+    }
+
+    static bool usbPhysicalPortLossAndArrivalGate() {
+        using Worker = DeviceIoWorker;
+        using Session = SmartSessionController;
+        const QStringList before{QStringLiteral("COM7"), QStringLiteral("COM15")};
+        const QStringList unplugged{QStringLiteral("COM7")};
+        const QStringList replugged{QStringLiteral("COM7"), QStringLiteral("COM16")};
+        const QStringList unchanged{QStringLiteral("COM7"), QStringLiteral("COM15")};
+        return Worker::missingPortConfirmationPolls() == 2 &&
+            Worker::presencePollIntervalMs() == 750 &&
+            !Worker::verifiedPortPhysicallyGone(true, true, 0) &&
+            !Worker::verifiedPortPhysicallyGone(true, true, 1) &&
+            Worker::verifiedPortPhysicallyGone(true, true, 2) &&
+            !Worker::verifiedPortPhysicallyGone(false, true, 2) &&
+            !Worker::verifiedPortPhysicallyGone(true, false, 2) &&
+            !Session::hasNewlyEnumeratedPort(before, unplugged) &&
+            !Session::hasNewlyEnumeratedPort(before, unchanged) &&
+            Session::hasNewlyEnumeratedPort(unplugged, replugged) &&
+            Session::hasNewlyEnumeratedPort(
+                QStringList{QStringLiteral("COM15")},
+                QStringList{QStringLiteral("com15"), QStringLiteral("COM16")}) &&
+            !Session::hasNewlyEnumeratedPort(
+                QStringList{QStringLiteral("COM15")},
+                QStringList{QStringLiteral("com15")});
     }
 
     static bool readyReplugRecoversWithoutStart() {
