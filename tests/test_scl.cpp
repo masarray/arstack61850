@@ -1204,6 +1204,36 @@ void parser_detects_duplicate_ieds_and_missing_dataset_references() {
         }));
 }
 
+void arstack_untagged_lab_reference_compiles_without_vlan_tag() {
+    using namespace ar::iec61850::sampled_values;
+    using namespace ar::iec61850::scl;
+
+    const auto path = std::filesystem::path{ARIEC61850_SOURCE_DIR} /
+        "apps" / "arstack_studio" / "templates" /
+        "arstack_4i4v_untagged_lab.scd";
+    const auto document = SclParser{}.load(path);
+    CHECK(document.sampled_values_streams.size() == 1U);
+    const auto& stream = document.sampled_values_streams.front();
+    CHECK(stream.address.app_id == std::optional<std::uint16_t>{static_cast<std::uint16_t>(0x4000U)});
+    CHECK(!stream.address.vlan_id.has_value());
+    CHECK(!stream.address.vlan_priority.has_value());
+    CHECK(stream.entries.size() == 16U);
+    CHECK(stream.sample_rate == 4000U);
+    CHECK(stream.no_asdu == 1U);
+
+    SvPublisherProfileCompileContext context;
+    context.profile_family = SvProfileFamily::legacy_9_2le;
+    context.sample_counter_modulus = static_cast<std::uint16_t>(4000U);
+    const auto compiled = SvPublisherProfileCompiler::compile(stream, context);
+    CHECK(compiled.ok());
+    CHECK(compiled.profile.has_value());
+    CHECK(!compiled.profile->vlan_present);
+    CHECK(compiled.profile->app_id == 0x4000U);
+    CHECK(compiled.profile->payload_size_bytes == 64U);
+    CHECK(compiled.profile->timing.exact_frame_rate_hz() ==
+        std::optional<std::uint32_t>{4000U});
+}
+
 void parser_detects_editions_from_root_metadata() {
     using namespace ar::iec61850::scl;
 
@@ -1281,6 +1311,7 @@ int main() {
         {"Simulator semantic defaults and indexed RCBs", simulator_compiles_semantic_defaults_and_indexed_report_instances},
         {"SCL SettingControl", parser_preserves_setting_control_and_invalid_state},
         {"SCL conflicts and warnings", parser_detects_duplicate_ieds_and_missing_dataset_references},
+        {"ARStack untagged SV lab profile", arstack_untagged_lab_reference_compiles_without_vlan_tag},
         {"SCL edition detection", parser_detects_editions_from_root_metadata},
         {"SCL prefixed namespace", parser_supports_prefixed_namespaces_and_predefined_entities},
         {"SCL secure XML", secure_xml_reader_rejects_dtd_entities_and_malformed_documents},

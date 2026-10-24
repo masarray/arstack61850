@@ -12,7 +12,7 @@ Useful details include the Studio release, Windows version, ESP32-P4 firmware bu
 
 **Can't find the board?** Check the USB data cable and serial device selection; use **Configuration → Firmware** to verify the ESP32-P4 and install matching firmware.
 
-**Can't see SV in Wireshark?** Verify the isolated Ethernet topology, selected capture interface and whether a switch mirror/TAP is needed.
+**SMV missing in ARSAS, DigSubAnalyzer or Wireshark?** Follow the [independent Ethernet receiver check](docs/INTEROP_FIRST_PACKET.md): verify SV RUNNING, capture on the actual NIC, and compare priority-tagged VLAN 0 with the optional untagged lab SCL.
 
 **Interested in IEC 61850 subscriber testing?** Share results in the [community interoperability guide](docs/COMMUNITY_TESTING.md).
 
