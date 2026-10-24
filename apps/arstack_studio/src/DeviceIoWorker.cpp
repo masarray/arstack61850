@@ -191,6 +191,7 @@ void DeviceIoWorker::refreshPortsInternal(const bool forceSignal) {
         highConfidence.size() != highConfidenceCount_;
 
     ports_ = std::move(discovered);
+    physicallyPlausiblePorts_ = std::move(highConfidence);
     recommendedPort_ = recommended;
     highConfidenceCount_ = highConfidence.size();
     if (forceSignal || changed)
@@ -234,8 +235,8 @@ void DeviceIoWorker::autoDetectAndConnect(const quint64 generation) {
     const QSettings settings;
     const QString verifiedPort = settings.value(
         QStringLiteral("device-discovery/lastVerifiedPort")).toString().trimmed();
-    probeQueue_ = orderedDiscoveryPorts(
-        ports_, verifiedPort, recommendedPort_);
+    probeQueue_ = focusedAutomaticPorts(
+        ports_, physicallyPlausiblePorts_, verifiedPort, recommendedPort_);
     genericProbeActive_ = !probeQueue_.isEmpty();
     if (genericProbeActive_) tryNextProbe();
     else emit automaticProbeExhausted(activeGeneration_);
