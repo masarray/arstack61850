@@ -1,0 +1,82 @@
+name: Capture Real ARStack Studio Screenshot
+
+# This one-time product gallery workflow runs only on a dedicated review branch.
+# It captures pixels from the compiled, actual native Qt Quick Windows window.
+on:
+  push:
+    branches:
+      - docs/p1-real-studio-screenshot-20261024
+    paths:
+      - '.github/workflows/public-studio-screenshot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  screenshot:
+    if: ${{ github.repository == 'masarray/arstack61850' && github.ref == 'refs/heads/docs/p1-real-studio-screenshot-20261024' }}
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          ref: docs/p1-real-studio-screenshot-20261024
+      - name: Install Qt 6 for real application
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.10.3'
+          arch: win64_msvc2022_64
+          modules: 'qtserialport'
+          cache: true
+      - name: Compile Windows desktop application
+        shell: pwsh
+        run: |
+          cmake -S apps/arstack_studio -B build-arstack-studio -G "Visual Studio 17 2022" -A x64 -DARIEC61850_WARNINGS_AS_ERRORS=ON
+          if ($LASTEXITCODE -ne 0) { throw "Studio configure failed" }
+          cmake --build build-arstack-studio --config Release --target arstack_studio --parallel
+          if ($LASTEXITCODE -ne 0) { throw "Studio compile failed" }
+      - name: Capture real native-window pixels and verify PNG
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:QT_SCALE_FACTOR = '1'
+          $env:ARSTACK_STUDIO_QA_NATIVE_ONLY = '1'
+          $env:ARSTACK_STUDIO_QA_DIR = Join-Path $env:RUNNER_TEMP 'arstack-native-shot'
+          New-Item -ItemType Directory -Path $env:ARSTACK_STUDIO_QA_DIR -Force | Out-Null
+          Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
+          Remove-Item Env:QT_QUICK_BACKEND -ErrorAction SilentlyContinue
+          $exe = Join-Path $PWD 'build-arstack-studio/Release/arstack_studio.exe'
+          if (-not (Test-Path $exe)) { throw 'Actual compiled Qt desktop executable missing' }
+          & $exe --check-operator-ui
+          if ($LASTEXITCODE -ne 0) { throw "Native Qt screenshot acceptance failed ($LASTEXITCODE)" }
+          $png = Join-Path $env:ARSTACK_STUDIO_QA_DIR 'studio-960x680.png'
+          if (-not (Test-Path $png) -or (Get-Item $png).Length -lt 15000) { throw 'Native screenshot missing or implausibly small' }
+          Add-Type -AssemblyName System.Drawing
+          $image = [System.Drawing.Image]::FromFile($png)
+          try {
+            if ($image.Width -ne 960 -or $image.Height -ne 680) { throw 'Native capture dimensions do not match requested viewport' }
+          } finally { $image.Dispose() }
+          New-Item -ItemType Directory -Path 'assets/screenshots' -Force | Out-Null
+          Copy-Item -LiteralPath $png -Destination 'assets/screenshots/arstack-studio-windows.png' -Force
+      - name: Upload independently inspectable original native evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: arstack-studio-real-windows-screenshot
+          path: assets/screenshots/arstack-studio-windows.png
+          if-no-files-found: error
+          retention-days: 30
+      - name: Commit actual captured pixels to review branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- assets/screenshots/arstack-studio-windows.png
+          if git diff --cached --quiet; then
+            echo 'Screenshot identical to previously verified native capture'
+          else
+            git commit -m 'docs(visual): add real Windows Qt app screenshot from native GUI acceptance'
+            git push origin HEAD:refs/heads/docs/p1-real-studio-screenshot-20261024
+          fi

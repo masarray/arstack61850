@@ -40,6 +40,12 @@ Invoke-WebRequest 'https://raw.githubusercontent.com/masarray/arstack61850/main/
 
 For Linux x86_64, check [Downloads](https://github.com/masarray/arstack61850/releases/latest) for an AppImage when it is published; the [installation guide](docs/INSTALL.md) also covers Linux command-line setup and WinGet package status.
 
+## See ARStack Studio
+
+![ARStack Studio native Windows engineering workspace — captured from the real Qt application](assets/screenshots/arstack-studio-windows.png)
+
+*Real ARStack Studio Windows screenshot, captured by the application's built-in native-window acceptance test.*
+
 ## See it in action
 
 The released **M3.H** laboratory milestone captured **163,048 SV frames** in 40.763 seconds at **3,999.884 frames/s**, with continuous `smpCnt` and no missing, duplicate or malformed SV frames in that captured interval. The same test recorded PTP Announce / Sync / Follow_Up traffic.
