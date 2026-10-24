@@ -783,6 +783,32 @@ def main() -> None:
             and "AR_PTP_POLICY_AUTO_PREFER_EXTERNAL" not in default_mode,
             "PTP SOURCE must default to INTERNAL_GM_ONLY, AUTO only operator opt-in")
 
+    # M3.F: USB hotplug must retire a stale Windows COM handle using ONLY
+    # existing 750-ms OS enumeration and hysteresis, without disturbing the
+    # Ethernet-side PTP/SV clock or requiring app restart.
+    io_worker = (STUDIO / "src/DeviceIoWorker.cpp").read_text(encoding="utf-8")
+    io_header = (STUDIO / "src/DeviceIoWorker.hpp").read_text(encoding="utf-8")
+    session_cpp = (STUDIO / "src/SmartSessionController.cpp").read_text(encoding="utf-8")
+    session_header = (STUDIO / "src/SmartSessionController.hpp").read_text(encoding="utf-8")
+    scan = io_worker.split("void DeviceIoWorker::refreshPortsInternal(", 1)[1].split(
+        "void DeviceIoWorker::autoDetectAndConnect(", 1)[0]
+    require("verifiedPortPhysicallyGone(" in scan
+            and "handleSerialFailure(" in scan
+            and "consecutiveMissingPortPolls_" in scan
+            and "presencePollIntervalMs() noexcept { return 750; }" in io_header
+            and "missingPortConfirmationPolls() noexcept { return 2; }" in io_header
+            and "PTP STOP" not in scan
+            and "SV STOP" not in scan.replace("// NEVER issue SV/PTP STOP,", "")
+            and "setHeartbeatEnabled(" not in scan,
+            "USB disappearance must retire only stale COM with bounded presence hysteresis")
+    require("hasNewlyEnumeratedPort(lastEnumeratedPorts_, nowVisible)" in session_cpp
+            and "lastEnumeratedPorts_ = nowVisible" in session_cpp
+            and "QTimer::singleShot(0, this, [this]" in session_cpp
+            and "device_->connected() || device_->discovering()" in session_cpp
+            and "portOwner_ == PortOwner::firmwareTool" in session_cpp
+            and "hasNewlyEnumeratedPort(" in session_header,
+            "USB reappearance must trigger safe semantic autodiscovery with owner gates")
+
     print("Studio operator workspace contract: PASS")
 
 
