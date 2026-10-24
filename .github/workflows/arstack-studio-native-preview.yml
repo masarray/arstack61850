@@ -5,6 +5,10 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'apps/arstack_studio/**'
+      # Firmware-only timing fixes MUST create a matched ESP32 image and
+      # Windows Inno installer; do not leave users on stale embedded firmware.
+      - 'embedded/esp32p4_smv_injector/**'
+      - 'include/ariec61850/time_sync/**'
       - '.github/workflows/arstack-studio-native-preview.yml'
 
 permissions:
@@ -19,10 +23,14 @@ jobs:
   # rather than taking an older public firmware that lacks PROFILE-BINARY-V1.
   firmware:
     uses: ./.github/workflows/esp32p4-smv-injector.yml
+    with:
+      # Only the GUI Preview installer opts into measured local phase sync.
+      # Stable release workflow keeps ordinary firmware until board validation.
+      phase_sync_preview: true
 
   windows-preview:
     needs: firmware
-    if: ${{ !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: windows-2022
     timeout-minutes: 40
     env:
@@ -50,10 +58,17 @@ jobs:
         run: |
           cmake -S apps/arstack_studio -B build-studio-preview -G "Visual Studio 17 2022" -A x64 -DARIEC61850_WARNINGS_AS_ERRORS=ON -DARSTACK_STUDIO_ENGINEERING_PREVIEW=ON
           if ($LASTEXITCODE -ne 0) { throw 'Preview configuration failed' }
-          cmake --build build-studio-preview --config Release --target arstack_studio arstack_session_harness --parallel 2
+          cmake --build build-studio-preview --config Release --target arstack_studio arstack_session_harness arstack_clipboard_harness arstack_capture_harness --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'Native Studio preview build failed' }
           & "$PWD\build-studio-preview\Release\arstack_session_harness.exe"
           if ($LASTEXITCODE -ne 0) { throw 'Native session regression failed' }
+          & "$PWD\build-studio-preview\Release\arstack_clipboard_harness.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Production native clipboard readback regression failed' }
+          # The exact production PCAP decoder must pass the real historical
+          # 24-byte/zero-packet and STOPPED+stale-FPS regression, not just
+          # the session and clipboard tests on Draft PRs.
+          & "$PWD\build-studio-preview\Release\arstack_capture_harness.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Native SV capture 24-byte PCAP / liveness regression failed' }
           # Differentiate product code regressions from missing deployed DLLs.
           $nativeGui = Join-Path $PWD 'build-studio-preview\Release\arstack_studio.exe'
           $probe = Start-Process -FilePath $nativeGui -ArgumentList '--check-reference-template' -Wait -PassThru
@@ -95,6 +110,16 @@ jobs:
             throw 'Matching firmware job did not provide its manifest'
           }
           $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+          if ($manifest.phaseSyncPreview -ne $true -or
+              $manifest.bootSimulatedGlobalGmEnabled -ne $true -or
+              $manifest.bootSourceAutostartEnabled -ne $true -or
+              $manifest.defaultPtpPolicy -ne 'INTERNAL_GM_ONLY' -or
+              $manifest.globalGmTraceabilityPhysicallyProven -ne $false -or
+              $manifest.phaseServoEnabled -ne $true -or
+              $manifest.canonicalMacTxEvidenceEnabled -ne $true -or
+              $manifest.broadcastMirrorEnabled -ne $false) {
+            throw 'FAT preview requires simulated Global GM BOOT + PTP-source autostart + measured SV phase/MAC evidence, never LOCAL-only firmware'
+          }
           $expectedCapabilities = @('SMV-4I4V', 'PROFILE', 'PROFILE-BINARY-V1', 'LIVE-SETPOINTS', 'SESSION-LEASE', 'PTP-P2', 'SMPSYNCH-AUTO')
           foreach ($capability in $expectedCapabilities) {
             if ($manifest.capabilities -notcontains $capability) { throw "PR firmware lacks capability: $capability" }
@@ -216,7 +241,7 @@ jobs:
           $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $stage 'firmware'
           $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $stage 'tools\espflash.exe'
           $env:ESPFLASH_SKIP_UPDATE_CHECK = 'true'
-          foreach ($check in @('--check-reference-template', '--check-firmware-contract', '--check-p0-policy', '--check-app-lifecycle')) {
+          foreach ($check in @('--check-reference-template', '--check-firmware-contract', '--check-p0-policy', '--check-clipboard', '--check-app-lifecycle')) {
             $probe = Start-Process -FilePath $exe -ArgumentList $check -Wait -PassThru
             Write-Host "PACKAGED_PREVIEW_CHECK=$check EXIT=$($probe.ExitCode)"
             if ($probe.ExitCode -ne 0) {
@@ -264,7 +289,7 @@ jobs:
           $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $installDir 'firmware'
           $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $installDir 'tools\espflash.exe'
           $env:ESPFLASH_SKIP_UPDATE_CHECK = 'true'
-          foreach ($check in @('--check-firmware-contract', '--check-p0-policy', '--check-app-lifecycle')) {
+          foreach ($check in @('--check-firmware-contract', '--check-p0-policy', '--check-clipboard', '--check-app-lifecycle')) {
             $probe = Start-Process -FilePath $exe -ArgumentList $check -Wait -PassThru
             if ($probe.ExitCode -ne 0) { throw "Installed preview failed $check code $($probe.ExitCode)" }
           }

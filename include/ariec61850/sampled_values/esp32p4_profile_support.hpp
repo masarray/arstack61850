@@ -36,7 +36,14 @@ namespace detail {
 [[nodiscard]] inline bool esp32p4_4i4v_layout_matches(
     const SvPublisherProfile& profile) {
     const auto frame_rate_hz = profile.timing.exact_frame_rate_hz();
-    if (profile.timing.sampling_basis != SvSampleMode::samples_per_second ||
+    const bool supported_basis =
+        profile.timing.sampling_basis == SvSampleMode::samples_per_second ||
+        (profile.timing.sampling_basis == SvSampleMode::samples_per_period &&
+         profile.timing.configured_sample_rate != 0U &&
+         frame_rate_hz.has_value() &&
+         (*frame_rate_hz == profile.timing.configured_sample_rate * 50ULL ||
+          *frame_rate_hz == profile.timing.configured_sample_rate * 60ULL));
+    if (!supported_basis ||
         profile.timing.asdus_per_frame != 1U ||
         !legacy_9_2le_4i4v_layout_matches(profile) ||
         !frame_rate_hz.has_value() || *frame_rate_hz == 0U ||

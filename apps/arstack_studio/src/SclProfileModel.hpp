@@ -65,6 +65,9 @@ public:
     Q_INVOKABLE bool confirmNominalFrequencyHz(int frequencyHz);
     Q_INVOKABLE void clearNominalFrequency();
     Q_INVOKABLE bool selectProfileFamily(const QString& familyKey);
+    // Operator L2 override is compiled into the SAME canonical device profile
+    // and binary transaction. It is never a display-only VLAN setting.
+    Q_INVOKABLE bool configureSelectedVlan(bool present, int vid, int pcp);
 
 signals:
     void sourceChanged();
@@ -85,6 +88,11 @@ private:
     };
 
     void installDocument(ar::iec61850::scl::SclDocument document, bool referenceTemplate);
+    struct VlanOverride final {
+        bool present{};
+        std::uint16_t vid{};
+        std::uint8_t pcp{};
+    };
     void rebuildRows();
     [[nodiscard]] QVariantMap profileToVariantMap(
         const ar::iec61850::sampled_values::SvPublisherProfile& profile) const;
@@ -93,6 +101,7 @@ private:
     std::optional<std::uint16_t> confirmedCounterModulus_;
     std::optional<std::uint32_t> confirmedNominalFrequencyMilliHz_;
     std::vector<ar::iec61850::sampled_values::SvProfileFamily> profileFamilies_;
+    std::vector<std::optional<VlanOverride>> vlanOverrides_;
     std::vector<Row> rows_;
     int selectedIndex_{-1};
     QString fatalError_;

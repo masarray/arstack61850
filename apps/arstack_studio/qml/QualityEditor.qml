@@ -103,7 +103,7 @@ RowLayout {
         theme: editor.theme
         uiFont: editor.uiFont
         id: presetBox
-        implicitWidth: editor.compact ? 98 : 108
+        implicitWidth: editor.compact ? 90 : 108
         model: ["Good", "Invalid", "Questionable", "Test"]
         currentIndex: editor.presetIndex(editor.qualityValue)
         font.family: editor.uiFont
@@ -116,7 +116,7 @@ RowLayout {
         theme: editor.theme
         monoFont: editor.monoFont
         compact: true
-        implicitWidth: editor.compact ? 100 : 112
+        implicitWidth: editor.compact ? 98 : 112
         Component.onCompleted: text = editor.hexText(editor.qualityValue)
         onEditingFinished: {
             var trimmed = text.trim()

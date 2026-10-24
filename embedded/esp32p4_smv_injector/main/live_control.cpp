@@ -3,6 +3,8 @@
 #include "live_control.hpp"
 #include "ethernet_port.h"
 #include "profile_control.hpp"
+#include "smp_synch_lab.hpp"
+#include "ariec61850/sampled_values/live_signal_transaction.hpp"
 
 #include "esp_app_desc.h"
 #include "esp_log.h"
@@ -32,23 +34,52 @@ namespace {
 
 using ar::iec61850::sampled_values::SvLiveSignalBank;
 using ar::iec61850::sampled_values::SvLiveSignalState;
+using ar::iec61850::sampled_values::SvScenarioTransaction;
 using ar::iec61850::sampled_values::live_channel_index;
 
 constexpr char kTag[] = "ar_smv_ctrl";
 constexpr std::array<std::string_view, 8> kChannelNames{
     "IA", "IB", "IC", "IN", "UA", "UB", "UC", "UN"};
 constexpr std::string_view kTokenDelimiters{" \t\r\n"};
-constexpr std::uint32_t kControlLeaseTimeoutMs = 2500U;
-constexpr std::uint64_t kControlLeaseTimeoutUs =
-    static_cast<std::uint64_t>(kControlLeaseTimeoutMs) * 1000ULL;
+// A 700-ms host heartbeat is coalesced through a serial command queue.
+// A 2.5-second lease caused unnecessary SV STOP during transient Windows USB
+// stalls. Allow several missed scheduling slots, but still fail CLOSED after
+// six seconds without a real device-consumed heartbeat.
+constexpr std::uint32_t kControlLeaseTimeoutMs = 6000U;
+constexpr std::uint32_t kSlowHeartbeatGapMs = 2000U;
+// Fixed-rate watchdog never stops/rearms from console heartbeat and timer
+// callback concurrently. An expired lease is detected in <=timeout+250ms.
+constexpr std::uint64_t kControlWatchdogPeriodUs = 250000ULL;
+
+enum class SvStopCause : std::uint32_t {
+    none = 0U, operator_request, lease_expired, runtime_fault
+};
+
+const char* sv_stop_cause_name(const SvStopCause cause) noexcept {
+    switch (cause) {
+        case SvStopCause::operator_request: return "OPERATOR_STOP";
+        case SvStopCause::lease_expired: return "LEASE_EXPIRED";
+        case SvStopCause::runtime_fault: return "RUNTIME_FAULT";
+        default: return "NONE";
+    }
+}
 
 SvLiveSignalBank g_signal_bank;
+SvScenarioTransaction g_scenario_txn;
 std::atomic<bool> g_running{false};
 std::atomic<bool> g_start_request{false};
 std::atomic<TaskHandle_t> g_publisher_task{nullptr};
 std::atomic<bool> g_control_heartbeat_seen{false};
 std::atomic<bool> g_control_lease_active{false};
 std::atomic<std::uint32_t> g_last_heartbeat_ms{0U};
+std::atomic<std::uint32_t> g_max_heartbeat_gap_ms{0U};
+std::atomic<std::uint32_t> g_slow_heartbeat_events{0U};
+std::atomic<bool> g_control_watchdog_ready{false};
+std::atomic<SvStopCause> g_last_sv_stop_cause{SvStopCause::none};
+std::atomic<std::uint32_t> g_sv_stop_seq{0U};
+std::atomic<std::uint32_t> g_last_sv_stop_ms{0U};
+std::atomic<std::uint32_t> g_sv_stop_heartbeat_age_ms{0U};
+portMUX_TYPE g_control_lease_mux = portMUX_INITIALIZER_UNLOCKED;
 esp_timer_handle_t g_control_lease_timer{nullptr};
 std::uint64_t g_boot_id{0U};
 
@@ -71,96 +102,96 @@ bool heartbeat_is_fresh() noexcept {
     return static_cast<std::uint32_t>(now - last) <= kControlLeaseTimeoutMs;
 }
 
-bool start_control_lease_timer(const std::uint64_t delay_us) noexcept {
-    if (g_control_lease_timer == nullptr) return false;
-    static_cast<void>(esp_timer_stop(g_control_lease_timer));
-    const auto result = esp_timer_start_once(g_control_lease_timer, delay_us == 0U ? 1U : delay_us);
-    if (result != ESP_OK) {
-        ESP_LOGE(kTag, "Unable to arm control-session lease timer: %d", static_cast<int>(result));
-        return false;
-    }
-    return true;
+// Preserve stop provenance in board RAM even if serial output scrolls away.
+// SHOW reports the same reason after the operator has restarted the publisher.
+void record_sv_stop(const SvStopCause cause, const std::uint32_t age_ms) noexcept {
+    g_last_sv_stop_cause.store(cause, std::memory_order_release);
+    g_sv_stop_heartbeat_age_ms.store(age_ms, std::memory_order_release);
+    g_last_sv_stop_ms.store(monotonic_ms(), std::memory_order_release);
+    g_sv_stop_seq.fetch_add(1U, std::memory_order_acq_rel);
 }
 
 void disarm_control_lease() noexcept {
+    // The 4 Hz watchdog keeps running for the board lifetime. Disarm only
+    // the OUTPUT lease, so no concurrent timer restart/stop race exists.
+    portENTER_CRITICAL(&g_control_lease_mux);
     g_control_lease_active.store(false, std::memory_order_release);
-    if (g_control_lease_timer != nullptr) {
-        static_cast<void>(esp_timer_stop(g_control_lease_timer));
-    }
+    portEXIT_CRITICAL(&g_control_lease_mux);
 }
 
 void clear_control_session() noexcept {
-    disarm_control_lease();
+    portENTER_CRITICAL(&g_control_lease_mux);
+    g_control_lease_active.store(false, std::memory_order_release);
     g_control_heartbeat_seen.store(false, std::memory_order_release);
     g_last_heartbeat_ms.store(0U, std::memory_order_release);
+    portEXIT_CRITICAL(&g_control_lease_mux);
 }
 
-void stop_for_lease_failure(const char* reason) noexcept {
-    bool expected = true;
-    if (g_running.compare_exchange_strong(expected, false, std::memory_order_acq_rel)) {
-        g_start_request.store(false, std::memory_order_release);
-        g_control_lease_active.store(false, std::memory_order_release);
-        wake_publisher();
-        ESP_LOGW(kTag, "%s; SV transmission stopped", reason);
-    }
-}
-
+// A control lease is NOT a PTP clock lease. The board must stop publishing
+// when the Studio connection actually disappears; loss of PTP qualification
+// only deasserts smpSynch and does not silently stop the SV publisher.
 void enforce_control_lease() noexcept {
-    if (!g_running.load(std::memory_order_acquire) ||
-        !g_control_lease_active.load(std::memory_order_acquire)) {
-        return;
-    }
-
-    const auto now = monotonic_ms();
-    const auto last = g_last_heartbeat_ms.load(std::memory_order_acquire);
-    const auto elapsed = static_cast<std::uint32_t>(now - last);
-    if (elapsed < kControlLeaseTimeoutMs) {
-        const auto remaining_us =
-            static_cast<std::uint64_t>(kControlLeaseTimeoutMs - elapsed) * 1000ULL;
-        if (!start_control_lease_timer(remaining_us)) {
-            stop_for_lease_failure("Control session lease timer failed");
+    std::uint32_t expired_age_ms = 0U;
+    bool expired = false;
+    portENTER_CRITICAL(&g_control_lease_mux);
+    if (g_running.load(std::memory_order_acquire) &&
+        g_control_lease_active.load(std::memory_order_acquire)) {
+        const auto now = monotonic_ms();
+        const auto last = g_last_heartbeat_ms.load(std::memory_order_acquire);
+        const auto elapsed = static_cast<std::uint32_t>(now - last);
+        if (elapsed >= kControlLeaseTimeoutMs) {
+            g_control_lease_active.store(false, std::memory_order_release);
+            g_start_request.store(false, std::memory_order_release);
+            expired = g_running.exchange(false, std::memory_order_acq_rel);
+            expired_age_ms = elapsed;
+            if (expired) record_sv_stop(SvStopCause::lease_expired, elapsed);
         }
-        return;
     }
-
-    g_control_lease_active.store(false, std::memory_order_release);
-    g_start_request.store(false, std::memory_order_release);
-    const bool was_running = g_running.exchange(false, std::memory_order_acq_rel);
-    if (was_running) {
+    portEXIT_CRITICAL(&g_control_lease_mux);
+    if (expired) {
         wake_publisher();
         ESP_LOGW(kTag,
                  "Control session lease expired after %lu ms; SV transmission stopped",
-                 static_cast<unsigned long>(elapsed));
+                 static_cast<unsigned long>(expired_age_ms));
     }
 }
 
 void control_lease_timer_callback(void*) noexcept {
-    enforce_control_lease();
+    enforce_control_lease(); // 4 Hz bounded age check; NEVER rearm the timer.
 }
 
 void record_control_heartbeat() noexcept {
-    g_last_heartbeat_ms.store(monotonic_ms(), std::memory_order_release);
-    g_control_heartbeat_seen.store(true, std::memory_order_release);
-    if (!g_running.load(std::memory_order_acquire)) return;
-
-    if (!start_control_lease_timer(kControlLeaseTimeoutUs)) {
-        stop_for_lease_failure("Control session heartbeat could not rearm the lease timer");
-        return;
+    portENTER_CRITICAL(&g_control_lease_mux);
+    const std::uint32_t now_ms = monotonic_ms();
+    if (g_control_heartbeat_seen.load(std::memory_order_relaxed)) {
+        const std::uint32_t gap_ms = now_ms -
+            g_last_heartbeat_ms.load(std::memory_order_relaxed);
+        if (gap_ms > g_max_heartbeat_gap_ms.load(std::memory_order_relaxed))
+            g_max_heartbeat_gap_ms.store(gap_ms, std::memory_order_relaxed);
+        if (gap_ms > kSlowHeartbeatGapMs)
+            g_slow_heartbeat_events.fetch_add(1U, std::memory_order_relaxed);
     }
-    g_control_lease_active.store(true, std::memory_order_release);
+    g_last_heartbeat_ms.store(now_ms, std::memory_order_release);
+    g_control_heartbeat_seen.store(true, std::memory_order_release);
+    portEXIT_CRITICAL(&g_control_lease_mux);
+    // No esp_timer_stop/start from this control task, and no lease renewal
+    // after the watchdog has already revoked the RUNNING session.
 }
 
 bool arm_control_lease_if_fresh() noexcept {
-    if (!heartbeat_is_fresh()) {
-        g_control_lease_active.store(false, std::memory_order_release);
-        return true;
+    if (!g_control_watchdog_ready.load(std::memory_order_acquire)) return false;
+    bool fresh = false;
+    portENTER_CRITICAL(&g_control_lease_mux);
+    if (g_control_heartbeat_seen.load(std::memory_order_acquire)) {
+        const auto elapsed = static_cast<std::uint32_t>(
+            monotonic_ms() -
+            g_last_heartbeat_ms.load(std::memory_order_acquire));
+        fresh = elapsed < kControlLeaseTimeoutMs;
+        if (fresh)
+            g_control_lease_active.store(true, std::memory_order_release);
     }
-    if (!start_control_lease_timer(kControlLeaseTimeoutUs)) {
-        g_control_lease_active.store(false, std::memory_order_release);
-        return false;
-    }
-    g_control_lease_active.store(true, std::memory_order_release);
-    return true;
+    portEXIT_CRITICAL(&g_control_lease_mux);
+    return fresh;
 }
 
 void uppercase_ascii(char* text) noexcept {
@@ -215,16 +246,29 @@ bool parse_u32(const char* text, std::uint32_t& value) noexcept {
     return true;
 }
 
+bool parse_u64(const char* text, std::uint64_t& out, const int base) noexcept {
+    if (text == nullptr || *text == '\0' || *text == '-') return false;
+    errno = 0;
+    char* end{};
+    const auto value = std::strtoull(text, &end, base);
+    if (errno || end == text || *end != '\0') return false;
+    out = static_cast<std::uint64_t>(value);
+    return true;
+}
+
 void print_help() noexcept {
     ESP_LOGI(kTag, "Live control commands (bench serial transport):");
-    ESP_LOGI(kTag, "  IDENTIFY | START | STOP | SHOW | ZERO | HELP");
+    ESP_LOGI(kTag, "  IDENTIFY | STOP | SHOW | ZERO | HELP");
+    ESP_LOGI(kTag, "  CFG BEGIN <token> <boot_hex> | CFG FREQ/SET/ENABLE/SHAPE ...");
+    ESP_LOGI(kTag, "  CFG COMMIT <token> <hash_hex> | CFG SHOW <token> | START <token> <boot_hex> <hash_hex>");
     ESP_LOGI(kTag, "  FREQ <millihertz>");
     ESP_LOGI(kTag, "  SET <IA|IB|IC|IN|UA|UB|UC|UN> <rms_wire_counts> <phase_mdeg> [quality]");
     ESP_LOGI(kTag, "  ENABLE <channel> <0|1>");
     ESP_LOGI(kTag, "  QUALITY <channel> <uint32/0xhex>");
     ESP_LOGI(kTag, "  SHAPE CT <0|1> <dc_permille> <harmonic_permille> <order> <clip_permille>");
-    ESP_LOGI(kTag, "  PTP SHOW | PTP START | PTP STOP");
-    ESP_LOGI(kTag, "  PTP CONFIG <domain> <transport> <vlan> <vid> <pcp> <announce_ms> <sync_ms> <pdelay>");
+    ESP_LOGI(kTag, "  PTP SHOW | PTP DIAG | PTP START | PTP STOP");
+    ESP_LOGI(kTag, "  PTP POLICY <INTERNAL_GM_ONLY|AUTO_PREFER_EXTERNAL|EXTERNAL_ONLY|MONITOR_ONLY> (PTP+SV must be STOPPED)");
+    ESP_LOGI(kTag, "  PTP CONFIG <domain> <transport> <vlan> <vid> <pcp> <announce_ms> <sync_ms> <pdelay> [bench_global_0_1 UTC_epoch_seconds]");
     ESP_LOGI(kTag, "GUI profile deployment uses bounded PROFILE subcommands while STOPPED.");
 }
 
@@ -238,12 +282,12 @@ void print_identity() noexcept {
     const char* version = app != nullptr ? app->version : "unknown";
 #if CONFIG_AR_PTP_LAB_TX
     const char* capabilities = g_control_lease_timer != nullptr
-        ? "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO,PROFILE-BINARY-V1"
-        : "SMV-4I4V,PROFILE,LIVE-SETPOINTS,PTP-P2,SMPSYNCH-AUTO,PROFILE-BINARY-V1";
+        ? "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE,SV-CONFIG-TXN-V1,PTP-P2,PTP-GM-BENCH-V1,PTP-POLICY-M3D-V1,SMPSYNCH-AUTO,PROFILE-BINARY-V1,PROFILE-REUSE-V1"
+        : "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-CONFIG-TXN-V1,PTP-P2,PTP-GM-BENCH-V1,PTP-POLICY-M3D-V1,SMPSYNCH-AUTO,PROFILE-BINARY-V1,PROFILE-REUSE-V1";
 #else
     const char* capabilities = g_control_lease_timer != nullptr
-        ? "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE,PROFILE-BINARY-V1"
-        : "SMV-4I4V,PROFILE,LIVE-SETPOINTS,PROFILE-BINARY-V1";
+        ? "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE,SV-CONFIG-TXN-V1,PROFILE-BINARY-V1,PROFILE-REUSE-V1"
+        : "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-CONFIG-TXN-V1,PROFILE-BINARY-V1,PROFILE-REUSE-V1";
 #endif
     ESP_LOGI(kTag,
              "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 device_id=%02X%02X%02X%02X%02X%02X firmware=%s build=%s boot_id=%016llX capabilities=%s",
@@ -264,6 +308,17 @@ void print_ptp_state() noexcept {
         ESP_LOGE(kTag, "PTP status unavailable");
         return;
     }
+    ar_esp32p4_ptp_print_link_status(); // actual Ethernet driver + PHY event state
+    const auto policy = ar_ptp_lab_advanced_policy();
+    ESP_LOGI(kTag,
+        "PTPPOLICY mode=%s role=%s boot_auto=%u ext_candidate=%u source_generation=%lu sv_running=%u",
+        ar_ptp_lab_advanced_policy_name(policy),
+        config.role == AR_PTP_ROLE_LAB_SOURCE ? "SOURCE" :
+            config.role == AR_PTP_ROLE_TIME_RECEIVER ? "RECEIVER" : "MONITOR",
+        ar_ptp_boot_supervisor_autostart_allowed() ? 1U : 0U,
+        ar_ptp_source_external_candidate_stable() ? 1U : 0U,
+        static_cast<unsigned long>(ar_ptp_lab_source_generation()),
+        live_tx_running() ? 1U : 0U);
     ESP_LOGI(kTag,
              "PTP status=%s Announce=%llu Sync=%llu FollowUp=%llu PdelayFrames=%llu TXfail=%llu",
              status.is_running ? "RUNNING" : "STOPPED",
@@ -296,6 +351,49 @@ void print_ptp_state() noexcept {
 #endif
 }
 
+void print_sv_sync_diagnostics() noexcept {
+    // Operator-triggered read-only snapshot of the ACTUAL internal gate.
+    // Never read MAC descriptors or add any polling to the 4kHz publisher.
+    const auto s = smp_synch_diag_snapshot();
+    ESP_LOGI(kTag,
+        "SVSYNC DIAG events=%lu acquired=%lu revoked=%lu source=%u receiver=%u "
+        "phase_us=%ld uncertainty_us=%lu mac_pairs=%lu clean=%lu epoch=%lu "
+        "accepted=%u tracking=%u",
+        static_cast<unsigned long>(s.events),
+        static_cast<unsigned long>(s.acquisitions),
+        static_cast<unsigned long>(s.losses),
+        smp_synch_source_local_qualified() ? 1U : 0U,
+        smp_synch_receiver_timeline_qualified() ? 1U : 0U,
+        static_cast<long>(s.phase_error_us),
+        static_cast<unsigned long>(s.uncertainty_us),
+        static_cast<unsigned long>(s.mac_pairs),
+        static_cast<unsigned long>(s.clean_epochs),
+        static_cast<unsigned long>(s.sample_epoch),
+        s.phase_accepted ? 1U : 0U,
+        s.software_tracking ? 1U : 0U);
+    for (std::size_t i = 1U;
+         i < static_cast<std::size_t>(SvSyncLossReason::count); ++i) {
+        if (s.cause_counts[i] == 0U) continue;
+        const auto reason = static_cast<SvSyncLossReason>(i);
+        ESP_LOGI(kTag, "SVSYNC CAUSE reason=%s count=%lu",
+                 smp_synch_diag_reason_name(reason),
+                 static_cast<unsigned long>(s.cause_counts[i]));
+    }
+    for (std::size_t i = 0U; i < s.recent_count; ++i) {
+        const auto& e = s.recent[i];
+        ESP_LOGI(kTag,
+                 "SVSYNC EVENT seq=%lu uptime_ms=%lu state=%s reason=%s "
+                 "event_phase_us=%ld event_MACpairs=%lu",
+                 static_cast<unsigned long>(e.sequence),
+                 static_cast<unsigned long>(e.monotonic_ms),
+                 e.acquired ? "ACQUIRED" : "REVOKED",
+                 smp_synch_diag_reason_name(e.reason),
+                 static_cast<long>(e.phase_error_us),
+                 static_cast<unsigned long>(e.mac_pairs));
+    }
+    ESP_LOGI(kTag, "SVSYNC END events=%lu", static_cast<unsigned long>(s.events));
+}
+
 void handle_ptp_command(char* save) noexcept {
     char* subcommand = strtok_r(nullptr, kTokenDelimiters.data(), &save);
     if (subcommand == nullptr) {
@@ -309,14 +407,33 @@ void handle_ptp_command(char* save) noexcept {
         else print_ptp_state();
         return;
     }
+    if (std::strcmp(subcommand, "DIAG") == 0) {
+        if (has_extra_token(&save)) ESP_LOGE(kTag, "Usage: PTP DIAG");
+        else print_sv_sync_diagnostics();
+        return;
+    }
 #if CONFIG_AR_PTP_LAB_TX
     if (std::strcmp(subcommand, "START") == 0) {
         if (has_extra_token(&save)) {
             ESP_LOGE(kTag, "Usage: PTP START");
             return;
         }
+        ar_ptp_boot_supervisor_operator_override();
         if (!ar_esp32p4_ptp_start()) {
-            ESP_LOGE(kTag, "PTP start rejected: Ethernet link or role runtime readiness failed");
+            ar_ptp_lab_config_t active{};
+            const bool is_source = ar_ptp_lab_get_config(&active) &&
+                active.role == AR_PTP_ROLE_LAB_SOURCE;
+            if (is_source) {
+                const char* preflight = ar_esp32p4_ptp_preflight_reason();
+                ESP_LOGE(kTag, "PTP start rejected: source_reason=%s",
+                         preflight != nullptr ? preflight :
+                             ar_ptp_source_last_start_reason());
+                // Distinguish an unplugged Ethernet cable from a MAC driver
+                // that rejected transmit while the physical link was UP.
+                ar_esp32p4_ptp_print_link_status();
+            } else {
+                ESP_LOGE(kTag, "PTP start rejected: receiver/monitor runtime unavailable");
+            }
         } else {
             ESP_LOGI(kTag, "PTP start accepted");
         }
@@ -328,17 +445,82 @@ void handle_ptp_command(char* save) noexcept {
             ESP_LOGE(kTag, "Usage: PTP STOP");
             return;
         }
+        ar_ptp_boot_supervisor_operator_override();
         ar_ptp_lab_stop();
         ESP_LOGI(kTag, "PTP stop requested");
         return;
     }
+    if (std::strcmp(subcommand, "POLICY") == 0) {
+        char* requested = strtok_r(nullptr, kTokenDelimiters.data(), &save);
+        if (requested == nullptr || has_extra_token(&save)) {
+            ESP_LOGE(kTag, "Usage: PTP POLICY <INTERNAL_GM_ONLY|AUTO_PREFER_EXTERNAL|EXTERNAL_ONLY|MONITOR_ONLY>");
+            return;
+        }
+        uppercase_ascii(requested);
+        ar_ptp_advanced_mode_t desired;
+        if (std::strcmp(requested, "INTERNAL_GM_ONLY") == 0)
+            desired = AR_PTP_POLICY_INTERNAL_GM_ONLY;
+        else if (std::strcmp(requested, "AUTO_PREFER_EXTERNAL") == 0)
+            desired = AR_PTP_POLICY_AUTO_PREFER_EXTERNAL;
+        else if (std::strcmp(requested, "EXTERNAL_ONLY") == 0)
+            desired = AR_PTP_POLICY_EXTERNAL_ONLY;
+        else if (std::strcmp(requested, "MONITOR_ONLY") == 0)
+            desired = AR_PTP_POLICY_MONITOR_ONLY;
+        else {
+            ESP_LOGE(kTag, "PTP POLICY rejected: INVALID_MODE");
+            return;
+        }
+        // Always reject a time-authority role mutation during live SV or
+        // PTP ownership. No implicit STOP/restart of a healthy clock.
+        if (live_tx_running() || ar_ptp_source_runtime_active() ||
+            ar_ptp_lab_is_running()) {
+            ESP_LOGE(kTag, "PTP POLICY rejected: STOP_SV_AND_PTP_FIRST");
+            return;
+        }
+        if (!ar_ptp_lab_set_advanced_policy(desired)) {
+            ESP_LOGE(kTag, "PTP POLICY rejected: BUSY_OR_UNSUPPORTED_PROFILE");
+            return;
+        }
+        ESP_LOGI(kTag, "PTP POLICY accepted mode=%s",
+            ar_ptp_lab_advanced_policy_name(desired));
+        print_ptp_state();
+        return;
+    }
     if (std::strcmp(subcommand, "CONFIG") == 0) {
+        ar_ptp_boot_supervisor_operator_override();
         std::array<std::uint32_t, 8> values{};
         for (auto& value : values) {
             if (!parse_u32(strtok_r(nullptr, kTokenDelimiters.data(), &save), value)) {
                 ESP_LOGE(kTag, "Usage: PTP CONFIG <domain> <transport> <vlan> <vid> <pcp> <announce_ms> <sync_ms> <pdelay>");
                 return;
             }
+        }
+        bool bench_global = false;
+        std::uint32_t utc_epoch_seconds = 0U;
+        std::uint16_t utc_epoch_millis = 0U;
+        char* bench_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
+        if (bench_text != nullptr) {
+            std::uint32_t bench = 0U;
+            std::uint64_t utc_input = 0ULL;
+            if (!parse_u32(bench_text, bench) || bench > 1U ||
+                !parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), utc_input, 10)) {
+                ESP_LOGE(kTag, "PTP configuration rejected: expected bench mode and UTC epoch");
+                return;
+            }
+            // Accept both legacy Unix seconds and new Unix milliseconds.
+            // Full milliseconds avoid the ~0..999ms truncation caused by
+            // QDateTime::currentSecsSinceEpoch on the Windows host.
+            const bool epoch_in_milliseconds = utc_input >= 100000000000ULL;
+            const std::uint64_t seconds = epoch_in_milliseconds
+                ? utc_input / 1000ULL : utc_input;
+            if (seconds > UINT32_MAX || seconds < 1577836800ULL) {
+                ESP_LOGE(kTag, "PTP configuration rejected: UTC epoch outside supported range");
+                return;
+            }
+            utc_epoch_seconds = static_cast<std::uint32_t>(seconds);
+            utc_epoch_millis = epoch_in_milliseconds
+                ? static_cast<std::uint16_t>(utc_input % 1000ULL) : 0U;
+            bench_global = bench != 0U;
         }
         if (has_extra_token(&save) || values[0] > 255U || values[1] > 15U || values[2] > 1U ||
             values[3] > 4094U || values[4] > 7U || values[5] < 100U || values[5] > 10000U ||
@@ -359,11 +541,20 @@ void handle_ptp_command(char* save) noexcept {
         config.announce_interval_ms = values[5];
         config.sync_interval_ms = values[6];
         config.respond_to_peer_delay = values[7] != 0U;
+        config.bench_global_gm = bench_global;
+        config.bench_utc_epoch_seconds = bench_global ? utc_epoch_seconds : 0U;
+        config.bench_utc_epoch_millisecond = bench_global ? utc_epoch_millis : 0U;
+        config.bench_epoch_received_mono_us = bench_global ? esp_timer_get_time() : 0LL;
         if (!ar_ptp_lab_configure(&config)) {
-            ESP_LOGE(kTag, "PTP configuration rejected: stop PTP first or correct the profile");
+            ESP_LOGE(kTag, "PTP configuration rejected: reason=%s",
+                     ar_ptp_lab_last_config_error());
             return;
         }
         ESP_LOGI(kTag, "PTP configuration accepted");
+        ESP_LOGI(kTag, "PTP GM emulation=%u UTC_seed=%lu.%03u",
+                 config.bench_global_gm ? 1U : 0U,
+                 static_cast<unsigned long>(config.bench_utc_epoch_seconds),
+                 static_cast<unsigned>(config.bench_utc_epoch_millisecond));
         print_ptp_state();
         return;
     }
@@ -378,6 +569,28 @@ void print_state() noexcept {
              g_running.load(std::memory_order_acquire) ? "RUNNING" : "STOPPED",
              static_cast<unsigned long long>(state.generation),
              static_cast<unsigned>(state.frequency_millihz));
+    const std::uint32_t now_ms = monotonic_ms();
+    const std::uint32_t hb_last =
+        g_last_heartbeat_ms.load(std::memory_order_acquire);
+    const bool hb_seen = g_control_heartbeat_seen.load(std::memory_order_acquire);
+    const auto stop_reason = g_last_sv_stop_cause.load(std::memory_order_acquire);
+    ESP_LOGI(kTag,
+             "SVLIFE state=%s stop_cause=%s stop_seq=%lu stop_uptime_ms=%lu "
+             "stop_hb_age_ms=%lu hb_age_ms=%lu hb_seen=%u lease_ms=%lu watchdog=%u "
+             "hb_max_gap_ms=%lu hb_slow_events=%lu",
+             g_running.load(std::memory_order_acquire) ? "RUNNING" : "STOPPED",
+             sv_stop_cause_name(stop_reason),
+             static_cast<unsigned long>(g_sv_stop_seq.load(std::memory_order_acquire)),
+             static_cast<unsigned long>(g_last_sv_stop_ms.load(std::memory_order_acquire)),
+             static_cast<unsigned long>(g_sv_stop_heartbeat_age_ms.load(std::memory_order_acquire)),
+             static_cast<unsigned long>(hb_seen ? now_ms - hb_last : 0U),
+             hb_seen ? 1U : 0U,
+             static_cast<unsigned long>(kControlLeaseTimeoutMs),
+             g_control_watchdog_ready.load(std::memory_order_acquire) ? 1U : 0U,
+             static_cast<unsigned long>(
+                 g_max_heartbeat_gap_ms.load(std::memory_order_acquire)),
+             static_cast<unsigned long>(
+                 g_slow_heartbeat_events.load(std::memory_order_acquire)));
     for (std::size_t index = 0U; index < state.channels.size(); ++index) {
         const auto& channel = state.channels[index];
         ESP_LOGI(kTag,
@@ -407,6 +620,91 @@ void handle_line(char* line) noexcept {
     char* command = strtok_r(line, kTokenDelimiters.data(), &save);
     if (command == nullptr) return;
     uppercase_ascii(command);
+    bool staged = false;
+    if (std::strcmp(command, "CFG") == 0) {
+        command = strtok_r(nullptr, kTokenDelimiters.data(), &save);
+        if (command == nullptr) { g_scenario_txn.reject(); return; }
+        uppercase_ascii(command);
+        if (std::strcmp(command, "BEGIN") == 0) {
+            std::uint64_t token{}, boot{};
+            const bool valid = parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), token, 10) &&
+                parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), boot, 16) &&
+                !has_extra_token(&save) && boot == g_boot_id &&
+                g_scenario_txn.begin(token, g_signal_bank.snapshot(), monotonic_ms(),
+                                     g_running.load(std::memory_order_acquire));
+            if (!valid) { g_scenario_txn.reset(); ESP_LOGE(kTag, "CFG BEGIN rejected"); return; }
+            ESP_LOGI(kTag, "CFG BEGIN token=%llu accepted boot=%016llX",
+                     static_cast<unsigned long long>(token), static_cast<unsigned long long>(g_boot_id));
+            return;
+        }
+        if (std::strcmp(command, "COMMIT") == 0) {
+            std::uint64_t token{}, hash{};
+            if (!parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), token, 10) ||
+                !parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), hash, 16) ||
+                has_extra_token(&save) ||
+                g_scenario_txn.began_running() !=
+                    g_running.load(std::memory_order_acquire)) {
+                g_scenario_txn.reject();
+                ESP_LOGE(kTag, "CFG COMMIT rejected: malformed or changed RUN state"); return;
+            }
+            const auto result = g_scenario_txn.commit(g_signal_bank, token, hash, monotonic_ms());
+            if (result != SvScenarioTransaction::Result::accepted) {
+                ESP_LOGE(kTag, "CFG REJECT token=%llu code=%u",
+                         static_cast<unsigned long long>(token), static_cast<unsigned>(result)); return;
+            }
+            ESP_LOGI(kTag, "CFG COMMITTED token=%llu hash=%016llX generation=%llu boot=%016llX",
+                     static_cast<unsigned long long>(token),
+                     static_cast<unsigned long long>(g_scenario_txn.checksum()),
+                     static_cast<unsigned long long>(g_scenario_txn.applied_generation()),
+                     static_cast<unsigned long long>(g_boot_id));
+            return;
+        }
+        if (std::strcmp(command, "SHOW") == 0) {
+            std::uint64_t token{};
+            if (!parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), token, 10) ||
+                has_extra_token(&save) ||
+                g_scenario_txn.began_running() !=
+                    g_running.load(std::memory_order_acquire) ||
+                !g_scenario_txn.confirm_readback(g_signal_bank, token, monotonic_ms())) {
+                ESP_LOGE(kTag, "CFG READBACK rejected"); return;
+            }
+            ESP_LOGI(kTag, "CFG READBACK token=%llu hash=%016llX generation=%llu boot=%016llX",
+                     static_cast<unsigned long long>(token),
+                     static_cast<unsigned long long>(g_scenario_txn.checksum()),
+                     static_cast<unsigned long long>(g_scenario_txn.applied_generation()),
+                     static_cast<unsigned long long>(g_boot_id));
+            return;
+        }
+        if (std::strcmp(command, "ABORT") == 0) {
+            g_scenario_txn.reset();
+            ESP_LOGI(kTag, "CFG ABORT accepted");
+            return;
+        }
+        staged = std::strcmp(command, "FREQ") == 0 || std::strcmp(command, "SET") == 0 ||
+                 std::strcmp(command, "ENABLE") == 0 || std::strcmp(command, "QUALITY") == 0 ||
+                 std::strcmp(command, "SHAPE") == 0;
+        if (!staged || !g_scenario_txn.staging() ||
+            g_scenario_txn.began_running() !=
+                g_running.load(std::memory_order_acquire)) {
+            g_scenario_txn.reject();
+            ESP_LOGE(kTag, "CFG rejected: no staging or invalid command");
+            return;
+        }
+    }
+
+    // Running 4I4V setpoints must change as ONE committed bank generation.
+    // A legacy single-channel SET would otherwise put mixed old/new rows on
+    // real SV frames. Staged CFG remains allowed while RUNNING.
+    if (!staged && g_running.load(std::memory_order_acquire) &&
+        (std::strcmp(command, "FREQ") == 0 ||
+         std::strcmp(command, "SET") == 0 ||
+         std::strcmp(command, "ENABLE") == 0 ||
+         std::strcmp(command, "QUALITY") == 0 ||
+         std::strcmp(command, "SHAPE") == 0 ||
+         std::strcmp(command, "ZERO") == 0)) {
+        ESP_LOGE(kTag, "Live edit rejected: use atomic CFG transaction while RUNNING");
+        return;
+    }
 
     if (std::strcmp(command, "HEARTBEAT") == 0) {
         if (has_extra_token(&save)) {
@@ -424,8 +722,14 @@ void handle_line(char* line) noexcept {
     }
 
     if (std::strcmp(command, "START") == 0) {
-        if (has_extra_token(&save)) {
-            ESP_LOGE(kTag, "Usage: START");
+        std::uint64_t token{}, boot{}, hash{};
+        if (!parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), token, 10) ||
+            !parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), boot, 16) ||
+            !parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), hash, 16) ||
+            has_extra_token(&save) || boot != g_boot_id ||
+            g_running.load(std::memory_order_acquire) ||
+            !g_scenario_txn.can_start(g_signal_bank, token, hash, monotonic_ms())) {
+            ESP_LOGE(kTag, "START rejected: CFG commit/readback token or boot invalid");
             return;
         }
         if (!arm_control_lease_if_fresh()) {
@@ -433,10 +737,12 @@ void handle_line(char* line) noexcept {
             return;
         }
         profile_control_abort_staging();
+        g_scenario_txn.consume_start();
         g_start_request.store(true, std::memory_order_release);
         g_running.store(true, std::memory_order_release);
         wake_publisher();
-        ESP_LOGI(kTag, "START accepted: profile armed, phase and smpCnt reset at first sample boundary");
+        ESP_LOGI(kTag, "START accepted: profile armed token=%llu hash=%016llX, phase and smpCnt reset at first sample boundary",
+                 static_cast<unsigned long long>(token), static_cast<unsigned long long>(hash));
         return;
     }
     if (std::strcmp(command, "STOP") == 0) {
@@ -444,8 +750,10 @@ void handle_line(char* line) noexcept {
             ESP_LOGE(kTag, "Usage: STOP");
             return;
         }
-        g_running.store(false, std::memory_order_release);
+        const bool was_running = g_running.exchange(false, std::memory_order_acq_rel);
+        g_scenario_txn.reset();
         disarm_control_lease();
+        if (was_running) record_sv_stop(SvStopCause::operator_request, 0U);
         wake_publisher();
         ESP_LOGI(kTag, "STOP accepted: SV transmission suppressed");
         return;
@@ -467,6 +775,7 @@ void handle_line(char* line) noexcept {
         return;
     }
     if (std::strcmp(command, "PROFILE") == 0) {
+        g_scenario_txn.reset();
         handle_profile_command(save);
         return;
     }
@@ -488,18 +797,26 @@ void handle_line(char* line) noexcept {
         char* value_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
         std::uint32_t frequency{};
         if (!parse_u32(value_text, frequency) || has_extra_token(&save)) {
+            if (staged) g_scenario_txn.reject();
             ESP_LOGE(kTag, "Usage: FREQ <millihertz>");
             return;
         }
-        auto state = g_signal_bank.snapshot();
+        auto state = staged ? g_scenario_txn.draft() : g_signal_bank.snapshot();
         state.frequency_millihz = frequency;
-        static_cast<void>(publish_state(state));
+        if (staged) {
+            g_scenario_txn.draft() = state;
+            g_scenario_txn.mark_frequency();
+        } else {
+            g_scenario_txn.reset();
+            static_cast<void>(publish_state(state));
+        }
         return;
     }
 
     if (std::strcmp(command, "SHAPE") == 0) {
         char* shape_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
         if (shape_text == nullptr) {
+            if (staged) g_scenario_txn.reject();
             ESP_LOGE(kTag, "Usage: SHAPE CT <0|1> <dc_permille> <harmonic_permille> <order> <clip_permille>");
             return;
         }
@@ -519,16 +836,23 @@ void handle_line(char* line) noexcept {
             !parse_u32(order_text, order) || !parse_u32(clip_text, clip) || has_extra_token(&save) ||
             enabled > 1U || dc_offset < -3000 || dc_offset > 3000 || harmonic > 3000U ||
             order < 2U || order > 63U || clip < 10U || clip > 10000U) {
+            if (staged) g_scenario_txn.reject();
             ESP_LOGE(kTag, "Usage: SHAPE CT <0|1> <dc_permille> <harmonic_permille> <order> <clip_permille>");
             return;
         }
-        auto state = g_signal_bank.snapshot();
+        auto state = staged ? g_scenario_txn.draft() : g_signal_bank.snapshot();
         state.current_shape.enabled = enabled != 0U;
         state.current_shape.dc_offset_permille = dc_offset;
         state.current_shape.harmonic_permille = harmonic;
         state.current_shape.harmonic_order = static_cast<std::uint8_t>(order);
         state.current_shape.clip_permille = clip;
-        static_cast<void>(publish_state(state));
+        if (staged) {
+            g_scenario_txn.draft() = state;
+            g_scenario_txn.mark_shape();
+        } else {
+            g_scenario_txn.reset();
+            static_cast<void>(publish_state(state));
+        }
         ESP_LOGI(kTag, "CT saturation shape %s: DC=%ld.%u%% H%u=%lu.%u%% clip=%lu.%u%%",
                  enabled ? "enabled" : "disabled",
                  static_cast<long>(dc_offset / 10), static_cast<unsigned>(std::abs(dc_offset % 10)),
@@ -543,17 +867,19 @@ void handle_line(char* line) noexcept {
         std::strcmp(command, "QUALITY") == 0) {
         char* channel_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
         if (channel_text == nullptr) {
+            if (staged) g_scenario_txn.reject();
             ESP_LOGE(kTag, "Channel name is required");
             return;
         }
         uppercase_ascii(channel_text);
         const auto channel_index = live_channel_index(channel_text);
         if (!channel_index.has_value()) {
+            if (staged) g_scenario_txn.reject();
             ESP_LOGE(kTag, "Unknown channel '%s'", channel_text);
             return;
         }
 
-        auto state = g_signal_bank.snapshot();
+        auto state = staged ? g_scenario_txn.draft() : g_signal_bank.snapshot();
         auto& channel = state.channels[*channel_index];
         if (std::strcmp(command, "SET") == 0) {
             char* rms_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
@@ -562,22 +888,31 @@ void handle_line(char* line) noexcept {
             std::int32_t rms{};
             std::int32_t phase{};
             if (!parse_i32(rms_text, rms) || !parse_i32(phase_text, phase)) {
+            if (staged) g_scenario_txn.reject();
                 ESP_LOGE(kTag, "Usage: SET <channel> <rms_wire_counts> <phase_mdeg> [quality]");
                 return;
             }
             std::uint32_t quality{};
             if (quality_text != nullptr && !parse_u32(quality_text, quality)) {
+            if (staged) g_scenario_txn.reject();
                 ESP_LOGE(kTag, "Invalid quality value '%s'", quality_text);
                 return;
             }
             if (has_extra_token(&save)) {
+                if (staged) g_scenario_txn.reject();
                 ESP_LOGE(kTag, "Usage: SET <channel> <rms_wire_counts> <phase_mdeg> [quality]");
                 return;
             }
             channel.rms_counts = rms;
             channel.phase_millidegrees = phase;
             if (quality_text != nullptr) channel.quality = quality;
-            static_cast<void>(publish_state(state));
+            if (staged) {
+                g_scenario_txn.draft() = state;
+                g_scenario_txn.mark_set(*channel_index);
+            } else {
+                g_scenario_txn.reset();
+                static_cast<void>(publish_state(state));
+            }
             return;
         }
 
@@ -585,25 +920,35 @@ void handle_line(char* line) noexcept {
             char* enabled_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
             std::uint32_t enabled{};
             if (!parse_u32(enabled_text, enabled) || enabled > 1U || has_extra_token(&save)) {
+            if (staged) g_scenario_txn.reject();
                 ESP_LOGE(kTag, "Usage: ENABLE <channel> <0|1>");
                 return;
             }
             channel.enabled = enabled != 0U;
-            static_cast<void>(publish_state(state));
+            if (staged) {
+                g_scenario_txn.draft() = state;
+                g_scenario_txn.mark_enabled(*channel_index);
+            } else {
+                g_scenario_txn.reset();
+                static_cast<void>(publish_state(state));
+            }
             return;
         }
 
         char* quality_text = strtok_r(nullptr, kTokenDelimiters.data(), &save);
         std::uint32_t quality{};
         if (!parse_u32(quality_text, quality) || has_extra_token(&save)) {
+            if (staged) g_scenario_txn.reject();
             ESP_LOGE(kTag, "Usage: QUALITY <channel> <uint32/0xhex>");
             return;
         }
         channel.quality = quality;
-        static_cast<void>(publish_state(state));
+        if (staged) g_scenario_txn.draft() = state;
+        else { g_scenario_txn.reset(); static_cast<void>(publish_state(state)); }
         return;
     }
 
+    if (staged) g_scenario_txn.reject();
     ESP_LOGW(kTag, "Unknown command '%s'; type HELP", command);
 }
 
@@ -618,9 +963,16 @@ void live_control_initialize(
     for (std::size_t index = 4U; index < 7U; ++index) initial.channels[index].rms_counts = voltage_rms_counts;
     initial.channels[7].rms_counts = 0;
     static_cast<void>(g_signal_bank.publish(initial));
+    g_scenario_txn.reset();
     g_running.store(false, std::memory_order_release);
     g_start_request.store(false, std::memory_order_release);
     clear_control_session();
+    g_max_heartbeat_gap_ms.store(0U, std::memory_order_release);
+    g_slow_heartbeat_events.store(0U, std::memory_order_release);
+    g_last_sv_stop_cause.store(SvStopCause::none, std::memory_order_release);
+    g_sv_stop_seq.store(0U, std::memory_order_release);
+    g_last_sv_stop_ms.store(0U, std::memory_order_release);
+    g_sv_stop_heartbeat_age_ms.store(0U, std::memory_order_release);
 
     const std::uint64_t random_high = static_cast<std::uint64_t>(esp_random());
     const std::uint64_t random_low = static_cast<std::uint64_t>(esp_random());
@@ -631,11 +983,21 @@ void live_control_initialize(
         esp_timer_create_args_t timer_args{};
         timer_args.callback = &control_lease_timer_callback;
         timer_args.name = "ar_ctrl_lease";
-        const auto result = esp_timer_create(&timer_args, &g_control_lease_timer);
-        if (result != ESP_OK) {
-            g_control_lease_timer = nullptr;
-            ESP_LOGE(kTag, "Unable to create control-session lease timer: %d", static_cast<int>(result));
+        esp_err_t result = esp_timer_create(&timer_args, &g_control_lease_timer);
+        if (result == ESP_OK) {
+            result = esp_timer_start_periodic(
+                g_control_lease_timer, kControlWatchdogPeriodUs);
         }
+        if (result != ESP_OK) {
+            if (g_control_lease_timer != nullptr) {
+                static_cast<void>(esp_timer_delete(g_control_lease_timer));
+                g_control_lease_timer = nullptr;
+            }
+            ESP_LOGE(kTag, "Unable to start periodic control lease watchdog: %d",
+                     static_cast<int>(result));
+        }
+        g_control_watchdog_ready.store(
+            g_control_lease_timer != nullptr, std::memory_order_release);
     }
 }
 
@@ -644,9 +1006,10 @@ void live_control_bind_publisher_task(const TaskHandle_t task) noexcept {
 }
 
 void live_control_force_stop() noexcept {
-    g_running.store(false, std::memory_order_release);
+    const bool was_running = g_running.exchange(false, std::memory_order_acq_rel);
     g_start_request.store(false, std::memory_order_release);
     clear_control_session();
+    if (was_running) record_sv_stop(SvStopCause::runtime_fault, 0U);
     wake_publisher();
     ESP_LOGW(kTag, "STOP accepted: SV transmission suppressed by fail-closed runtime");
 }

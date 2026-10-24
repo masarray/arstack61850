@@ -101,6 +101,86 @@ def main():
             "github.event.pull_request.draft && "
             "contains(github.event.pull_request.body, '[run-phase-guard]') }}"
         )
+        # Limited exact-head artifact exceptions: consolidated Draft #286
+        # and the isolated physically-observed-source recovery Draft #288.
+        # No general Draft PR heavy-build bypass.
+        preview_gate = (
+            "    if: ${{ github.event_name != 'pull_request' || "
+            "!github.event.pull_request.draft || "
+            "(inputs.phase_sync_preview == true && "
+            "(github.event.pull_request.head.ref == "
+            "'feat/ptp-source-policy-fsm-20261022' || "
+            "github.event.pull_request.head.ref == "
+            "'fix/autolive-from-pcap-proven-7c95-20261023')) }}"
+        )
+        # One isolated M3.A Draft may compile its firmware and GCC/Clang
+        # timing regressions. All other Draft jobs remain guarded.
+        m3a_ptp_gate = (
+            "    if: ${{ github.event_name != 'pull_request' || "
+            "!github.event.pull_request.draft || "
+            "github.event.pull_request.head.ref == "
+            "'feat/m3a-persistent-sv-grid-20261023' }}"
+        )
+        m3a_firmware_gate = preview_gate.replace(
+            "'fix/autolive-from-pcap-proven-7c95-20261023')) }}",
+            "'fix/autolive-from-pcap-proven-7c95-20261023' || "
+            "github.event.pull_request.head.ref == "
+            "'feat/m3a-persistent-sv-grid-20261023')) || "
+            "github.event.pull_request.head.ref == "
+            "'feat/m3a-persistent-sv-grid-20261023' }}"
+        )
+        # This Draft M3.B is stacked on M3.A; only these two exact
+        # head branches may run expensive portable/firmware validation.
+        m3b_ptp_gate = m3a_ptp_gate.replace(
+            "github.event.pull_request.head.ref == 'feat/m3a-persistent-sv-grid-20261023'",
+            "(github.event.pull_request.head.ref == 'feat/m3a-persistent-sv-grid-20261023' || "
+            "github.event.pull_request.head.ref == 'feat/m3b-boot-timebase-supervisor-20261023')"
+        )
+        m3b_firmware_gate = m3a_firmware_gate.replace(
+            "'feat/m3a-persistent-sv-grid-20261023')) ||",
+            "'feat/m3a-persistent-sv-grid-20261023' || github.event.pull_request.head.ref == "
+            "'feat/m3b-boot-timebase-supervisor-20261023')) ||"
+        ).replace(
+            "'feat/m3a-persistent-sv-grid-20261023' }}",
+            "'feat/m3a-persistent-sv-grid-20261023' || github.event.pull_request.head.ref == "
+            "'feat/m3b-boot-timebase-supervisor-20261023' }}"
+        )
+        # Stacked M3.C exact-head PTP/ESP CI; all other Drafts stay gated.
+        m3c_ptp_gate = m3b_ptp_gate.replace(
+            "'feat/m3b-boot-timebase-supervisor-20261023') }}",
+            "'feat/m3b-boot-timebase-supervisor-20261023' || "
+            "github.event.pull_request.head.ref == "
+            "'feat/m3c-safe-external-gm-handover-20261023') }}"
+        )
+        m3c_firmware_gate = m3b_firmware_gate.replace(
+            "'feat/m3b-boot-timebase-supervisor-20261023')) ||",
+            "'feat/m3b-boot-timebase-supervisor-20261023' || "
+            "github.event.pull_request.head.ref == "
+            "'feat/m3c-safe-external-gm-handover-20261023')) ||"
+        ).replace(
+            "'feat/m3b-boot-timebase-supervisor-20261023' }}",
+            "'feat/m3b-boot-timebase-supervisor-20261023' || "
+            "github.event.pull_request.head.ref == "
+            "'feat/m3c-safe-external-gm-handover-20261023' }}"
+        )
+        # M3.D remains a Draft; permit only its exact stacked head.
+        m3d_ptp_gate = m3c_ptp_gate.replace(
+            "'feat/m3c-safe-external-gm-handover-20261023') }}",
+            "'feat/m3c-safe-external-gm-handover-20261023' || "
+            "github.event.pull_request.head.ref == "
+            "'feat/m3d-ptp-advanced-policy-diagnostics-20261024') }}"
+        )
+        m3d_firmware_gate = m3c_firmware_gate.replace(
+            "'feat/m3c-safe-external-gm-handover-20261023')) ||",
+            "'feat/m3c-safe-external-gm-handover-20261023' || "
+            "github.event.pull_request.head.ref == "
+            "'feat/m3d-ptp-advanced-policy-diagnostics-20261024')) ||"
+        ).replace(
+            "'feat/m3c-safe-external-gm-handover-20261023' }}",
+            "'feat/m3c-safe-external-gm-handover-20261023' || "
+            "github.event.pull_request.head.ref == "
+            "'feat/m3d-ptp-advanced-policy-diagnostics-20261024' }}"
+        )
         for index, boundary in enumerate(boundaries):
             job_name = boundary.group(1)
             block_end = (
@@ -110,6 +190,16 @@ def main():
             block = jobs[boundary.end():block_end]
             if_lines = re.findall(r"(?m)^    if: .+$", block)
             if if_lines == [gate]:
+                continue
+            if name == "esp32p4-smv-injector.yml" and job_name == "build-esp32p4":
+                assert if_lines == [m3d_firmware_gate], (
+                    name, job_name, "unexpected Draft firmware bypass"
+                )
+                continue
+            if name == "ptp-core-ci.yml" and job_name == "portable-ptp":
+                assert if_lines == [m3d_ptp_gate], (
+                    name, job_name, "unexpected Draft PTP regression bypass"
+                )
                 continue
             if name == "esp32p4-ptp-lab.yml" and job_name == "phase-guard-checkpoint":
                 assert if_lines == [phase_gate], (name, job_name, "unsafe opt-in")

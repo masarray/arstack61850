@@ -24,6 +24,7 @@
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -76,7 +77,8 @@ ar::iec61850::sampled_values::SampledValueAsdu make_reference_asdu() {
         2U,
         std::uint16_t{4000U},
         std::uint16_t{1U},
-        from_hex("0000006400000001000000C800000003")};
+        from_hex("0000006400000001000000C800000003"),
+        std::nullopt};
 }
 
 void sampled_values_pdu_matches_csharp_golden_vector() {
@@ -468,6 +470,50 @@ void compiled_binary_profile_activates_only_supported_4i4v_device_layout() {
     CHECK(runtime.app_id == 0x4001U);
     CHECK(runtime.sv_id[0] == 'S' && runtime.sv_id[2] == '2');
     CHECK(runtime.include_data_set && runtime.include_sample_rate);
+    CHECK(runtime.wire_sample_rate == 4800U);
+    CHECK(runtime.wire_sample_mode == 1U);
+    for (const auto nominal_hz : {50U, 60U}) {
+        auto per_period = device;
+        per_period.sampling_basis = SvSampleMode::samples_per_period;
+        per_period.configured_sample_rate = 80U;
+        per_period.frame_rate_hz = 80U * nominal_hz;
+        per_period.sample_counter_modulus = static_cast<std::uint16_t>(80U * nominal_hz);
+        const auto bytes_needed = SvDeviceProfileBinaryCodec::encoded_size(per_period);
+        CHECK(bytes_needed.has_value());
+        std::vector<std::uint8_t> rate_bytes(*bytes_needed);
+        CHECK(SvDeviceProfileBinaryCodec::encode_into(per_period, rate_bytes).success());
+        RuntimePublisherProfile period_runtime{};
+        CHECK(decode_binary_runtime_profile(rate_bytes, period_runtime) ==
+              BinaryRuntimeProfileStatus::ok);
+        CHECK(period_runtime.wire_sample_rate == 80U);
+        CHECK(period_runtime.wire_sample_mode == 0U);
+        CHECK(period_runtime.publisher_rate_hz == 80U * nominal_hz);
+        SampledValueAsdu asdu;
+        asdu.sv_id = "ARSTACK_SV01";
+        asdu.sample_rate = period_runtime.wire_sample_rate;
+        asdu.sample_mode = period_runtime.wire_sample_mode;
+        asdu.sample_payload.resize(64U);
+        const auto wire = SampledValuesPduCodec::encode(SampledValuesPdu{{asdu}});
+        SampledValuesPdu decoded_wire{};
+        CHECK(SampledValuesPduCodec::try_decode(wire, decoded_wire));
+        CHECK(decoded_wire.asdus[0].sample_rate == 80U);
+        CHECK(decoded_wire.asdus[0].sample_mode == 0U);
+        per_period.frame_rate_hz += 10U;
+        CHECK(SvDeviceProfileBinaryCodec::encode_into(per_period, rate_bytes).success());
+        CHECK(decode_binary_runtime_profile(rate_bytes, period_runtime) ==
+              BinaryRuntimeProfileStatus::unsupported_device_capability);
+    }
+    auto legacy = device;
+    legacy.profile_family = SvProfileFamily::legacy_9_2le;
+    legacy.asdu_options.sample_rate = false;
+    const auto legacy_len = SvDeviceProfileBinaryCodec::encoded_size(legacy);
+    CHECK(legacy_len.has_value());
+    std::vector<std::uint8_t> legacy_bytes(*legacy_len);
+    CHECK(SvDeviceProfileBinaryCodec::encode_into(legacy, legacy_bytes).success());
+    RuntimePublisherProfile legacy_runtime{};
+    CHECK(decode_binary_runtime_profile(legacy_bytes, legacy_runtime) ==
+          BinaryRuntimeProfileStatus::ok);
+    CHECK(!legacy_runtime.include_sample_rate);
     CHECK(runtime.data_set_reference[0] == 'D');
     const auto previous_generation = runtime.generation;
     chunks.abort();
@@ -638,11 +684,42 @@ void quality_and_generic_payload_diagnostics_preserve_wire_evidence() {
     CHECK(trailing.trailing_bytes == ByteVector({0xAAU, 0xBBU}));
 }
 
+// Ed.2.1 gmIdentity is exactly context-specific primitive tag 9 (0x89),
+// eight octets in PTP GrandmasterIdentity network byte order.
+void sampled_values_gm_identity_matches_ptp_and_rejects_truncation() {
+    using namespace ar::iec61850::sampled_values;
+    auto asdu = make_reference_asdu();
+    constexpr std::array<std::uint8_t, 8> gm{
+        0xE8U, 0xF6U, 0x0AU, 0xFFU, 0xFEU, 0xE0U, 0xC5U, 0x3FU};
+    asdu.gm_identity = gm;
+    const auto encoded = SampledValuesPduCodec::encode(SampledValuesPdu{{asdu}});
+    const std::array<std::uint8_t, 10> expected{
+        0x89U, 0x08U, 0xE8U, 0xF6U, 0x0AU,
+        0xFFU, 0xFEU, 0xE0U, 0xC5U, 0x3FU};
+    const auto tag = std::search(
+        encoded.begin(), encoded.end(), expected.begin(), expected.end());
+    CHECK(tag != encoded.end());
+    SampledValuesPdu decoded{};
+    CHECK(SampledValuesPduCodec::try_decode(encoded, decoded));
+    CHECK(decoded.asdus.size() == 1U);
+    CHECK(decoded.asdus[0].gm_identity.has_value());
+    CHECK(*decoded.asdus[0].gm_identity == gm);
+    auto truncated_identity = encoded;
+    const auto tag_offset = static_cast<std::size_t>(tag - encoded.begin());
+    truncated_identity[tag_offset + 1U] = 7U;
+    CHECK(!SampledValuesPduCodec::try_decode(truncated_identity, decoded));
+    asdu.gm_identity.reset();
+    const auto legacy = SampledValuesPduCodec::encode(SampledValuesPdu{{asdu}});
+    CHECK(std::search(legacy.begin(), legacy.end(),
+                      expected.begin(), expected.end()) == legacy.end());
+}
+
 } // namespace
 
 int main() {
     const std::vector<std::pair<std::string, std::function<void()>>> tests{
         {"SV PDU golden vector", sampled_values_pdu_matches_csharp_golden_vector},
+        {"SV Ed2.1 GM source identity", sampled_values_gm_identity_matches_ptp_and_rejects_truncation},
         {"SV Ethernet frame", sampled_values_frame_round_trips_vlan_process_bus_header},
         {"SV malformed input", sampled_values_codec_handles_multiple_asdus_and_rejects_malformed_input},
         {"SV compiled device profile binary", compiled_device_profile_binary_is_canonical_and_integrity_checked},

@@ -19,13 +19,21 @@ add_executable(ptp_profile_tests
 target_link_libraries(ptp_profile_tests PRIVATE ptp_profile_core)
 target_compile_features(ptp_profile_tests PRIVATE cxx_std_20)
 
+add_executable(ptp_power_profile_tests
+    "${ARSTACK_ROOT}/tests/test_ptp_power_profile.cpp")
+target_link_libraries(ptp_power_profile_tests PRIVATE ptp_profile_core)
+target_compile_features(ptp_power_profile_tests PRIVATE cxx_std_20)
+
 add_executable(ptp_runtime_tests
     "${ARSTACK_ROOT}/tests/test_ptp_runtime.cpp")
 target_link_libraries(ptp_runtime_tests PRIVATE ptp_profile_core)
 target_compile_features(ptp_runtime_tests PRIVATE cxx_std_20)
 
 add_executable(smp_synch_policy_tests
-    "${ARSTACK_ROOT}/tests/test_smp_synch_policy.cpp")
+    "${ARSTACK_ROOT}/tests/test_smp_synch_policy.cpp"
+    "${ARSTACK_ROOT}/embedded/esp32p4_smv_injector/main/smp_synch_lab.cpp")
+target_include_directories(smp_synch_policy_tests PRIVATE
+    "${ARSTACK_ROOT}/embedded/esp32p4_smv_injector/main")
 target_link_libraries(smp_synch_policy_tests PRIVATE ptp_profile_core)
 target_compile_features(smp_synch_policy_tests PRIVATE cxx_std_20)
 
@@ -39,6 +47,46 @@ add_executable(ptp_discipline_tests
 target_link_libraries(ptp_discipline_tests PRIVATE ptp_profile_core)
 target_compile_features(ptp_discipline_tests PRIVATE cxx_std_20)
 
+add_executable(ptp_control_cancellation_tests
+    "${ARSTACK_ROOT}/tests/test_ptp_control_cancellation.cpp")
+target_link_libraries(ptp_control_cancellation_tests PRIVATE ptp_profile_core)
+target_compile_features(ptp_control_cancellation_tests PRIVATE cxx_std_20)
+
+add_executable(ptp_emac_role_ownership_tests
+    "${ARSTACK_ROOT}/tests/test_ptp_emac_role_ownership.cpp")
+target_link_libraries(ptp_emac_role_ownership_tests PRIVATE ptp_profile_core)
+target_compile_features(ptp_emac_role_ownership_tests PRIVATE cxx_std_20)
+
+add_executable(ptp_canonical_authority_tests
+    "${ARSTACK_ROOT}/tests/test_ptp_canonical_authority.cpp")
+target_link_libraries(ptp_canonical_authority_tests PRIVATE ptp_profile_core)
+target_compile_features(ptp_canonical_authority_tests PRIVATE cxx_std_20)
+
+add_executable(ptp_receiver_clock_authority_tests
+    "${ARSTACK_ROOT}/tests/test_ptp_receiver_clock_authority.cpp")
+target_link_libraries(ptp_receiver_clock_authority_tests PRIVATE ptp_profile_core)
+target_compile_features(ptp_receiver_clock_authority_tests PRIVATE cxx_std_20)
+
+add_executable(sv_ptp_clock_lease_tests
+    "${ARSTACK_ROOT}/tests/test_sv_ptp_clock_lease.cpp")
+target_link_libraries(sv_ptp_clock_lease_tests PRIVATE ptp_profile_core)
+target_compile_features(sv_ptp_clock_lease_tests PRIVATE cxx_std_20)
+
+add_executable(sv_ptp_phase_authority_tests
+    "${ARSTACK_ROOT}/tests/test_sv_ptp_phase_authority.cpp")
+target_link_libraries(sv_ptp_phase_authority_tests PRIVATE ptp_profile_core)
+target_compile_features(sv_ptp_phase_authority_tests PRIVATE cxx_std_20)
+
+add_executable(sv_tx_egress_evidence_tests
+    "${ARSTACK_ROOT}/tests/test_sv_tx_egress_evidence.cpp")
+target_link_libraries(sv_tx_egress_evidence_tests PRIVATE ptp_profile_core)
+target_compile_features(sv_tx_egress_evidence_tests PRIVATE cxx_std_20)
+
+add_executable(sv_ptp_epoch_tests
+    "${ARSTACK_ROOT}/tests/test_sv_ptp_epoch.cpp")
+target_link_libraries(sv_ptp_epoch_tests PRIVATE ptp_profile_core)
+target_compile_features(sv_ptp_epoch_tests PRIVATE cxx_std_20)
+
 add_executable(ptp_p2_hardening_tests
     "${ARSTACK_ROOT}/tests/test_ptp_p2_hardening.cpp")
 target_link_libraries(ptp_p2_hardening_tests PRIVATE ptp_profile_core)
@@ -49,7 +97,7 @@ add_executable(ptp_profile_analyze
 target_link_libraries(ptp_profile_analyze PRIVATE ptp_profile_core)
 target_compile_features(ptp_profile_analyze PRIVATE cxx_std_20)
 
-foreach(target IN ITEMS ptp_profile_core ptp_profile_tests ptp_runtime_tests smp_synch_policy_tests smp_synch_wire_offset_tests ptp_discipline_tests ptp_p2_hardening_tests ptp_profile_analyze)
+foreach(target IN ITEMS ptp_profile_core ptp_profile_tests ptp_power_profile_tests ptp_runtime_tests smp_synch_policy_tests smp_synch_wire_offset_tests ptp_discipline_tests sv_ptp_epoch_tests ptp_control_cancellation_tests ptp_emac_role_ownership_tests ptp_canonical_authority_tests ptp_receiver_clock_authority_tests sv_ptp_clock_lease_tests sv_ptp_phase_authority_tests sv_tx_egress_evidence_tests ptp_p2_hardening_tests ptp_profile_analyze)
     if(MSVC)
         target_compile_options(${target} PRIVATE /W4 /WX /permissive-)
     else()
@@ -60,9 +108,18 @@ endforeach()
 
 enable_testing()
 add_test(NAME ptp_profile_tests COMMAND ptp_profile_tests)
+add_test(NAME ptp_power_profile_tests COMMAND ptp_power_profile_tests)
 add_test(NAME ptp_runtime_tests COMMAND ptp_runtime_tests)
 add_test(NAME smp_synch_policy_tests COMMAND smp_synch_policy_tests)
 add_test(NAME smp_synch_wire_offset_tests COMMAND smp_synch_wire_offset_tests)
 add_test(NAME ptp_discipline_tests COMMAND ptp_discipline_tests)
+add_test(NAME sv_ptp_epoch_tests COMMAND sv_ptp_epoch_tests)
+add_test(NAME ptp_control_cancellation_tests COMMAND ptp_control_cancellation_tests)
+add_test(NAME ptp_emac_role_ownership_tests COMMAND ptp_emac_role_ownership_tests)
+add_test(NAME ptp_canonical_authority_tests COMMAND ptp_canonical_authority_tests)
+add_test(NAME ptp_receiver_clock_authority_tests COMMAND ptp_receiver_clock_authority_tests)
+add_test(NAME sv_ptp_clock_lease_tests COMMAND sv_ptp_clock_lease_tests)
+add_test(NAME sv_ptp_phase_authority_tests COMMAND sv_ptp_phase_authority_tests)
+add_test(NAME sv_tx_egress_evidence_tests COMMAND sv_tx_egress_evidence_tests)
 add_test(NAME ptp_p2_hardening_tests COMMAND ptp_p2_hardening_tests)
 add_test(NAME ptp_profile_analyze_help COMMAND ptp_profile_analyze --help)

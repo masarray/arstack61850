@@ -15,38 +15,83 @@ SurfacePanel {
     property string uiFont: "Inter"
     property string monoFont: "Inter"
     property bool compact: false
-    property bool startQueued: false
+    // Firmware transaction is the single source of truth. UI timers and
+    // unrelated PTP/serial errors must not bounce the injection START button.
+    // Operator intent may arrive before first profile synchronization ends.
+    // One bounded, boot-bound pending click is consumed as soon as the SAME
+    // verified board enters READY. Never persist/replay across reconnect.
+    property bool startIntentPending: false
+    property string startIntentBoot: ""
+    property double startIntentDeadline: 0
+    // A RUNNING live CFG transaction is not a START. Keep 4I4V editors
+    // interactive while firmware verifies it; new edits coalesce and drain.
+    readonly property bool startQueued: Boolean(
+        startIntentPending || (ribbon.device && ribbon.device.scenarioApplying &&
+                               !ribbon.device.running))
     Timer {
-        id: startWatchdog
-        interval: 8000
+        id: startIntentExpiry
+        interval: 6500
         repeat: false
         onTriggered: {
-            if (!ribbon.startQueued) return
-            ribbon.startQueued = false
-            controller.pendingApply = true
-            controller.showMessage("START not confirmed by ESP32-P4. Check board status.", true)
+            if (!ribbon.startIntentPending) return
+            ribbon.cancelStartIntent()
+            controller.showMessage(
+                "START not sent: device preparation timed out. Check board/profile state and retry.", true)
         }
+    }
+    function cancelStartIntent() {
+        startIntentPending = false
+        startIntentBoot = ""
+        startIntentDeadline = 0
+        startIntentExpiry.stop()
+    }
+    function queueFirstStart() {
+        // Only a verified, physically connected board may receive deferred
+        // START. Never arm for offline, firmware update or reconnect.
+        if (!device.deviceVerified || !device.connected ||
+            smartSession.updatingFirmware || smartSession.firmwareUpdateRequired ||
+            smartSession.firmwareInstallRequired) return false
+        const boot = String(device.bootId)
+        if (!boot || boot === "undefined") return false
+        startIntentBoot = boot
+        startIntentPending = true
+        startIntentDeadline = Date.now() + 6500
+        startIntentExpiry.restart()
+        controller.showMessage("START queued — waiting for 4I+4V profile readiness on this board.", false)
+        return true
+    }
+    function tryConsumeFirstStart() {
+        if (!startIntentPending || !smartSession.startReady) return
+        const boot = String(device.bootId)
+        if (!device.deviceVerified || !device.connected || boot !== startIntentBoot ||
+            Date.now() > startIntentDeadline) {
+            cancelStartIntent()
+            return
+        }
+        const requestedBoot = startIntentBoot
+        cancelStartIntent()
+        Qt.callLater(function() {
+            // Prevent a reconnect between readiness notification and dispatch.
+            if (device.deviceVerified && device.connected &&
+                String(device.bootId) === requestedBoot && smartSession.startReady &&
+                !device.running && !device.scenarioApplying)
+                ribbon.requestStart()
+        })
+    }
+    Connections {
+        target: smartSession
+        function onStateChanged() { ribbon.tryConsumeFirstStart() }
     }
     Connections {
         target: ribbon.device
         function onRunningChanged() {
-            if (ribbon.device.running) {
-                ribbon.startQueued = false
-                startWatchdog.stop()
-                controller.pendingApply = false
-            }
-        }
-        function onLastErrorChanged() {
-            if (!ribbon.startQueued) return
-            ribbon.startQueued = false
-            startWatchdog.stop()
-            controller.pendingApply = true
+            if (ribbon.device.running) controller.pendingApply = false
         }
         function onDeviceVerifiedChanged() {
-            if (ribbon.device.deviceVerified) return
-            ribbon.startQueued = false
-            startWatchdog.stop()
-            controller.pendingApply = true
+            if (!ribbon.device.deviceVerified) {
+                controller.pendingApply = true
+                ribbon.cancelStartIntent()
+            }
         }
     }
     property bool updatePromptDeferred: false
@@ -59,7 +104,10 @@ SurfacePanel {
     readonly property bool firmwareGateActive:
         smartSession.firmwareInstallRequired || smartSession.firmwareUpdateRequired ||
         smartSession.updatingFirmware || smartSession.updateNeedsBootloaderHelp
-    readonly property bool injectionRunning: smartSession.state === "RUNNING"
+    // Board readback (not high-level session presentation state) owns the
+    // injection control. SETUP ERROR, update advisory or profile recovery must
+    // never visually unlatch STOP while actual SV remains RUNNING on wire.
+    readonly property bool injectionRunning: Boolean(ribbon.device && ribbon.device.running)
     readonly property int firmwareStageIndex: {
         switch (smartSession.firmwareUpdateStage) {
         case "prepare":
@@ -87,8 +135,12 @@ SurfacePanel {
         category: "operator-ui"
         property string lastEngineeringUrl: ""
         property int lastSelectedIndex: 0
-        property bool phasorVisible: false
-        property bool waveformVisible: false
+        property bool phasorVisible: true
+        property bool waveformVisible: true
+        // Earlier builds silently started with both charts hidden. Bump the
+        // dock preference schema once so existing installations also regain
+        // the operator's essential phasor and waveform workspaces.
+        property int dockLayoutVersion: 0
         property bool telemetryVisible: true
         property bool phasorDetached: false
         property bool waveformDetached: false
@@ -103,6 +155,13 @@ SurfacePanel {
     }
 
     Component.onCompleted: {
+        if (operatorSettings.dockLayoutVersion < 2) {
+            operatorSettings.phasorVisible = true
+            operatorSettings.waveformVisible = true
+            operatorSettings.phasorDetached = false
+            operatorSettings.waveformDetached = false
+            operatorSettings.dockLayoutVersion = 2
+        }
         controller.phasorDockVisible = operatorSettings.phasorVisible
         controller.waveformDockVisible = operatorSettings.waveformVisible
         controller.telemetryDockVisible = operatorSettings.telemetryVisible
@@ -212,15 +271,29 @@ SurfacePanel {
         }
     }
 
+    // Never display green READY immediately after an unsolicited board STOP.
+    // The board-reported reason is distinct from the physical PTP role.
+    readonly property bool unexpectedSvStop: Boolean(
+        ribbon.device && ribbon.device.deviceVerified &&
+        !ribbon.device.running && ribbon.device.svStopReason.length > 0 &&
+        !ribbon.startQueued)
     readonly property string displayState: {
+        if (ribbon.injectionRunning && smartSession.state !== "RUNNING")
+            return "SV still running · Studio session warning"
+        if (ribbon.unexpectedSvStop) {
+            if (ribbon.device.svStopReason === "LEASE_EXPIRED") return "SV stopped · USB control lease expired"
+            if (ribbon.device.svStopReason === "RUNTIME_FAULT") return "SV stopped · board runtime fault"
+            return "SV stopped · checking board cause"
+        }
         if (smartSession.state === "WAITING FOR DEVICE") return "Connect device"
         if (smartSession.state === "DEVICE FOUND" || smartSession.state === "CONNECTING") return "Connecting"
         if (smartSession.state === "CHECKING DEVICE") return "Checking device"
-        if (smartSession.state === "FIRMWARE REQUIRED") return "Firmware required"
+        if (smartSession.state === "FIRMWARE RECOVERY") return "Firmware status unknown"
         if (smartSession.state === "FIRMWARE UPDATE") return "Firmware update available"
         if (smartSession.state === "UPDATING FIRMWARE") return "Installing firmware"
         if (smartSession.state === "UPDATE NEEDS BOOT") return "Download mode required"
         if (smartSession.state === "PREPARING 4I+4V") return "Preparing"
+        if (smartSession.state === "RECOVERING PROFILE") return "Retrying profile"
         if (smartSession.state === "READY") return smartSession.firmwareUpdateAvailable ? "Ready · update available" : "Ready to inject"
         if (smartSession.state === "RUNNING") return "Injection running"
         if (smartSession.state === "PROFILE BLOCKED") return "Profile unavailable"
@@ -230,9 +303,13 @@ SurfacePanel {
     }
 
     readonly property color smartStateColor: {
-        if (smartSession.state === "RUNNING" || smartSession.state === "READY") return theme.green
+        if (ribbon.unexpectedSvStop) return theme.red
+        if (ribbon.injectionRunning)
+            return smartSession.state === "RUNNING" ? theme.green : theme.amber
+        if (smartSession.state === "READY") return theme.green
         if (smartSession.state === "CONNECTING" || smartSession.state === "CHECKING DEVICE" ||
-            smartSession.state === "FIRMWARE REQUIRED" || smartSession.state === "PREPARING 4I+4V" ||
+            smartSession.state === "FIRMWARE RECOVERY" || smartSession.state === "PREPARING 4I+4V" ||
+            smartSession.state === "RECOVERING PROFILE" ||
             smartSession.state === "FIRMWARE UPDATE" || smartSession.state === "UPDATING FIRMWARE" ||
             smartSession.state === "UPDATE NEEDS BOOT") return theme.amber
         if (smartSession.state === "DEVICE FOUND") return theme.accent
@@ -243,12 +320,13 @@ SurfacePanel {
 
     function startReason() {
         if (ribbon.injectionRunning) return "SMV output is already running."
-        if (smartSession.firmwareInstallRequired) return "Install ARStack firmware before starting injection."
+        if (smartSession.firmwareInstallRequired) return "ARStack identity not verified. Retry connection or use optional firmware recovery."
         if (smartSession.firmwareUpdateRequired) return "Update firmware before starting injection."
         if (smartSession.updatingFirmware) return "Firmware installation is in progress."
         if (smartSession.updateNeedsBootloaderHelp) return "Complete Download mode recovery before starting injection."
         if (smartSession.state === "CONNECTING" || smartSession.state === "CHECKING DEVICE") return "Studio is identifying the device automatically."
         if (smartSession.state === "PREPARING 4I+4V") return "Studio is preparing the default 4I+4V injection automatically."
+        if (smartSession.state === "RECOVERING PROFILE") return smartSession.statusText
         if (smartSession.state === "PROFILE SYNC ERROR") return smartSession.statusText
         if (smartSession.state === "WAITING FOR DEVICE") return "Connect ESP32-P4; Studio will detect it automatically."
         return smartSession.statusText
@@ -278,26 +356,43 @@ SurfacePanel {
             return
         }
         if (!smartSession.startReady) {
-            controller.showMessage(ribbon.startReason(), false)
+            // A first click during same-device profile preparation is retained
+            // briefly and dispatched once READY. Other errors are explained.
+            if (smartSession.state === "PREPARING 4I+4V" ||
+                smartSession.state === "RECOVERING PROFILE" ||
+                smartSession.state === "DEVICE FOUND") {
+                if (ribbon.queueFirstStart()) return
+            }
+            controller.showMessage("START waiting: " + ribbon.startReason(), true)
             return
         }
-        const accepted = controller.pendingApply
-            ? smartSession.requestStartWithScenario(controller.startScenarioSnapshot())
-            : smartSession.requestStart()
+        // A START always transmits the current 4I+4V table snapshot.
+        // A previous run may have cleared pendingApply; a bare START could
+        // then repeat old board angles while Studio displays edited values.
+        // Validate/flush the visible 4I+4V table before entering the
+        // exclusive device START transaction; no stale debounced angle.
+        const scenario = controller.startScenarioSnapshot()
+        if (!scenario) return
+        const accepted = smartSession.requestStartWithScenario(scenario)
         if (!accepted) {
             controller.pendingApply = true
             controller.showMessage("Start rejected. Check device status.", true)
-        } else {
-            // A successful queue call is NOT the board START ACK.
-            // Keep the draft dirty until RUNNING evidence arrives.
-            ribbon.startQueued = true
-            startWatchdog.restart()
         }
     }
 
     function requestStop() {
-        if (ribbon.injectionRunning && !smartSession.requestStop())
-            controller.showMessage("Studio could not stop the current device session.", true)
+        if (ribbon.startIntentPending) {
+            ribbon.cancelStartIntent()
+            controller.showMessage("Pending START cancelled.", false)
+            return
+        }
+        // A pending CFG transaction can progress to START: Stop must remain
+        // actionable before RUNNING telemetry, not only after it.
+        if (!ribbon.injectionRunning && !ribbon.startQueued) return
+        if (!smartSession.requestStop()) {
+            controller.showMessage("Studio could not cancel the current device session.", true)
+            return
+        }
     }
 
     function openEngineeringDialog() {
@@ -340,7 +435,7 @@ SurfacePanel {
         controller.phasorDetached = false
         controller.waveformDetached = false
         controller.phasorDockVisible = true
-        controller.waveformDockVisible = false
+        controller.waveformDockVisible = true
         controller.telemetryDockVisible = true
         controller.telemetryExpanded = false
         controller.showMessage("Dock layout reset.", false)
@@ -386,7 +481,7 @@ SurfacePanel {
             spacing: 12
             Label {
                 Layout.fillWidth: true
-                text: "ESP32-P4 detected. Install ARStack firmware to inject SV."
+                text: "No ARStack identity was verified on the manually selected port. This does NOT prove firmware is missing. Retry connection first; optional installation requires a ROM chip check."
                 color: ribbon.theme.textSoft
                 font.family: ribbon.uiFont
                 font.pixelSize: 11

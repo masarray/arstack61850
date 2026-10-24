@@ -18,6 +18,8 @@ void ptp_receiver_stop() noexcept;
 
 /** True only after hardware PTP + RX timestamp callback readiness completes. */
 [[nodiscard]] bool ptp_receiver_is_running() noexcept;
+// Unlike READY, this includes START pending, failure cleanup and async STOP.
+[[nodiscard]] bool ptp_receiver_runtime_active() noexcept;
 
 [[nodiscard]] bool ptp_receiver_get_status(ar_ptp_lab_status_t& status) noexcept;
 

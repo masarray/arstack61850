@@ -8,6 +8,7 @@
 #include <QElapsedTimer>
 #include <QSerialPort>
 #include <QSerialPortInfo>
+#include <QSettings>
 #include <QThread>
 #include <QTimer>
 
@@ -47,6 +48,10 @@ void DeviceIoWorker::initialize() {
     verificationTimer_ = new QTimer(this);
     presenceTimer_ = new QTimer(this);
     heartbeatTimer_ = new QTimer(this);
+    writeGapTimer_ = new QTimer(this);
+    writeGapTimer_->setSingleShot(true);
+    writeGapTimer_->setInterval(serialCommandGapMs());
+    connect(writeGapTimer_, &QTimer::timeout, this, &DeviceIoWorker::pumpWriteQueue);
 
     verificationTimer_->setSingleShot(true);
     verificationTimer_->setInterval(identityRetryIntervalMs());
@@ -72,8 +77,7 @@ void DeviceIoWorker::initialize() {
             heartbeatTimer_->stop();
             return;
         }
-        static_cast<void>(enqueueCommandsInternal(
-            {QStringLiteral("HEARTBEAT")}, true, false, false));
+        queuePriorityHeartbeat();
     });
 
     connect(serial_, &QSerialPort::readyRead, this, &DeviceIoWorker::processReadyRead);
@@ -116,7 +120,9 @@ void DeviceIoWorker::shutdown(const bool requestSvStop, const bool requestPtpSto
     if (verificationTimer_ != nullptr) verificationTimer_->stop();
     if (presenceTimer_ != nullptr) presenceTimer_->stop();
     if (heartbeatTimer_ != nullptr) heartbeatTimer_->stop();
+    if (writeGapTimer_ != nullptr) writeGapTimer_->stop();
     heartbeatEnabled_ = false;
+    heartbeatPending_ = false;
     probeQueue_.clear();
     genericProbeActive_ = false;
 
@@ -125,6 +131,7 @@ void DeviceIoWorker::shutdown(const bool requestSvStop, const bool requestPtpSto
     // during grandmaster shutdown. This runs once during teardown only.
     commandQueue_.clear();
     ptpStopPending_ = false;
+    svStopPending_ = false;
     if ((requestSvStop || requestPtpStop) && serial_ != nullptr && serial_->isOpen()) {
         const auto sendBoundedStop = [this](const QByteArray& command) {
             const qint64 queued = serial_->write(command);
@@ -184,10 +191,33 @@ void DeviceIoWorker::refreshPortsInternal(const bool forceSignal) {
         highConfidence.size() != highConfidenceCount_;
 
     ports_ = std::move(discovered);
+    physicallyPlausiblePorts_ = std::move(highConfidence);
     recommendedPort_ = recommended;
     highConfidenceCount_ = highConfidence.size();
-    if (forceSignal || changed) {
+    if (forceSignal || changed)
         emit portsObserved(activeGeneration_, ports_, recommendedPort_, highConfidenceCount_);
+
+    // Windows USB bridges can keep QSerialPort::isOpen() true after removal.
+    // Reuse the existing 750-ms enumeration; do not poll the board or PTP.
+    // Confirm two consecutive missing OS snapshots before retiring COM.
+    if (serial_ == nullptr || !serial_->isOpen() || !identityConfirmed_) {
+        consecutiveMissingPortPolls_ = 0;
+        return;
+    }
+    const QString ownedPort = serial_->portName().trimmed();
+    if (!ownedPort.isEmpty() && ports_.contains(ownedPort, Qt::CaseInsensitive)) {
+        consecutiveMissingPortPolls_ = 0;
+        return;
+    }
+    if (consecutiveMissingPortPolls_ < missingPortConfirmationPolls())
+        ++consecutiveMissingPortPolls_;
+    if (verifiedPortPhysicallyGone(
+            serial_->isOpen(), identityConfirmed_, consecutiveMissingPortPolls_)) {
+        // Only release the stale serial transport. NEVER issue SV/PTP STOP,
+        // firmware reset, or START based on USB enumeration.
+        handleSerialFailure(QStringLiteral(
+            "Verified USB serial port %1 vanished; releasing stale COM handle for rediscovery.")
+            .arg(ownedPort));
     }
 }
 
@@ -199,18 +229,17 @@ void DeviceIoWorker::autoDetectAndConnect(const quint64 generation) {
     probeQueue_.clear();
     genericProbeActive_ = false;
 
-    if (!recommendedPort_.isEmpty()) {
-        if (!openPortInternal(recommendedPort_, true)) emit automaticProbeExhausted(activeGeneration_);
-        return;
-    }
-    if (ports_.isEmpty()) {
-        emit automaticProbeExhausted(activeGeneration_);
-        return;
-    }
-
-    probeQueue_ = ports_;
-    genericProbeActive_ = true;
-    tryNextProbe();
+    // Prefer the port which previously returned a genuine ARStack identity,
+    // but never treat its COM number or USB metadata as proof of identity.
+    // A stale hint MUST fall through to other currently visible candidates.
+    const QSettings settings;
+    const QString verifiedPort = settings.value(
+        QStringLiteral("device-discovery/lastVerifiedPort")).toString().trimmed();
+    probeQueue_ = focusedAutomaticPorts(
+        ports_, physicallyPlausiblePorts_, verifiedPort, recommendedPort_);
+    genericProbeActive_ = !probeQueue_.isEmpty();
+    if (genericProbeActive_) tryNextProbe();
+    else emit automaticProbeExhausted(activeGeneration_);
 }
 
 void DeviceIoWorker::connectPort(const QString& portName, const quint64 generation) {
@@ -242,9 +271,12 @@ bool DeviceIoWorker::openPortInternal(const QString& portName, const bool automa
     automaticConnection_ = automatic;
     identityConfirmed_ = false;
     identifyAttempts_ = 0;
+    consecutiveMissingPortPolls_ = 0;
     pendingRx_.clear();
+    if (writeGapTimer_ != nullptr) writeGapTimer_->stop();
     commandQueue_.clear();
     ptpStopPending_ = false;
+    svStopPending_ = false;
     exclusiveCommandsRemaining_ = 0;
     writeActive_ = false;
     activeCommand_ = {};
@@ -283,16 +315,31 @@ void DeviceIoWorker::disconnectPort(const quint64 generation) {
     closePortInternal(true);
 }
 
+void DeviceIoWorker::retireUnresponsivePort(const quint64 generation) {
+    if (!initialized_ || shuttingDown_ || generation == 0 ||
+        generation != activeGeneration_ || serial_ == nullptr ||
+        !serial_->isOpen() || !identityConfirmed_) return;
+    // A bounded failure of bidirectional SHOW/telemetry means the old
+    // handle may be a zombie even if Windows has already re-enumerated
+    // the same COM number. Do not mistake this for operator DISCONNECT.
+    handleSerialFailure(QStringLiteral(
+        "Verified serial control path stopped responding; retiring stale COM for recovery."));
+}
+
 void DeviceIoWorker::closePortInternal(const bool emitRelease) {
     if (serial_ == nullptr) return;
     if (verificationTimer_ != nullptr) verificationTimer_->stop();
     if (heartbeatTimer_ != nullptr) heartbeatTimer_->stop();
+    if (writeGapTimer_ != nullptr) writeGapTimer_->stop();
     heartbeatEnabled_ = false;
+    heartbeatPending_ = false;
     identityConfirmed_ = false;
     identifyAttempts_ = 0;
+    consecutiveMissingPortPolls_ = 0;
     pendingRx_.clear();
     commandQueue_.clear();
     ptpStopPending_ = false;
+    svStopPending_ = false;
     exclusiveCommandsRemaining_ = 0;
     writeActive_ = false;
     activeCommand_ = {};
@@ -342,10 +389,17 @@ void DeviceIoWorker::finishIdentificationTimeout() {
 void DeviceIoWorker::confirmIdentity(const quint64 generation) {
     if (serial_ == nullptr || !serial_->isOpen() || generation != activeGeneration_) return;
     identityConfirmed_ = true;
+    consecutiveMissingPortPolls_ = 0;
     automaticConnection_ = false;
     genericProbeActive_ = false;
     probeQueue_.clear();
     if (verificationTimer_ != nullptr) verificationTimer_->stop();
+    // Remember a port only AFTER its ARStack identity has been parsed.
+    // It is just a priority hint for the next Studio start, never a bypass.
+    QSettings settings;
+    settings.setValue(
+        QStringLiteral("device-discovery/lastVerifiedPort"),
+        serial_->portName());
 }
 
 void DeviceIoWorker::enqueueCommands(
@@ -371,6 +425,12 @@ bool DeviceIoWorker::enqueueCommandsInternal(
     }
     if (commands.isEmpty()) return true;
 
+    if (!exclusive && commands.size() == 1 &&
+        commands.constFirst().trimmed() == QStringLiteral("STOP")) {
+        // A STOP must not wait behind a saturated configuration queue.
+        queuePrioritySvStop();
+        return true;
+    }
     if (!exclusive && commands.size() == 1 &&
         commands.constFirst().trimmed() == QStringLiteral("PTP STOP")) {
         // One reserved safety slot cannot be rejected by normal queue saturation.
@@ -418,6 +478,28 @@ bool DeviceIoWorker::enqueueCommandsInternal(
     return true;
 }
 
+void DeviceIoWorker::queuePrioritySvStop() {
+    // The emergency STOP slot is outside the 64-entry normal queue.
+    // Discard remaining batch commands, including an unsent START, so
+    // cancellation cannot accidentally complete a stale configuration.
+    commandQueue_.clear();
+    exclusiveCommandsRemaining_ = (writeActive_ && activeCommand_.exclusive) ? 1 : 0;
+    if (!(writeActive_ && activeCommand_.text == QStringLiteral("STOP")))
+        svStopPending_ = true;
+    pumpWriteQueue();
+}
+
+void DeviceIoWorker::queuePriorityHeartbeat() {
+    // The 6-second firmware control lease must not be starved by a saturated
+    // 64-command queue or an exclusive profile CFG transaction. A single
+    // coalesced keepalive uses the same QSerialPort owner and normal pacing;
+    // it never bypasses a pending safety STOP or interrupts an active write.
+    // A disconnected/stalled serial port still fails closed in firmware.
+    if (!(writeActive_ && activeCommand_.text == QStringLiteral("HEARTBEAT")))
+        heartbeatPending_ = true;
+    pumpWriteQueue();
+}
+
 void DeviceIoWorker::queuePriorityPtpStop() {
     // Bounded (64 entries) and infrequent: revoke every unsent PTP START.
     // Preserve all other queued commands; STOP runs after the active write.
@@ -441,12 +523,27 @@ void DeviceIoWorker::queuePriorityPtpStop() {
 
 void DeviceIoWorker::pumpWriteQueue() {
     if (serial_ == nullptr || !serial_->isOpen() || writeActive_ ||
-        (!ptpStopPending_ && commandQueue_.isEmpty())) return;
+        (!svStopPending_ && !ptpStopPending_ && !heartbeatPending_ &&
+         commandQueue_.isEmpty())) return;
+    // bytesToWrite()==0 proves only host/driver drain, not ESP console line
+    // consumption. Throttle ordinary writes; reserved STOPs always bypass.
+    if (!svStopPending_ && !ptpStopPending_ && writeGapTimer_ != nullptr &&
+        writeGapTimer_->isActive()) return;
+    if ((svStopPending_ || ptpStopPending_) && writeGapTimer_ != nullptr)
+        writeGapTimer_->stop();
 
-    if (ptpStopPending_) {
+    if (svStopPending_) {
+        svStopPending_ = false;
+        activeCommand_ = PendingCommand{
+            QStringLiteral("STOP"), QByteArrayLiteral("STOP\n"), false, false};
+    } else if (ptpStopPending_) {
         ptpStopPending_ = false;
         activeCommand_ = PendingCommand{
             QStringLiteral("PTP STOP"), QByteArrayLiteral("PTP STOP\n"), false, false};
+    } else if (heartbeatPending_) {
+        heartbeatPending_ = false;
+        activeCommand_ = PendingCommand{
+            QStringLiteral("HEARTBEAT"), QByteArrayLiteral("HEARTBEAT\n"), true, false};
     } else {
         activeCommand_ = commandQueue_.dequeue();
     }
@@ -475,7 +572,13 @@ void DeviceIoWorker::completeActiveWrite() {
         --exclusiveCommandsRemaining_;
     }
     emit commandTransmitted(activeGeneration_, completed.text, completed.quiet);
-    pumpWriteQueue();
+    if (svStopPending_ || ptpStopPending_) {
+        pumpWriteQueue(); // safety priority never waits for line pacing
+    } else if (writeGapTimer_ != nullptr) {
+        writeGapTimer_->start();
+    } else {
+        pumpWriteQueue();
+    }
 }
 
 void DeviceIoWorker::processReadyRead() {
@@ -506,11 +609,17 @@ void DeviceIoWorker::handleSerialFailure(const QString& message) {
     const QString detail = message.trimmed().isEmpty()
         ? QStringLiteral("Serial transport failed.")
         : message.trimmed();
-    emit transportError(activeGeneration_, detail, true);
+    const bool hadVerifiedIdentity = identityConfirmed_;
+    const quint64 lostGeneration = activeGeneration_;
+    const QString lostPort = serial_ != nullptr ? serial_->portName() : lastPort_;
+    emit transportError(lostGeneration, detail, true);
     probeQueue_.clear();
     genericProbeActive_ = false;
     automaticConnection_ = false;
+    // Close and release the handle BEFORE asking the GUI for new discovery.
     closePortInternal(true);
+    if (hadVerifiedIdentity && lostGeneration != 0U)
+        emit unexpectedPortLoss(lostGeneration, lostPort);
 }
 
 void DeviceIoWorker::setHeartbeatEnabled(const bool enabled, const quint64 generation) {
@@ -519,11 +628,11 @@ void DeviceIoWorker::setHeartbeatEnabled(const bool enabled, const quint64 gener
     if (heartbeatTimer_ == nullptr) return;
 
     if (!enabled || serial_ == nullptr || !serial_->isOpen() || !identityConfirmed_) {
+        heartbeatPending_ = false;
         heartbeatTimer_->stop();
         return;
     }
 
-    static_cast<void>(enqueueCommandsInternal(
-        {QStringLiteral("HEARTBEAT")}, true, false, false));
+    queuePriorityHeartbeat();
     if (!heartbeatTimer_->isActive()) heartbeatTimer_->start();
 }

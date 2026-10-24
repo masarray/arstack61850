@@ -123,8 +123,12 @@ public:
         const QString& recommendedPort,
         const QStringList& visiblePorts);
 
-    [[nodiscard]] static constexpr int profileSyncMaxAttempts() noexcept { return 2; }
-    [[nodiscard]] static constexpr int profileSyncTimeoutMs() noexcept { return 2500; }
+    [[nodiscard]] static constexpr int profileSyncMaxAttempts() noexcept { return 3; }
+    [[nodiscard]] static constexpr int profileSyncTimeoutMs() noexcept { return 4500; }
+    [[nodiscard]] static constexpr int profileSyncHardDeadlineMs() noexcept { return 30000; }
+    [[nodiscard]] static constexpr int profileSyncBackoffMs(const int attempts) noexcept {
+        return attempts <= 1 ? 650 : 1450;
+    }
     [[nodiscard]] static constexpr bool profileSyncRetryAllowed(const int attemptsStarted) noexcept {
         return attemptsStarted >= 0 && attemptsStarted < profileSyncMaxAttempts();
     }
@@ -146,6 +150,17 @@ public:
         const bool serialConnected) noexcept {
         return owner == PortOwner::firmwareTool && !serialConnected;
     }
+    // No OS watcher / extra scan: react to the existing worker's 750-ms
+    // physical port inventory and queue semantic IDENTIFY only on arrival.
+    // A pure predicate makes COM renumbering testable without USB hardware.
+    [[nodiscard]] static bool hasNewlyEnumeratedPort(
+        const QStringList& previous, const QStringList& current) noexcept {
+        for (const QString& name : current) {
+            if (!previous.contains(name, Qt::CaseInsensitive)) return true;
+        }
+        return false;
+    }
+
     [[nodiscard]] static bool recoveryIdentityMatches(
         const QString& expectedDeviceId,
         const QString& observedDeviceId) noexcept {
@@ -166,6 +181,7 @@ public:
     // can mutate device connection, output, live values, profile state or PTP.
     Q_INVOKABLE bool requestStart();
     Q_INVOKABLE bool requestStartWithScenario(const QVariantMap& scenario);
+    Q_INVOKABLE bool requestApplyLiveScenario(const QVariantMap& scenario);
     Q_INVOKABLE bool requestStop();
     Q_INVOKABLE bool requestConnect();
     Q_INVOKABLE void requestRefreshPorts();
@@ -181,7 +197,8 @@ public:
         double currentCountsPerAmp,
         double voltageCountsPerVolt);
     Q_INVOKABLE bool requestSetEnabled(const QString& signalId, const bool enabled) {
-        return liveControlReady() && device_ != nullptr && device_->setEnabled(signalId, enabled);
+        return liveControlReady() && device_ != nullptr && !device_->running() &&
+            device_->setEnabled(signalId, enabled);
     }
     Q_INVOKABLE bool requestSetQuality(const QString& signalId, quint32 quality);
     Q_INVOKABLE bool requestSetCtSaturation(
@@ -192,9 +209,11 @@ public:
         double clipPercent);
     Q_INVOKABLE bool requestZero();
     Q_INVOKABLE bool requestPtpRefresh();
+    Q_INVOKABLE bool requestSyncDiagnostics();
     Q_INVOKABLE bool requestPtpRole(const QString& role);
     Q_INVOKABLE bool requestSmpSynch(const QString& mode);
     Q_INVOKABLE bool requestConfigurePtp(const QVariantMap& profile);
+    Q_INVOKABLE bool requestPtpAdvancedPolicy(const QString& mode);
     Q_INVOKABLE bool requestStartPtp();
     Q_INVOKABLE bool requestStartPtpConfigured(const QString& role, const QVariantMap& profile);
     Q_INVOKABLE bool requestStopPtp();
@@ -331,10 +350,11 @@ private:
         void handleIdentificationChange() {
             if (owner_ == nullptr || device_ == nullptr || !owner_->recoveryPending_ ||
                 device_->identificationState() != DeviceController::IdentificationState::Unidentified) return;
+            // A delayed reply from the previously verified injector is not
+            // evidence of absent firmware. Keep identity pinning armed and
+            // let the bounded discovery loop try the port again.
             owner_->blankBoardDetected_ = false;
             owner_->blankBoardPort_.clear();
-            owner_->setupError_ = true;
-            owner_->setupErrorStatus_ = QStringLiteral("The previously verified injector did not answer semantic identity after bounded retries. Firmware absence was not inferred; retry identification after USB settles.");
             owner_->reconcile();
         }
         SmartSessionController* owner_{nullptr};
@@ -377,6 +397,8 @@ private:
     QTimer prepareTimer_;
     QTimer reconnectTimer_;
     QTimer profileSyncTimer_;
+    QTimer profileRetryTimer_;
+    QTimer profileSyncTotalTimer_;
     QString state_{QStringLiteral("WAITING FOR DEVICE")};
     QString statusText_{QStringLiteral("Connect ESP32-P4; ARStack Studio will detect it automatically.")};
     QString deviceFirmwareVersion_;
@@ -402,6 +424,8 @@ private:
     bool setupError_{false};
     bool recoveryPending_{false};
     bool shuttingDown_{false};
+    QStringList lastEnumeratedPorts_;
+    int unidentifiedDiscoveryTicks_{0};
     int updateReconnectAttempts_{0};
     int profileSyncAttempts_{0};
     PortOwner portOwner_{PortOwner::none};

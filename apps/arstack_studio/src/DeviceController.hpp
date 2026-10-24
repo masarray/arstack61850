@@ -2,11 +2,13 @@
 #pragma once
 
 #include <QByteArray>
+#include <cstdint>
 #include <QObject>
 #include <QStringList>
 #include <QThread>
 #include <QTimer>
 #include <QVariantMap>
+namespace ar::iec61850::sampled_values { struct SvLiveChannelState; }
 
 class DeterministicSessionHarness;
 class DeviceIoWorker;
@@ -49,20 +51,31 @@ class DeviceController : public QObject {
     Q_PROPERTY(QStringList capabilities READ capabilities NOTIFY deviceIdentityChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
     Q_PROPERTY(bool running READ running NOTIFY runningChanged)
+    Q_PROPERTY(QString svStopReason READ svStopReason NOTIFY svStopReasonChanged)
+    Q_PROPERTY(QString svLastStopCause READ svLastStopCause NOTIFY svStopReasonChanged)
+    Q_PROPERTY(bool scenarioApplying READ scenarioApplying NOTIFY scenarioStateChanged)
     Q_PROPERTY(QString portName READ portName NOTIFY connectedChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(QString logText READ logText NOTIFY logTextChanged)
+    Q_PROPERTY(QString diagnosticLogPath READ diagnosticLogPath CONSTANT)
+    Q_PROPERTY(QString syncDiagnostics READ syncDiagnostics NOTIFY syncDiagnosticsChanged)
+    Q_PROPERTY(QString syncFlightLatest READ syncFlightLatest NOTIFY syncDiagnosticsChanged)
     Q_PROPERTY(QString fps READ fps NOTIFY telemetryChanged)
     Q_PROPERTY(QString missed READ missed NOTIFY telemetryChanged)
     Q_PROPERTY(QString txFailures READ txFailures NOTIFY telemetryChanged)
     Q_PROPERTY(QString signalGeneration READ signalGeneration NOTIFY telemetryChanged)
     Q_PROPERTY(QString profileGeneration READ profileGeneration NOTIFY profileStateChanged)
     Q_PROPERTY(bool profileArmed READ profileArmed NOTIFY profileStateChanged)
+    Q_PROPERTY(bool profileWasReused READ profileWasReused NOTIFY profileStateChanged)
     Q_PROPERTY(bool profileDeploying READ profileDeploying NOTIFY profileStateChanged)
     Q_PROPERTY(bool ptpAvailable READ ptpAvailable NOTIFY ptpStateChanged)
     Q_PROPERTY(bool ptpRunning READ ptpRunning NOTIFY ptpStateChanged)
     Q_PROPERTY(bool ptpStarting READ ptpStarting NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpStatus READ ptpStatus NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpEthernetDriver READ ptpEthernetDriver NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpEthernetLink READ ptpEthernetLink NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpLastStartFailure READ ptpLastStartFailure NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpStartPhase READ ptpStartPhase NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpDomain READ ptpDomain NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpTransportSpecific READ ptpTransportSpecific NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpVlan READ ptpVlan NOTIFY ptpStateChanged)
@@ -72,6 +85,10 @@ class DeviceController : public QObject {
     Q_PROPERTY(QString ptpPdelayFrames READ ptpPdelayFrames NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpTxFailures READ ptpTxFailures NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpRole READ ptpRole NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpPolicy READ ptpPolicy NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpPolicyBootAuto READ ptpPolicyBootAuto NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpCandidate READ ptpCandidate NOTIFY ptpStateChanged)
+    Q_PROPERTY(QString ptpSourceGeneration READ ptpSourceGeneration NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpDiscipline READ ptpDiscipline NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpSource READ ptpSource NOTIFY ptpStateChanged)
     Q_PROPERTY(QString ptpOffsetNs READ ptpOffsetNs NOTIFY ptpStateChanged)
@@ -132,20 +149,32 @@ public:
     [[nodiscard]] DeviceIdentity deviceIdentity() const;
     [[nodiscard]] bool connected() const noexcept;
     [[nodiscard]] bool running() const noexcept;
+    [[nodiscard]] QString svStopReason() const { return svStopReason_; }
+    [[nodiscard]] QString svLastStopCause() const { return svLastStopCause_; }
+    [[nodiscard]] bool scenarioApplying() const noexcept;
     [[nodiscard]] QString portName() const;
     [[nodiscard]] QString lastError() const;
     [[nodiscard]] QString logText() const;
+    [[nodiscard]] QString diagnosticLogPath() const { return diagnosticLogPath_; }
+    [[nodiscard]] QString syncDiagnostics() const { return syncDiagnostics_; }
+    [[nodiscard]] QString syncFlightLatest() const { return syncFlightLatest_; }
     [[nodiscard]] QString fps() const;
     [[nodiscard]] QString missed() const;
     [[nodiscard]] QString txFailures() const;
     [[nodiscard]] QString signalGeneration() const;
     [[nodiscard]] QString profileGeneration() const;
     [[nodiscard]] bool profileArmed() const noexcept;
+    [[nodiscard]] bool profileWasReused() const noexcept { return profileWasReused_; }
     [[nodiscard]] bool profileDeploying() const noexcept;
+    [[nodiscard]] QString profileDeploymentProgressSummary() const;
     [[nodiscard]] bool ptpAvailable() const noexcept;
     [[nodiscard]] bool ptpRunning() const noexcept;
     [[nodiscard]] bool ptpStarting() const noexcept { return ptpStartStage_ != PtpStartStage::idle; }
     [[nodiscard]] QString ptpStatus() const;
+    [[nodiscard]] QString ptpEthernetDriver() const { return ptpEthernetDriver_; }
+    [[nodiscard]] QString ptpEthernetLink() const { return ptpEthernetLink_; }
+    [[nodiscard]] QString ptpLastStartFailure() const { return ptpLastStartFailure_; }
+    [[nodiscard]] QString ptpStartPhase() const;
     [[nodiscard]] QString ptpDomain() const;
     [[nodiscard]] QString ptpTransportSpecific() const;
     [[nodiscard]] QString ptpVlan() const;
@@ -155,6 +184,10 @@ public:
     [[nodiscard]] QString ptpPdelayFrames() const { return ptpPdelayFrames_; }
     [[nodiscard]] QString ptpTxFailures() const;
     [[nodiscard]] QString ptpRole() const { return ptpRole_; }
+    [[nodiscard]] QString ptpPolicy() const { return ptpPolicy_; }
+    [[nodiscard]] QString ptpPolicyBootAuto() const { return ptpPolicyBootAuto_; }
+    [[nodiscard]] QString ptpCandidate() const { return ptpCandidate_; }
+    [[nodiscard]] QString ptpSourceGeneration() const { return ptpSourceGeneration_; }
     [[nodiscard]] QString ptpDiscipline() const { return ptpDiscipline_; }
     [[nodiscard]] QString ptpSource() const { return ptpSource_; }
     [[nodiscard]] QString ptpOffsetNs() const { return ptpOffsetNs_; }
@@ -193,8 +226,8 @@ public:
         const QString& expectedFirmwareVersion,
         const QString& expectedBuildId = {});
 
-    [[nodiscard]] static constexpr int identityMaxAttempts() noexcept { return 3; }
-    [[nodiscard]] static constexpr int identityRetryIntervalMs() noexcept { return 650; }
+    [[nodiscard]] static constexpr int identityMaxAttempts() noexcept { return 5; }
+    [[nodiscard]] static constexpr int identityRetryIntervalMs() noexcept { return 1100; }
     [[nodiscard]] static constexpr bool identityRetryAllowed(const int attemptsSent) noexcept {
         return attemptsSent >= 0 && attemptsSent < identityMaxAttempts();
     }
@@ -209,10 +242,13 @@ public:
     bool autoDetectAndConnect();
     bool connectPort(const QString& portName);
     void disconnectPort();
+    // Only after independent bounded control-health failure.
+    void recoverUnresponsivePort();
     bool sendShow();
     virtual bool start();
     // Single validated, bounded FIFO transaction. START is always last.
     bool startWithScenario(const QVariantMap& scenario);
+    bool applyLiveScenario(const QVariantMap& scenario);
     bool stop();
     virtual bool zero();
     virtual bool setFrequency(double hz);
@@ -231,6 +267,7 @@ public:
     void abandonProfileDeployment();
 
     bool sendPtpShow();
+    bool setPtpAdvancedPolicy(const QString& mode);
     bool startPtp();
     bool startPtpConfigured(const QString& role, const QVariantMap& profile);
     bool stopPtp();
@@ -253,6 +290,7 @@ public:
         return sendCommand(QStringLiteral("PROFILE PTPROLE %1").arg(role));
     }
 
+    bool sendPtpDiagnostics() { return sendCommand(QStringLiteral("PTP DIAG")); }
     bool sendSmpSynchShow() {
         return sendCommand(QStringLiteral("PROFILE SHOW"));
     }
@@ -270,6 +308,8 @@ public:
     // Diagnostics are presentation-safe: clearing the local log does not touch
     // serial ownership, output state, firmware or the device protocol.
     Q_INVOKABLE void clearLog();
+    Q_INVOKABLE bool openDiagnosticLogFolder() const;
+    Q_INVOKABLE void recordUiDiagnostic(const QString& message);
 
 signals:
     void portsChanged();
@@ -279,14 +319,22 @@ signals:
     void deviceIdentityChanged();
     void connectedChanged();
     void runningChanged();
+    void svStopReasonChanged();
     void lastErrorChanged();
     void logTextChanged();
+    void syncDiagnosticsChanged();
     void telemetryChanged();
     void profileStateChanged();
     void profileDeploymentProgress();
     void ptpStateChanged();
     void deviceMessage(const QString& message);
+    void scenarioStateChanged();
+    void scenarioApplicationFinished();
+    void liveScenarioApplied();
     void portReleased(quint64 generation, const QString& portName);
+    // Worker has closed a verified COM unexpectedly; the supervisor can
+    // re-identify without mistaking this for a manual disconnect.
+    void unexpectedTransportLoss(quint64 generation, const QString& portName);
 
 protected:
     bool sendQuietCommand(const QString& command);
@@ -295,21 +343,25 @@ protected:
     // multi-channel flush. Empty result = invalid; never send partial batch.
     static QString formatSignalCommand(const QString& signalId, double magnitude,
         double phaseDegrees, quint32 quality, double currentCountsPerAmp,
-        double voltageCountsPerVolt, double frequencyHz);
+        double voltageCountsPerVolt, double frequencyHz,
+        ar::iec61850::sampled_values::SvLiveChannelState* encoded = nullptr);
     void setSessionHeartbeatEnabled(bool enabled);
 
 private:
     friend class DeterministicSessionHarness;
 
     enum class PtpStartStage {
-        idle, awaiting_role_ack, awaiting_role_readback, awaiting_config,
+        idle, awaiting_preflight, awaiting_role_ack, awaiting_role_readback, awaiting_config,
         awaiting_start, awaiting_runtime, awaiting_stop_ack, awaiting_stop_readback,
         stop_unconfirmed
     };
 
+    enum class ScenarioStage { idle, awaiting_commit, awaiting_readback, awaiting_start_ack };
+
     enum class BinaryProfileStage {
         idle,
         waiting_status,
+        waiting_reuse,
         waiting_abort,
         waiting_begin,
         waiting_chunk,
@@ -320,7 +372,11 @@ private:
     struct BinaryProfileTransfer final {
         QByteArray bytes;
         QString svId;
+        QString bootId;
         QString committedGeneration;
+        QString reusedReadbackGeneration;
+        std::uint64_t recordHash{};
+        bool reusedReadbackMatched{false};
         quint32 appId{};
         quint32 rate{};
         quint32 modulus{};
@@ -350,12 +406,16 @@ private:
     bool sendNextBinaryProfileChunk();
     void resetBinaryProfileTransfer();
     void failBinaryProfileDeployment(const QString& message);
+    void failScenarioStart(const QString& message);
+    bool submitScenario(const QVariantMap& scenario, bool starting);
+    void resetScenarioStart() noexcept;
     void resetTelemetry();
     void resetPtpState();
     [[nodiscard]] bool needsPtpStopBeforeShutdown() const noexcept { return ptpRunning_ || ptpStarting(); }
     void advancePtpStartup(const QString& line);
     void failPtpStartup(const QString& reason, bool rollback);
     bool beginPtpStopVerification();
+    void flushDeferredReadbacks();
     void markPtpStopUnconfirmed(const QString& reason);
     void resetPtpStartup() noexcept;
     [[nodiscard]] static QString ptpConfigCommand(const QVariantMap& profile);
@@ -372,6 +432,9 @@ private:
     DeviceIdentity identity_;
     QString lastError_;
     QString logText_;
+    QString diagnosticLogPath_;
+    QString syncDiagnostics_{QStringLiteral("Select Inspect SV lock to read on-board causes.")};
+    QString syncFlightLatest_;
     QString fps_{QStringLiteral("—")};
     QString missed_{QStringLiteral("—")};
     QString txFailures_{QStringLiteral("—")};
@@ -385,21 +448,42 @@ private:
     int identifyAttempts_{0};
     int highConfidenceCount_{0};
     bool running_{false};
+    bool operatorStopPending_{false};
+    QString svStopReason_;
+    QString svLastStopCause_;
+    quint64 lastSvStopSeq_{0};
     bool connected_{false};
     bool discovering_{false};
     bool deviceVerified_{false};
     bool profileArmed_{false};
+    bool profileWasReused_{false};
     bool profileDeploying_{false};
+    // One coalesced readback of each kind; no second serial writer or retry loop.
+    bool deferredShow_{false};
+    bool deferredProfileShow_{false};
+    bool deferredPtpShow_{false};
     BinaryProfileStage binaryProfileStage_{BinaryProfileStage::idle};
     BinaryProfileTransfer binaryProfile_{};
     bool ptpAvailable_{false};
     bool ptpRunning_{false};
     PtpStartStage ptpStartStage_{PtpStartStage::idle};
     QTimer ptpStartTimer_;
+    QTimer scenarioTimer_;
+    ScenarioStage scenarioStage_{ScenarioStage::idle};
+    bool scenarioLiveUpdate_{false};
+    double scenarioPendingFrequencyHz_{0.0};
+    quint64 scenarioToken_{0};
+    quint64 scenarioHash_{0};
+    quint64 scenarioSessionGeneration_{0};
+    quint64 scenarioSignalGeneration_{0};
+    QString scenarioBoot_;
+    QString scenarioProfileGeneration_;
     QTimer ptpStopPollTimer_;
+    QTimer logUpdateTimer_;
     QString pendingPtpRole_;
     QString pendingPtpConfig_;
     bool ptpRuntimeRoleSeen_{false};
+    bool ptpRuntimeRunningSeen_{false};
     bool ioWorkerReady_{false};
     bool ioWorkerAffinityValid_{false};
     bool shuttingDown_{false};
@@ -407,6 +491,10 @@ private:
     bool pendingAutoDetect_{false};
     double signalFrequencyHz_{50.0};
     QString ptpStatus_{QStringLiteral("Waiting for device")};
+    // Actual ESP-IDF ETH_EVENT proof. UNKNOWN never means link is UP.
+    QString ptpEthernetDriver_{QStringLiteral("UNKNOWN")};
+    QString ptpEthernetLink_{QStringLiteral("UNKNOWN")};
+    QString ptpLastStartFailure_;
     QString ptpDomain_{QStringLiteral("-")};
     QString ptpTransportSpecific_{QStringLiteral("-")};
     QString ptpVlan_{QStringLiteral("-")};
@@ -416,6 +504,10 @@ private:
     QString ptpPdelayFrames_{QStringLiteral("-")};
     QString ptpTxFailures_{QStringLiteral("-")};
     QString ptpRole_{QStringLiteral("SOURCE")};
+    QString ptpPolicy_{QStringLiteral("UNKNOWN")};
+    QString ptpPolicyBootAuto_{QStringLiteral("0")};
+    QString ptpCandidate_{QStringLiteral("0")};
+    QString ptpSourceGeneration_{QStringLiteral("0")};
     QString ptpDiscipline_{QStringLiteral("UNLOCKED")};
     QString ptpSource_{QStringLiteral("NONE")};
     QString ptpOffsetNs_{QStringLiteral("NA")};

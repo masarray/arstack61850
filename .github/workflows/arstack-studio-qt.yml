@@ -81,7 +81,7 @@ jobs:
         shell: powershell
         run: |
           cmake --build build-arstack-studio --config Release `
-            --target arstack_session_harness arstack_windows_ownership_harness --parallel
+            --target arstack_session_harness arstack_clipboard_harness arstack_windows_ownership_harness --parallel
 
       - name: S8A deterministic session harness on Windows
         timeout-minutes: 1
@@ -96,6 +96,16 @@ jobs:
           Get-Content $err -ErrorAction SilentlyContinue
           if ($exitCode -ne 0) {
             throw "S8A Windows deterministic harness failed with exit code $exitCode."
+          }
+
+      - name: Native Windows clipboard roundtrip regression
+        timeout-minutes: 1
+        shell: powershell
+        run: |
+          $exe = Join-Path $PWD 'build-arstack-studio\Release\arstack_clipboard_harness.exe'
+          & $exe
+          if ($LASTEXITCODE -ne 0) {
+            throw "Native Windows OS clipboard readback failed: exit $LASTEXITCODE"
           }
 
       - name: S8B cross-process ownership and serial-loss harness
@@ -174,6 +184,10 @@ jobs:
         shell: bash
         run: python3 apps/arstack_studio/tests/check_operator_workspace.py
 
+      - name: Independent SV PCAP decoder deterministic regressions
+        shell: bash
+        run: python3 -m unittest discover -s tests -p test_smv_wire_capture_audit.py -v
+
       - name: Native binary profile authority regression
         shell: bash
         run: |
@@ -212,7 +226,7 @@ jobs:
         run: |
           set -o pipefail
           cmake --build build-arstack-studio \
-            --target arstack_studio arstack_session_harness --parallel 2 \
+            --target arstack_studio arstack_session_harness arstack_capture_harness arstack_clipboard_harness --parallel 2 \
             2>&1 | tee /tmp/arstack-studio-build.log
 
       - name: 4I+4V reference template regression
@@ -235,6 +249,21 @@ jobs:
           set -o pipefail
           timeout 20s ./build-arstack-studio/arstack_session_harness \
             2>&1 | tee /tmp/arstack-studio-session-harness.log
+
+      - name: Native GUI clipboard content/readback regression
+        shell: bash
+        run: |
+          set -o pipefail
+          timeout 15s env QT_QPA_PLATFORM=offscreen \
+            ./build-arstack-studio/arstack_clipboard_harness \
+            2>&1 | tee /tmp/arstack-studio-clipboard-harness.log
+
+      - name: Native SV PCAP capture and CSV decoder regression
+        shell: bash
+        run: |
+          set -o pipefail
+          timeout 20s ./build-arstack-studio/arstack_capture_harness \
+            2>&1 | tee /tmp/arstack-studio-capture-harness.log
 
       - name: Firmware bundle contract regression
         shell: bash

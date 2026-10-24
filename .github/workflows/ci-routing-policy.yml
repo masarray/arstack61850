@@ -5,12 +5,16 @@ on:
       - '.github/workflows/**'
       - 'scripts/check_ci_trigger_policy.py'
       - 'docs/CI_WORKFLOW_ROUTING.md'
+      - 'docs/integration/**'
+      - 'tools/integration_preservation_audit.py'
   push:
     branches: [main]
     paths:
       - '.github/workflows/**'
       - 'scripts/check_ci_trigger_policy.py'
       - 'docs/CI_WORKFLOW_ROUTING.md'
+      - 'docs/integration/**'
+      - 'tools/integration_preservation_audit.py'
 permissions:
   contents: read
 concurrency:
@@ -24,3 +28,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Verify scoped PR workflow routing
         run: python3 scripts/check_ci_trigger_policy.py
+      - name: Verify preservation manifest and all 37 non-chain source inventories
+        shell: bash
+        run: |
+          if [ -f docs/integration/PR_PRESERVATION_SNAPSHOT_2026-10-22.json ]; then
+            python3 tools/integration_preservation_audit.py --verify-only
+          else
+            echo 'No integration manifest in this branch; no-op.'
+          fi

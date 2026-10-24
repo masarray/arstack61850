@@ -1,0 +1,384 @@
+{
+  "schema": "arstack61850.independent-pr-retention.v1",
+  "date": "2026-10-22",
+  "group": 2,
+  "tip_sha": "0a2600f7b8474c605d5f11c4709df8bbec720140",
+  "repo": "masarray/arstack61850",
+  "method": "PR changed-file paths retained with source SHA; existence in PTP tip is NOT content or semantic equivalence. Independent PRs require distinct convergence lane.",
+  "records": [
+    {
+      "number": 153,
+      "title": "M1: standards-aligned PTP source defaults and fail-closed SV epoch startup",
+      "head_sha": "ccec6c41e48dde58af2d0fcc2f427b7c34d700e7",
+      "base_sha": "9e70a4937874e3e1752b725264fe5a2008aa8fb0",
+      "changed_file_count": 20,
+      "source_paths_not_in_ptp_tip": [],
+      "changed_paths": [
+        {
+          "path": ".github/workflows/esp32p4-ptp-lab.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/esp32p4-smv-injector.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/ptp-core-ci.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/arstack_studio/qml/PtpExpertPanel.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "docs/IEC61850_PTP_SV_SOFTWARE_COMPATIBILITY_MATRIX.md",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "docs/PTP_SV_EPOCH_M1_ACCEPTANCE.md",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/Kconfig.projbuild",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/app_main.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/smp_synch_lab.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/sdkconfig.defaults",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "include/ariec61850/time_sync/ptp.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "include/ariec61850/time_sync/ptp_power_profile.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "include/ariec61850/time_sync/ptp_runtime.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "include/ariec61850/time_sync/ptp_tai_source.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "include/ariec61850/time_sync/sv_ptp_epoch.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "src/time_sync/ptp.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tests/ptp_profile/CMakeLists.txt",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tests/test_ptp_power_profile.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tests/test_sv_ptp_epoch.cpp",
+          "currently_exists_in_ptp_tip": true
+        }
+      ],
+      "status": "INDEPENDENT_LANE_UNMERGED_DO_NOT_CLOSE"
+    },
+    {
+      "number": 138,
+      "title": "Docs: GUI/UX recovery handoff for next thread (R1B blocker and exit gates)",
+      "head_sha": "18fc07e89cd069de28049e768c47ab28a0095ae1",
+      "base_sha": "c7238d3a8ff86b30b397164c5fcbed820562b3e0",
+      "changed_file_count": 1,
+      "source_paths_not_in_ptp_tip": [
+        "docs/handoffs/ARSTACK_IEC61850_GUI_IED\u0053COUT_HANDOFF_2026-09-28.md"
+      ],
+      "changed_paths": [
+        {
+          "path": "docs/handoffs/ARSTACK_IEC61850_GUI_IED\u0053COUT_HANDOFF_2026-09-28.md",
+          "currently_exists_in_ptp_tip": false
+        }
+      ],
+      "status": "INDEPENDENT_LANE_UNMERGED_DO_NOT_CLOSE"
+    },
+    {
+      "number": 137,
+      "title": "R1B: preserve exact Static Reporting route through live report attach",
+      "head_sha": "b47ac165f4ae9a3927cb81641cefc88df3e477dc",
+      "base_sha": "1d3899e5266a588a2602a81c0ffe06f148f4e467",
+      "changed_file_count": 9,
+      "source_paths_not_in_ptp_tip": [],
+      "changed_paths": [
+        {
+          "path": ".github/workflows/ied-simulator-qt.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/ied-simulator-release-hardening.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/qml/BrowserDataSetPane.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/qml/IedBrowserWorkspace.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/MmsReportController.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/MmsReportController.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/ied_report_workspace_qa.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/main.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/test_browser_report_authoring.py",
+          "currently_exists_in_ptp_tip": true
+        }
+      ],
+      "status": "INDEPENDENT_LANE_UNMERGED_DO_NOT_CLOSE"
+    },
+    {
+      "number": 136,
+      "title": "R1A: canonical Signal Catalog → Dataset Signals → bound static RCB",
+      "head_sha": "1d3899e5266a588a2602a81c0ffe06f148f4e467",
+      "base_sha": "3a3ceef9149fc0dd31b27f4c9232418a68fae0e6",
+      "changed_file_count": 7,
+      "source_paths_not_in_ptp_tip": [],
+      "changed_paths": [
+        {
+          "path": "apps/ied_simulator/qml/BrowserDataSetPane.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/qml/IedBrowserWorkspace.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/MmsReportController.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/MmsReportController.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/ied_report_workspace_qa.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/main.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/test_browser_report_authoring.py",
+          "currently_exists_in_ptp_tip": true
+        }
+      ],
+      "status": "INDEPENDENT_LANE_UNMERGED_DO_NOT_CLOSE"
+    },
+    {
+      "number": 130,
+      "title": "R1A: canonical Signal Catalog and offline DataSet browsing in IED Browser",
+      "head_sha": "7d7cc5e9831df761cc61231a3f686b4a2e40a83a",
+      "base_sha": "8b077f5e7e3f16d0d9a0c13559dbfb5ec67b74a8",
+      "changed_file_count": 10,
+      "source_paths_not_in_ptp_tip": [
+        "apps/ied_simulator/qml/BrowserSignalCatalog.qml",
+        "apps/ied_simulator/test_browser_observation_workflow.py",
+        "apps/ied_simulator/test_browser_signal_catalog.py"
+      ],
+      "changed_paths": [
+        {
+          "path": ".github/workflows/ied-simulator-qt.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/CMakeLists.txt",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/qml/BrowserDataSetPane.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/qml/BrowserGlobalDataPane.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/qml/BrowserSignalCatalog.qml",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": "apps/ied_simulator/qml/IedBrowserNavigation.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/qml/IedBrowserWorkspace.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/main.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/test_browser_observation_workflow.py",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": "apps/ied_simulator/test_browser_signal_catalog.py",
+          "currently_exists_in_ptp_tip": false
+        }
+      ],
+      "status": "INDEPENDENT_LANE_UNMERGED_DO_NOT_CLOSE"
+    },
+    {
+      "number": 127,
+      "title": "P0: restore active Browser panel routing and enforce rendered QA",
+      "head_sha": "3a3ceef9149fc0dd31b27f4c9232418a68fae0e6",
+      "base_sha": "009855c0594ecbe27f0ce16c12ef25f711a7b8cd",
+      "changed_file_count": 16,
+      "source_paths_not_in_ptp_tip": [
+        "apps/ied_simulator/test_browser_delegate_bindings.py",
+        "apps/ied_simulator/test_browser_observation_workflow.py"
+      ],
+      "changed_paths": [
+        {
+          "path": ".github/workflows/ied-simulator-qt.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/ied-simulator-release-hardening.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/qml/BrowserDataSetAuthoringDialog.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/qml/BrowserDataSetPane.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/qml/BrowserReportAuthoringDialog.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/qml/IedBrowserNavigation.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/qml/IedBrowserWorkspace.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/qml/Main.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/qml/MmsClientWorkspace.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/IedBrowserFleetController.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/main.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/test_browser_control_ux.py",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/test_browser_convergence.py",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/test_browser_delegate_bindings.py",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": "apps/ied_simulator/test_browser_observation_workflow.py",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": "apps/ied_simulator/test_multi_ied_workspace.py",
+          "currently_exists_in_ptp_tip": true
+        }
+      ],
+      "status": "INDEPENDENT_LANE_UNMERGED_DO_NOT_CLOSE"
+    },
+    {
+      "number": 99,
+      "title": "P0: make ARStack Studio shutdown deterministic on Windows",
+      "head_sha": "dbb564e396ed6e6b064b9b79ad21de110d1f342d",
+      "base_sha": "1c212a7af673468ae97bbfd480c13fe62de625ee",
+      "changed_file_count": 9,
+      "source_paths_not_in_ptp_tip": [],
+      "changed_paths": [
+        {
+          "path": ".github/workflows/arstack-studio-windows-lifecycle.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/arstack_studio/src/DeviceController.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/arstack_studio/src/DeviceController.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/arstack_studio/src/FirmwareManager.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/arstack_studio/src/FirmwareManager.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/arstack_studio/src/SmartSessionController.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/arstack_studio/src/SmartSessionController.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/arstack_studio/src/StudioDeviceController.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/arstack_studio/src/main.cpp",
+          "currently_exists_in_ptp_tip": true
+        }
+      ],
+      "status": "INDEPENDENT_LANE_UNMERGED_DO_NOT_CLOSE"
+    }
+  ]
+}

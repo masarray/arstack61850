@@ -29,7 +29,7 @@ ToolButton {
             visible: control.iconSource.toString().length === 0
             anchors.fill: parent
             text: control.text
-            color: control.enabled ? (control.hovered ? "#ffffff" : theme.textSoft) : theme.muted2
+            color: control.enabled ? (control.hovered ? "#142334" : theme.textSoft) : theme.muted2
             font: control.font
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
@@ -37,7 +37,7 @@ ToolButton {
     }
     background: Rectangle {
         radius: 6
-        color: control.down ? theme.accentSoft : (control.hovered ? theme.raisedHover : "transparent")
+        color: control.down ? "#d6e6f9" : (control.hovered ? "#edf5ff" : "transparent")
         border.width: control.activeFocus ? 1 : 0
         border.color: theme.accent
     }

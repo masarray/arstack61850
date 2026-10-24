@@ -47,7 +47,9 @@ bool SmartSessionController::profileGenerationAdvanced(
     bool baselineOk = false;
     const qulonglong baselineGeneration = baseline.trimmed().toULongLong(&baselineOk);
     if (!baselineOk) return true;
-    return observedGeneration != baselineGeneration;
+    // Within one verified boot epoch, a committed profile generation must
+    // strictly advance. Rollback is stale evidence, not a successful sync.
+    return observedGeneration > baselineGeneration;
 }
 
 SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent) {
@@ -56,8 +58,16 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
     connect(&discoveryTimer_, &QTimer::timeout, this, [this] {
         if (!started_ || device_ == nullptr || updateRequested_ || blankBoardDetected_ || setupError_) return;
         if (firmware_ != nullptr && firmware_->busy()) return;
-        if (device_->identificationState() == DeviceController::IdentificationState::Unidentified) return;
+        // A slow serial reply is NOT evidence that firmware is absent.
+        // Retry semantic discovery after a bounded 5s cool-down; do not
+        // endlessly hold the single COM port or auto-flash a live board.
+        if (device_->identificationState() == DeviceController::IdentificationState::Unidentified) {
+            if (manualRecoveryArmed_) return;
+            ++unidentifiedDiscoveryTicks_;
+            if (unidentifiedDiscoveryTicks_ < 2) return;
+        }
         if (!device_->deviceVerified() && !device_->discovering() && !device_->connected()) {
+            unidentifiedDiscoveryTicks_ = 0;
             static_cast<void>(startDeviceDiscovery());
         }
     });
@@ -70,8 +80,28 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
     profileSyncTimer_.setSingleShot(true);
     connect(&profileSyncTimer_, &QTimer::timeout, this, [this] {
         if (profileSyncStage_ != ProfileSyncStage::deploying) return;
+        const QString progress = device_ == nullptr ? QStringLiteral("device unavailable")
+            : device_->profileDeploymentProgressSummary();
         handleProfileSyncAttemptFailure(QStringLiteral(
-            "Timed out waiting for the ESP32-P4 to arm a new profile generation."));
+            "Firmware profile acknowledgement timed out (%1).").arg(progress));
+        reconcile();
+    });
+
+    // Retry timer never grants START; it only re-enters the verified
+    // profile handshake with bounded exponential-like backoff.
+    profileRetryTimer_.setSingleShot(true);
+    connect(&profileRetryTimer_, &QTimer::timeout, this, &SmartSessionController::reconcile);
+
+    // ACK progress alone must never keep PREPARING forever.
+    profileSyncTotalTimer_.setInterval(profileSyncHardDeadlineMs());
+    profileSyncTotalTimer_.setSingleShot(true);
+    connect(&profileSyncTotalTimer_, &QTimer::timeout, this, [this] {
+        if (profileSyncStage_ != ProfileSyncStage::deploying) return;
+        handleProfileSyncAttemptFailure(QStringLiteral(
+            "Profile preparation exceeded the absolute %1 ms safety deadline (%2).")
+            .arg(profileSyncHardDeadlineMs())
+            .arg(device_ == nullptr ? QStringLiteral("device missing")
+                                  : device_->profileDeploymentProgressSummary()));
         reconcile();
     });
 
@@ -113,6 +143,8 @@ void SmartSessionController::shutdown() {
     prepareTimer_.stop();
     reconnectTimer_.stop();
     profileSyncTimer_.stop();
+    profileRetryTimer_.stop();
+    profileSyncTotalTimer_.stop();
     firmwareHandoffWatchdog_.shutdown();
     deviceRecoveryMonitor_.shutdown();
     updateRequested_ = false;
@@ -243,6 +275,7 @@ void SmartSessionController::setDevice(QObject* object) {
     if (device_ == next) return;
     if (device_ != nullptr) disconnect(device_, nullptr, this, nullptr);
     device_ = next;
+    lastEnumeratedPorts_ = device_ != nullptr ? device_->ports() : QStringList{};
     deviceFirmwareVersion_.clear();
     profileSyncBootId_.clear();
     resetProfileSync(true);
@@ -298,8 +331,9 @@ void SmartSessionController::start() {
 }
 
 bool SmartSessionController::requestStart() {
-    if (!startReady_ || !deviceControlAvailable() || device_ == nullptr || device_->running()) return false;
-    return device_->start();
+    // Legacy callers must not bypass the fresh scenario snapshot supplied by the UI.
+    // requestStartWithScenario remains the only guided START entry point.
+    return false;
 }
 
 bool SmartSessionController::requestStartWithScenario(const QVariantMap& scenario) {
@@ -307,9 +341,19 @@ bool SmartSessionController::requestStartWithScenario(const QVariantMap& scenari
     return device_->startWithScenario(scenario);
 }
 
+bool SmartSessionController::requestApplyLiveScenario(const QVariantMap& scenario) {
+    // Never silently replay a locally restored draft after reconnect. This
+    // path is entered only by the explicit operator Apply Live intent.
+    if (!liveControlReady() || device_ == nullptr || !device_->running() ||
+        device_->scenarioApplying()) return false;
+    return device_->applyLiveScenario(scenario);
+}
+
 bool SmartSessionController::requestStop() {
     if (device_ == nullptr) return false;
-    if (!device_->running()) return true;
+    // STOP is a cancellation authority even before SV RUNNING telemetry: an
+    // ACKed staging transaction may still be advancing toward START.
+    if (!device_->running() && !device_->scenarioApplying()) return true;
     if (portOwner_ != PortOwner::deviceSession || updateRequested_) return false;
     return device_->stop();
 }
@@ -370,7 +414,7 @@ bool SmartSessionController::requestProfileSync() {
 }
 
 bool SmartSessionController::requestSetFrequency(const double hz) {
-    return liveControlReady() && device_ != nullptr && device_->setFrequency(hz);
+    return liveControlReady() && device_ != nullptr && !device_->running() && device_->setFrequency(hz);
 }
 
 bool SmartSessionController::requestSetSignal(
@@ -380,7 +424,7 @@ bool SmartSessionController::requestSetSignal(
     const quint32 quality,
     const double currentCountsPerAmp,
     const double voltageCountsPerVolt) {
-    return liveControlReady() && device_ != nullptr &&
+    return liveControlReady() && device_ != nullptr && !device_->running() &&
         device_->setSignal(
             signalId,
             magnitude,
@@ -391,7 +435,7 @@ bool SmartSessionController::requestSetSignal(
 }
 
 bool SmartSessionController::requestSetQuality(const QString& signalId, const quint32 quality) {
-    return liveControlReady() && device_ != nullptr && device_->setQuality(signalId, quality);
+    return liveControlReady() && device_ != nullptr && !device_->running() && device_->setQuality(signalId, quality);
 }
 
 bool SmartSessionController::requestSetCtSaturation(
@@ -400,7 +444,7 @@ bool SmartSessionController::requestSetCtSaturation(
     const double harmonicPercent,
     const int harmonicOrder,
     const double clipPercent) {
-    return liveControlReady() && device_ != nullptr &&
+    return liveControlReady() && device_ != nullptr && !device_->running() &&
         device_->setCtSaturation(
             enabled,
             dcOffsetPercent,
@@ -410,15 +454,27 @@ bool SmartSessionController::requestSetCtSaturation(
 }
 
 bool SmartSessionController::requestZero() {
-    return liveControlReady() && device_ != nullptr && device_->zero();
+    return liveControlReady() && device_ != nullptr && !device_->running() && device_->zero();
 }
 
 bool SmartSessionController::requestPtpRefresh() {
     // A guided START owns its ACK/readback order; do not interleave SHOWs.
-    if (!deviceControlAvailable() || device_ == nullptr || device_->ptpStarting()) return false;
+    if (!deviceControlAvailable() || device_ == nullptr || device_->ptpStarting() ||
+        device_->profileDeploying() || profileSyncStage_ == ProfileSyncStage::deploying ||
+        device_->scenarioApplying()) return false;
     const bool ptp = device_->sendPtpShow();
     const bool sync = device_->sendSmpSynchShow();
     return ptp && sync;
+}
+
+bool SmartSessionController::requestSyncDiagnostics() {
+    // Read-only operator request; serialize behind the existing device
+    // session. Never interleave with START/CFG or firmware port handoff.
+    if (!deviceControlAvailable() || device_ == nullptr ||
+        device_->ptpStarting() || device_->profileDeploying() ||
+        profileSyncStage_ == ProfileSyncStage::deploying ||
+        device_->scenarioApplying() || updateRequested_) return false;
+    return device_->sendPtpDiagnostics();
 }
 
 bool SmartSessionController::requestPtpRole(const QString& role) {
@@ -431,6 +487,13 @@ bool SmartSessionController::requestSmpSynch(const QString& mode) {
 
 bool SmartSessionController::requestConfigurePtp(const QVariantMap& profile) {
     return deviceControlAvailable() && device_ != nullptr && device_->configurePtp(profile);
+}
+bool SmartSessionController::requestPtpAdvancedPolicy(const QString& mode) {
+    return deviceControlAvailable() && device_ != nullptr &&
+        !device_->running() && !device_->ptpRunning() &&
+        !device_->ptpStarting() && !device_->scenarioApplying() &&
+        !device_->profileDeploying() && !updateRequested_ &&
+        device_->setPtpAdvancedPolicy(mode);
 }
 
 bool SmartSessionController::requestStartPtp() {
@@ -655,6 +718,14 @@ void SmartSessionController::reconnectDeviceSignals() {
         reconcile();
     });
     connect(device_, &DeviceController::deviceIdentityChanged, this, [this] {
+        if (device_ != nullptr && device_->deviceVerified() &&
+            !profileSyncBootId_.isEmpty() && !device_->bootId().isEmpty() &&
+            profileSyncBootId_ != device_->bootId()) {
+            // A new firmware boot on an unchanged COM is a new authority
+            // epoch. Do not carry a READY/profile proof across the reset.
+            resetProfileSync(true);
+            profileSyncBootId_.clear();
+        }
         refreshFirmwareIdentity();
         emit stateChanged();
         reconcile();
@@ -670,9 +741,52 @@ void SmartSessionController::reconnectDeviceSignals() {
         refreshRecoveryOfferFromIdentity();
         reconcile();
     });
+    // A verified COM was retired by the worker AFTER QSerialPort::close().
+    // Unlike portsChanged, this also covers rapid USB unplug/replug where
+    // Windows reuses COM15 between two 750-ms scans and no list edge exists.
+    // Queue the re-identification on the supervisor thread; never restart
+    // SV/PTP, bypass semantic identity, or seize COM from the flasher.
+    connect(device_, &DeviceController::unexpectedTransportLoss, this,
+            [this](const quint64 generation, const QString&) {
+        if (!generationIsCurrent(sessionGeneration_, generation)) return;
+        QTimer::singleShot(0, this, [this, generation] {
+            if (!generationIsCurrent(sessionGeneration_, generation) ||
+                !started_ || shuttingDown_ || device_ == nullptr ||
+                updateRequested_ || setupError_ || blankBoardDetected_ ||
+                manualRecoveryArmed_ || portOwner_ == PortOwner::firmwareTool ||
+                (firmware_ != nullptr && firmware_->busy()) ||
+                device_->connected() || device_->discovering() ||
+                device_->ports().isEmpty()) return;
+            // This is physical transport loss, not the operator selecting
+            // Disconnect. A fresh session generation retires late ACKs.
+            static_cast<void>(startDeviceDiscovery());
+            reconcile();
+        });
+    });
     connect(device_, &DeviceController::portsChanged, this, [this] {
+        if (device_ == nullptr) return;
+        const QStringList nowVisible = device_->ports();
+        const bool arrival = hasNewlyEnumeratedPort(lastEnumeratedPorts_, nowVisible);
+        lastEnumeratedPorts_ = nowVisible;
         refreshRecoveryOfferFromIdentity();
         reconcile();
+        if (!arrival) return;
+        // Wake once on USB arrival instead of waiting for periodic discovery.
+        // No serial I/O on the UI thread and no USB polling beyond the
+        // existing 750-ms DeviceIoWorker inventory. A removed port never
+        // triggers a probe; manual disconnect alone never triggers a probe.
+        // All identity/port ownership validation remains in the supervisor.
+        QTimer::singleShot(0, this, [this] {
+            if (!started_ || shuttingDown_ || device_ == nullptr ||
+                updateRequested_ || setupError_ || blankBoardDetected_ ||
+                manualRecoveryArmed_ || portOwner_ == PortOwner::firmwareTool ||
+                (firmware_ != nullptr && firmware_->busy()) ||
+                device_->connected() || device_->discovering() ||
+                device_->ports().isEmpty())
+                return;
+            static_cast<void>(startDeviceDiscovery());
+            reconcile();
+        });
     });
     connect(device_, &DeviceController::runningChanged, this, [this] {
         if (updateRequested_ && updateStage_ == UpdateStage::stopping &&
@@ -841,7 +955,10 @@ void SmartSessionController::refreshRecoveryOfferFromIdentity() {
         return;
     }
 
-    if (recoveryPending_) {
+    // Semantic timeout on an auto-detected port proves *nothing* about
+    // flash contents. Present firmware recovery only after the operator
+    // explicitly selected this port. ROM chip checks still precede flash.
+    if (recoveryPending_ || !manualRecoveryArmed_) {
         blankBoardDetected_ = false;
         blankBoardPort_.clear();
         return;
@@ -865,6 +982,7 @@ void SmartSessionController::clearBlankBoardContext() {
     blankBoardDetected_ = false;
     blankBoardPort_.clear();
     manualRecoveryArmed_ = false;
+    unidentifiedDiscoveryTicks_ = 0;
     setupError_ = false;
     setupErrorStatus_.clear();
 }
@@ -920,14 +1038,29 @@ QString SmartSessionController::diagnosticsText() const {
         add(QStringLiteral("Profile generation"), device_->profileGeneration());
         add(QStringLiteral("Profile armed"), device_->profileArmed() ? QStringLiteral("yes") : QStringLiteral("no"));
         add(QStringLiteral("SMV running"), device_->running() ? QStringLiteral("yes") : QStringLiteral("no"));
-        add(QStringLiteral("SMV FPS reported"), device_->fps());
+        add(QStringLiteral("Current SV stop condition (board readback)"), device_->svStopReason());
+        add(QStringLiteral("Last SV stop cause (same board, persists across restart)"),
+            device_->svLastStopCause());
+        // A STOPPED publisher may retain the last 3999/4000 FPS sample.
+        // Make stale telemetry explicit in copied field diagnostics.
+        add(QStringLiteral("SMV FPS reported"), device_->running()
+            ? device_->fps()
+            : QStringLiteral("STALE / NOT RUNNING (last observed %1)").arg(device_->fps()));
         add(QStringLiteral("SMV missed reported"), device_->missed());
         add(QStringLiteral("SMV TX failures reported"), device_->txFailures());
         add(QStringLiteral("PTP status reported"), device_->ptpStatus());
+        add(QStringLiteral("PTP Ethernet driver (board ETH_EVENT)"), device_->ptpEthernetDriver());
+        add(QStringLiteral("PTP PHY link (board ETH_EVENT)"), device_->ptpEthernetLink());
+        add(QStringLiteral("PTP transactional phase"), device_->ptpStartPhase());
+        add(QStringLiteral("Last PTP START failure (same boot)"),
+            device_->ptpLastStartFailure());
+        add(QStringLiteral("SV sync internal flight recorder (not physical proof)"),
+            device_->syncDiagnostics());
         add(QStringLiteral("PTP role reported"), device_->ptpRole());
         add(QStringLiteral("PTP discipline reported"), device_->ptpDiscipline());
         add(QStringLiteral("SMPSYNCH value reported"), device_->smpSynchValue());
         add(QStringLiteral("Device last error"), device_->lastError());
+        add(QStringLiteral("Persistent Studio event log (UTC)"), device_->diagnosticLogPath());
         rows << QStringLiteral("--- Device serial log, last 12000 chars ---")
              << device_->logText().right(12000);
     }
@@ -968,6 +1101,8 @@ void SmartSessionController::latchFirmwareFailure(QString message) {
 
 void SmartSessionController::resetProfileSync(const bool requireSync) {
     profileSyncTimer_.stop();
+    profileRetryTimer_.stop();
+    profileSyncTotalTimer_.stop();
     profileSyncStage_ = ProfileSyncStage::idle;
     profileSyncAttempts_ = 0;
     profileSyncBaselineGeneration_.clear();
@@ -994,6 +1129,8 @@ bool SmartSessionController::beginProfileSync(const QVariantMap& profile) {
     ++profileSyncAttempts_;
     profileSyncStage_ = ProfileSyncStage::deploying;
     profileSyncError_.clear();
+    profileRetryTimer_.stop();
+    profileSyncTotalTimer_.start();
 
     const bool accepted = device_->deployProfile(profile);
     if (!accepted) {
@@ -1016,9 +1153,15 @@ void SmartSessionController::handleProfileStateChanged() {
 
     if (device_->profileArmed()) {
         const QString observedGeneration = device_->profileGeneration().trimmed();
-        if (!profileGenerationAdvanced(profileSyncBaselineGeneration_, observedGeneration)) return;
+        // For a fresh BINCOMMIT require generation advance. For a read-only
+        // canonical-content reuse the generation intentionally stays identical:
+        // the device already had exactly the requested profile.
+        if (!device_->profileWasReused() &&
+            !profileGenerationAdvanced(profileSyncBaselineGeneration_, observedGeneration)) return;
 
         profileSyncTimer_.stop();
+        profileSyncTotalTimer_.stop();
+        profileRetryTimer_.stop();
         profileSyncStage_ = ProfileSyncStage::idle;
         profileSyncAttempts_ = 0;
         profileSyncBaselineGeneration_ = observedGeneration;
@@ -1036,6 +1179,7 @@ void SmartSessionController::handleProfileStateChanged() {
 
 void SmartSessionController::handleProfileSyncAttemptFailure(QString reason) {
     profileSyncTimer_.stop();
+    profileSyncTotalTimer_.stop();
     if (profileSyncStage_ == ProfileSyncStage::failed) return;
 
     reason = reason.trimmed();
@@ -1044,8 +1188,11 @@ void SmartSessionController::handleProfileSyncAttemptFailure(QString reason) {
     if (profileSyncRetryAllowed(profileSyncAttempts_)) {
         profileSyncStage_ = ProfileSyncStage::idle;
         profileSyncError_ = reason;
+        // Start cool-down BEFORE notifying the device: profileStateChanged is
+        // synchronous and could otherwise immediately launch another attempt.
+        profileRetryTimer_.start(profileSyncBackoffMs(profileSyncAttempts_));
         if (device_ != nullptr && device_->profileDeploying()) device_->abandonProfileDeployment();
-        QTimer::singleShot(0, this, &SmartSessionController::reconcile);
+        reconcile();
         return;
     }
 
@@ -1055,6 +1202,8 @@ void SmartSessionController::handleProfileSyncAttemptFailure(QString reason) {
 
 void SmartSessionController::latchProfileSyncFailure(QString reason) {
     profileSyncTimer_.stop();
+    profileSyncTotalTimer_.stop();
+    profileRetryTimer_.stop();
     profileSyncStage_ = ProfileSyncStage::failed;
     needsProfileSync_ = true;
     reason = reason.trimmed();
@@ -1177,8 +1326,8 @@ void SmartSessionController::reconcile() {
 
         if (blankBoardDetected_) {
             setPresentation(
-                QStringLiteral("FIRMWARE REQUIRED"),
-                QStringLiteral("ESP32-P4 candidate %1 did not answer the current semantic identity after bounded attempts. Studio can install the bundled firmware after ROM chip/revision verification.")
+                QStringLiteral("FIRMWARE RECOVERY"),
+                QStringLiteral("Manually selected port %1 did not answer ARStack IDENTIFY. Firmware status is UNKNOWN. Retry connection first; optional recovery requires ROM chip/revision verification.")
                     .arg(blankBoardPort_),
                 false,
                 false);
@@ -1282,6 +1431,18 @@ void SmartSessionController::reconcile() {
                 : profileSyncError_,
             false,
             false);
+        return;
+    }
+
+    if (profileRetryTimer_.isActive()) {
+        setPresentation(
+            QStringLiteral("RECOVERING PROFILE"),
+            QStringLiteral("Profile attempt %1/%2 did not complete: %3. "
+                           "Checking session and retrying in %4 ms (no auto-START).")
+                .arg(profileSyncAttempts_).arg(profileSyncMaxAttempts())
+                .arg(profileSyncError_.left(160))
+                .arg(profileRetryTimer_.remainingTime()),
+            false, false);
         return;
     }
 

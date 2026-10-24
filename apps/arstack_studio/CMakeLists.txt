@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 SerialPort)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 SerialPort Concurrent)
 qt_standard_project_setup(REQUIRES 6.5)
 
 # Reuse the repository's IEC 61850/SCL implementation directly. The desktop UI
@@ -38,6 +38,8 @@ qt_add_executable(arstack_studio
     src/main.cpp
     src/StudioClipboard.cpp
     src/StudioClipboard.hpp
+    src/SvCaptureController.cpp
+    src/SvCaptureController.hpp
     ${ARSTACK_STUDIO_CORE_SOURCES}
 )
 
@@ -51,6 +53,27 @@ qt_add_executable(arstack_session_harness
     src/DeterministicSessionHarness.hpp
     ${ARSTACK_STUDIO_CORE_SOURCES}
 )
+
+# Offline production wire decoder regression (no Npcap or hardware required).
+# Isolated platform GUI clipboard verification (same source linked in Studio).
+# No QML stubs, no fake service: tests actual QGuiApplication OS clipboard.
+qt_add_executable(arstack_clipboard_harness
+    src/ClipboardHarness.cpp
+    src/StudioClipboard.cpp
+    src/StudioClipboard.hpp
+)
+target_link_libraries(arstack_clipboard_harness PRIVATE Qt6::Core Qt6::Gui)
+target_compile_features(arstack_clipboard_harness PRIVATE cxx_std_20)
+
+qt_add_executable(arstack_capture_harness
+    src/SvCaptureHarness.cpp
+    src/SvCaptureController.cpp
+    src/SvCaptureController.hpp
+)
+target_link_libraries(arstack_capture_harness PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Concurrent
+)
+target_compile_features(arstack_capture_harness PRIVATE cxx_std_20)
 
 # RC2 is a fail-closed evidence evaluator, not a hardware simulator. CI self-tests
 # its acceptance policy; a physical run feeds the same executable a machine-readable
@@ -102,8 +125,10 @@ qt_add_qml_module(arstack_studio
         qml/StudioActionMenu.qml
         qml/StudioMenuDivider.qml
         qml/StudioPtpSwitch.qml
+        qml/StudioLinkSwitch.qml
         qml/StudioTimingTray.qml
         qml/DeviceExpertPanel.qml
+        qml/SvCapturePanel.qml
         qml/FirmwarePanel.qml
         qml/WaveformExpertPanel.qml
         qml/SignalMatrix.qml
@@ -145,6 +170,8 @@ qt_add_qml_module(arstack_studio
         assets/material/device_hub.svg
         assets/material/help_outline.svg
         assets/material/smv_injector.svg
+        assets/material/electric_bolt_run.svg
+        assets/material/electric_bolt_stop.svg
 )
 
 qt_add_resources(arstack_studio "reference_templates"
@@ -166,6 +193,7 @@ target_link_libraries(arstack_studio PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
     Qt6::SerialPort
+    Qt6::Concurrent
     ARIEC61850::core
 )
 

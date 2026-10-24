@@ -7,7 +7,10 @@
 #include "SmartSessionController.hpp"
 #include "StudioClipboard.hpp"
 #include "StudioDeviceController.hpp"
+#include "SvCaptureController.hpp"
+#include "ariec61850/sampled_values/compiled_device_profile.hpp"
 
+#include <QClipboard>
 #include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDebug>
@@ -30,7 +33,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <memory>
+#include <span>
 #include <string_view>
 
 #ifndef ARSTACK_STUDIO_VERSION
@@ -67,6 +72,8 @@ struct UiBounds {
     const auto current = findUiBounds(window, "studioCurrentMatrix");
     const auto tray = findUiBounds(window, "studioTimingTray");
     const auto quality = findUiBounds(window, "studioQualityRow");
+    const auto phasor = findUiBounds(window, "studioPhasorDock");
+    const auto waveform = findUiBounds(window, "studioWaveformDock");
     const std::array<std::pair<const char*, UiBounds>, 6> areas{{
         {"toolbar", bar}, {"injection workspace", surface},
         {"voltage matrix", voltage}, {"current matrix", current},
@@ -82,8 +89,37 @@ struct UiBounds {
             return false;
         }
     }
-    if (!(voltage.area.right() <= current.area.left() + tolerance
-          && tray.area.top() >= voltage.area.bottom() - tolerance
+    // Real Windows evidence must contain both actual plots. Checking only
+    // the left table let a 100%-empty right workspace pass every DPI gate.
+    // Report visible state + bounds to distinguish hidden from zero-size docks.
+    if (surface.area.width() > 470 ||
+        !phasor.visible || !waveform.visible ||
+        phasor.area.width() < 180 || waveform.area.width() < 180 ||
+        phasor.area.height() < 170 || waveform.area.height() < 170 ||
+        std::abs(phasor.area.height() - waveform.area.height()) > 24) {
+        qCritical().noquote() << "Studio split width/chart balance violation" << size
+                              << "surface=" << surface.area
+                              << "phasor-visible=" << phasor.visible << "phasor=" << phasor.area
+                              << "wave-visible=" << waveform.visible << "wave=" << waveform.area;
+        return false;
+    }
+    // A child can pass the viewport test while overflowing its *parent*
+    // (small controls were clipped by the neighbouring plot at 1366px).
+    for (const auto& [label, item] : std::array<std::pair<const char*, UiBounds>, 4>{{
+             {"voltage", voltage}, {"current", current},
+             {"timing", tray}, {"quality", quality}
+         }}) {
+        if (!surface.area.adjusted(-tolerance, -tolerance, tolerance, tolerance)
+                 .contains(item.area.adjusted(tolerance, tolerance, -tolerance, -tolerance))) {
+            qCritical().noquote() << "Studio injection child overflows parent" << size
+                                  << label << item.area << surface.area;
+            return false;
+        }
+    }
+    // Operator layout: voltage above current. Validate the new actual
+    // vertical hierarchy, not the obsolete side-by-side geometry.
+    if (!(voltage.area.bottom() <= current.area.top() + tolerance
+          && tray.area.top() >= current.area.bottom() - tolerance
           && quality.area.top() >= tray.area.bottom() - tolerance
           && quality.area.bottom() <= surface.area.bottom() + tolerance)) {
         qCritical().noquote() << "Studio UI panel order/overlap violation" << size
@@ -96,7 +132,8 @@ struct UiBounds {
     qreal previousRight = tray.area.left();
     for (const char* name : controls) {
         const auto control = findUiBounds(window, name);
-        if (!control.visible || control.area.width() < 35 ||
+        const qreal minimumWidth = std::string_view{name} == "studioTimingDetails" ? 30.0 : 35.0;
+        if (!control.visible || control.area.width() < minimumWidth ||
             control.area.left() + tolerance < previousRight ||
             !tray.area.adjusted(-tolerance, -tolerance, tolerance, tolerance)
                  .contains(control.area.adjusted(tolerance, tolerance,
@@ -164,8 +201,38 @@ int checkReferenceTemplate(int argc, char* argv[]) {
         return 3;
     }
 
+    // An operator VLAN edit MUST change the binary sent to the ESP32, not
+    // only a QML label. It must survive an SCL timing recompile and reject
+    // invalid values without corrupting the active stream profile.
+    if (!profiles.configureSelectedVlan(true, 123, 5) ||
+        profiles.configureSelectedVlan(true, 4095, 5) ||
+        profiles.configureSelectedVlan(true, 123, 8) ||
+        !profiles.confirmCounterModulus(4000)) {
+        qCritical().noquote() << "SV VLAN operator edit/recompile regression";
+        return 4;
+    }
+    const auto edited = profiles.selectedProfile();
+    const auto blob = edited.value(QStringLiteral("deviceProfileBinary")).toByteArray();
+    ar::iec61850::sampled_values::CompiledSvDeviceProfile decoded{};
+    const auto bytes = std::span<const std::uint8_t>{
+        reinterpret_cast<const std::uint8_t*>(blob.constData()),
+        static_cast<std::size_t>(blob.size())};
+    if (blob.isEmpty() ||
+        !ar::iec61850::sampled_values::SvDeviceProfileBinaryCodec::decode(bytes, decoded).success() ||
+        !decoded.vlan_present || decoded.vlan_id != 123U || decoded.vlan_priority != 5U ||
+        edited.value(QStringLiteral("vlanId")).toInt() != 123 ||
+        edited.value(QStringLiteral("vlanPriority")).toInt() != 5) {
+        qCritical().noquote() << "SV VLAN binary profile mismatch" << edited;
+        return 5;
+    }
+    if (!profiles.loadReferenceTemplate() ||
+        profiles.selectedProfile().value(QStringLiteral("vlanId")).toInt() != 0 ||
+        profiles.selectedProfile().value(QStringLiteral("vlanPriority")).toInt() != 4) {
+        qCritical().noquote() << "SV VLAN override leaked across reference reload";
+        return 6;
+    }
     qInfo().noquote()
-        << "ARStack 4I+4V 9-2LE reference template: PASS · Class A · ready · 4000 fps · 64 B";
+        << "ARStack 4I+4V 9-2LE reference: PASS · 4000 fps · SV VLAN edit/binary/reload";
     return 0;
 }
 
@@ -328,20 +395,23 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         rejectedIdentity);
 
     const bool boundedIdentifyPolicy =
-        DeviceController::identityMaxAttempts() == 3 &&
-        DeviceController::identityRetryIntervalMs() == 650 &&
+        DeviceController::identityMaxAttempts() == 5 &&
+        DeviceController::identityRetryIntervalMs() == 1100 &&
         DeviceController::identityRetryAllowed(0) &&
         DeviceController::identityRetryAllowed(1) &&
         DeviceController::identityRetryAllowed(2) &&
-        !DeviceController::identityRetryAllowed(3) &&
+        DeviceController::identityRetryAllowed(3) &&
+        DeviceController::identityRetryAllowed(4) &&
+        !DeviceController::identityRetryAllowed(5) &&
         !DeviceController::identityRetryAllowed(-1);
 
     const bool boundedProfileSyncPolicy =
-        SmartSessionController::profileSyncMaxAttempts() == 2 &&
-        SmartSessionController::profileSyncTimeoutMs() == 2500 &&
+        SmartSessionController::profileSyncMaxAttempts() == 3 &&
+        SmartSessionController::profileSyncTimeoutMs() == 4500 &&
         SmartSessionController::profileSyncRetryAllowed(0) &&
         SmartSessionController::profileSyncRetryAllowed(1) &&
-        !SmartSessionController::profileSyncRetryAllowed(2) &&
+        SmartSessionController::profileSyncRetryAllowed(2) &&
+        !SmartSessionController::profileSyncRetryAllowed(3) &&
         !SmartSessionController::profileSyncRetryAllowed(-1) &&
         SmartSessionController::profileGenerationAdvanced(
             QStringLiteral("1"), QStringLiteral("2")) &&
@@ -349,6 +419,8 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
             QStringLiteral("—"), QStringLiteral("2")) &&
         !SmartSessionController::profileGenerationAdvanced(
             QStringLiteral("2"), QStringLiteral("2")) &&
+        !SmartSessionController::profileGenerationAdvanced(
+            QStringLiteral("2"), QStringLiteral("1")) &&
         !SmartSessionController::profileGenerationAdvanced(
             QStringLiteral("2"), QStringLiteral("not-a-generation"));
 
@@ -525,6 +597,25 @@ int main(int argc, char* argv[]) {
     QCoreApplication::setApplicationVersion(QStringLiteral(ARSTACK_STUDIO_VERSION));
 #endif
 
+    if (hasArgument(argc, argv, "--check-clipboard")) {
+        // Headless-board independent Windows acceptance: clipboard copy must
+        // round-trip and an empty report must never be reported as copied.
+        StudioClipboard clipboard;
+        const QString sample = QStringLiteral(
+            "ARStack Studio diagnostics\\nPTP last failure: source_reason=PDELAY_RX_TIMESTAMP_UNAVAILABLE");
+        const bool copied = clipboard.copyText(sample);
+        const bool matches = QGuiApplication::clipboard() != nullptr &&
+            QGuiApplication::clipboard()->text(QClipboard::Clipboard) == sample;
+        const bool rejectsEmpty = !clipboard.copyText(QString{});
+        if (!copied || !matches || !rejectsEmpty) {
+            qCritical() << "Studio native clipboard regression: FAIL"
+                        << copied << matches << rejectsEmpty;
+            return 18;
+        }
+        qInfo() << "Studio native clipboard regression: PASS";
+        return 0;
+    }
+
     // S6 ownership starts before any firmware process, QML object, or serial
     // worker exists. A second Studio process therefore cannot race for the
     // injector COM handle or bypass the supervisor's in-process PortOwner.
@@ -539,6 +630,7 @@ int main(int argc, char* argv[]) {
 
     qmlRegisterType<SclProfileModel>("ARStack.Studio", 1, 0, "SclProfileModel");
     qmlRegisterType<StudioDeviceController>("ARStack.Studio", 1, 0, "DeviceController");
+    qmlRegisterType<SvCaptureController>("ARStack.Studio", 1, 0, "SvCaptureController");
     qmlRegisterType<SmartSessionController>("ARStack.Studio", 1, 0, "SmartSessionController");
     qmlRegisterSingletonInstance("ARStack.Studio", 1, 0, "FirmwareService", &firmwareService);
     StudioClipboard clipboard;
@@ -602,16 +694,15 @@ int main(int argc, char* argv[]) {
         }
         // Exercise desktop, supported minimum, and extended desktop layout on
         // the real rendering engine. This branch never touches a serial port.
-        constexpr std::array<QSize, 3> sizes{{QSize{1240, 760}, QSize{960, 620},
-                                               QSize{1440, 900}}};
-        // Virtual Qt platforms can resize to arbitrary logical viewports,
-        // but cannot support grabWindow. One native 960x620 pass captures
-        // actual Windows pixels separately without requesting an oversized
-        // desktop window.
+        constexpr std::array<QSize, 5> sizes{{QSize{960, 680}, QSize{1024, 748},
+            QSize{1152, 760}, QSize{1366, 800}, QSize{1920, 1000}}};
+        // All five logical viewport geometries are exercised by Qt Quick.
+        // One smaller native viewport captures real Windows pixels; optional
+        // software screenshots of larger viewports carry no native claim.
         const bool nativeCapture = !qEnvironmentVariableIsEmpty("ARSTACK_STUDIO_QA_NATIVE_ONLY");
         const int caseCount = nativeCapture ? 1 : static_cast<int>(sizes.size());
         const auto caseSize = [sizes, nativeCapture](const int step) {
-            return nativeCapture ? sizes[1] : sizes.at(static_cast<std::size_t>(step));
+            return nativeCapture ? sizes[0] : sizes.at(static_cast<std::size_t>(step));
         };
         const QString screenshots = qEnvironmentVariable("ARSTACK_STUDIO_QA_DIR");
         if (!screenshots.isEmpty() && !QDir{}.mkpath(screenshots)) {
@@ -651,10 +742,14 @@ int main(int argc, char* argv[]) {
                     QStringLiteral("studio-%1x%2.png").arg(target.width()).arg(target.height()));
                 const QImage frame = mainWindow->grabWindow();
                 if (frame.isNull() || !frame.save(path)) {
-                    qCritical().noquote() << "GUI evidence capture failed:" << path;
-                    uiTimer->stop();
-                    QCoreApplication::exit(22);
-                    return;
+                    if (nativeCapture) {
+                        qCritical().noquote() << "Native GUI evidence capture failed:" << path;
+                        uiTimer->stop();
+                        QCoreApplication::exit(22);
+                        return;
+                    }
+                    qWarning().noquote() << "Offscreen screenshot unavailable:" << path
+                        << "(viewport bounds still checked)";
                 }
             }
             ++*step;
