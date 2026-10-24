@@ -1,0 +1,168 @@
+name: M3.H Exact-Tag Linux Artifact Acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ['.github/workflows/m3h-exact-tag-linux-artifact.yml']
+  push:
+    branches: [main]
+    paths: ['.github/workflows/m3h-exact-tag-linux-artifact.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exact-tag-linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      M3H_TAG: processbus-sim-m3h-20261024
+      M3H_SOURCE_SHA: a922e9bdba4e57a4e88406eb83344455dd8ff142
+      M3H_TAG_SHA: a4b6e53d0dbbcababc55ba8a4ff97ade6f2a6200
+    steps:
+      - name: Checkout exact published M3.H tag, never working development main
+        uses: actions/checkout@v4
+        with:
+          ref: processbus-sim-m3h-20261024
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Guard original immutable tag and GitHub Stable release
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$M3H_TAG_SHA"
+          git merge-base --is-ancestor "$M3H_SOURCE_SHA" HEAD
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$M3H_TAG" > /tmp/m3h-release.json
+          python3 - <<'PY'
+          import json
+          r=json.load(open('/tmp/m3h-release.json'))
+          assert r['id']==422544367 and r['tag_name']=='processbus-sim-m3h-20261024'
+          assert r['target_commitish']=='a4b6e53d0dbbcababc55ba8a4ff97ade6f2a6200'
+          assert not r['draft'] and not r['prerelease']
+          expected={
+            'ARStack-ProcessBus-M3H-win-x64-setup.exe':'4902e8bf44e78fc55a139ce84a1273f0768ef6fe10000f5d0f85d75d2f6c736e',
+            'ARStack-ProcessBus-M3H-win-x64-portable.zip':'ca01424e4102aa65e353737024ebf3258b4d2f614fa60d932c95c353ee228d8f',
+            'ARStack-ESP32P4-ProcessBus-M3H-firmware.bin':'61c508e9bf1357eb964d2b817b260b6a0e985446ddd68de1d45d9467e25c4607',
+            'firmware-manifest.json':'b2878148a1cda30f11a4c93a200bcba07bb63548aa571de8d05260c2ef630f9a',
+            'SHA256SUMS.txt':'c7674d1a97b77b66adda12216f7d5e460f86da5cb07fd1d1f02bf3011b99c876'
+          }
+          a={x['name']:x['digest'].removeprefix('sha256:') for x in r['assets']}
+          assert a==expected, 'M3.H released asset identity changed; stop packaging'
+          print('PASS: exact-tag source and original five immutable Stable assets')
+          PY
+
+      - name: Install Linux native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build build-essential \
+            libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0 \
+            libxcb-xkb1 libxcb-randr0 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
+            libfuse2 unzip xvfb libdbus-1-3
+
+      - name: Install Qt 6 and SerialPort
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.10.3'
+          arch: linux_gcc_64
+          modules: 'qtserialport'
+          cache: true
+
+      - name: Compile exact-tag Linux desktop app and run native policy checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S apps/arstack_studio -B build-m3h-linux -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DARIEC61850_WARNINGS_AS_ERRORS=ON
+          cmake --build build-m3h-linux --target arstack_studio --parallel 2
+          test -x build-m3h-linux/arstack_studio
+          QT_QPA_PLATFORM=offscreen xvfb-run -a build-m3h-linux/arstack_studio --check-reference-template
+          QT_QPA_PLATFORM=offscreen xvfb-run -a build-m3h-linux/arstack_studio --check-p0-policy
+
+      - name: Download exact release firmware and enforce manifest/build identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/firmware
+          gh release download "$M3H_TAG" --dir dist --pattern 'firmware-manifest.json' --pattern '*.bin'
+          python3 - <<'PY'
+          import json,hashlib,pathlib,shutil
+          p=pathlib.Path('dist')
+          m=json.loads((p/'firmware-manifest.json').read_text())
+          assert m['sourceCommit']=='a922e9bdba4e57a4e88406eb83344455dd8ff142'
+          assert m['buildId']=='a922e9bdba4e57a4'
+          assert m['chip']=='esp32p4'
+          fw=p/'ARStack-ESP32P4-ProcessBus-M3H-firmware.bin'
+          assert fw.exists()
+          assert hashlib.sha256(fw.read_bytes()).hexdigest()==m['sha256']
+          shutil.copy2(fw,p/'firmware'/m['image'])
+          shutil.copy2(p/'firmware-manifest.json',p/'firmware'/'firmware-manifest.json')
+          print('PASS: M3.H exact firmware SHA and build identity verified')
+          PY
+
+      - name: Stage AppDir desktop bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p AppDir/usr/bin/firmware AppDir/usr/share/icons/hicolor/512x512/apps
+          cp build-m3h-linux/arstack_studio AppDir/usr/bin/ARStackStudio
+          cp LICENSE NOTICE COPYRIGHT.md THIRD_PARTY_NOTICES.md AppDir/usr/bin/
+          cp assets/studio_icon/android-chrome-512x512.png AppDir/usr/share/icons/hicolor/512x512/apps/arstack-studio.png
+          cp -a dist/firmware/. AppDir/usr/bin/firmware/
+          cat > arstack-studio.desktop <<'DESKTOP'
+          [Desktop Entry]
+          Type=Application
+          Name=ARStack Studio
+          Exec=ARStackStudio
+          Icon=arstack-studio
+          Categories=Education;Science;Electronics;
+          Terminal=false
+          DESKTOP
+          mkdir -p AppDir/usr/bin/tools
+          curl -fLsS https://github.com/esp-rs/espflash/releases/download/v4.5.0/espflash-x86_64-unknown-linux-gnu.zip -o espflash.zip
+          echo 'dcd7fd822f247df18966935bbb10c7cb4b700c87172349633e9e323ee2542717  espflash.zip' | sha256sum -c -
+          unzip -j espflash.zip 'espflash' -d AppDir/usr/bin/tools
+          chmod +x AppDir/usr/bin/tools/espflash
+
+      - name: Set up Linux AppImage bundler
+        uses: miurahr/install-linuxdeploy-action@v1.8.0
+        id: linuxdeploy
+        with:
+          plugins: qt appimage
+
+      - name: Produce and smoke test exact-tag AppImage
+        env:
+          QML_SOURCES_PATHS: ${{ github.workspace }}/apps/arstack_studio/qml
+          VERSION: processbus-sim-m3h-20261024
+        shell: bash
+        run: |
+          set -euo pipefail
+          export QMAKE="$(command -v qmake6 || command -v qmake)"
+          ${{ steps.linuxdeploy.outputs.linuxdeploy }} \
+            --appdir AppDir \
+            --executable AppDir/usr/bin/ARStackStudio \
+            --desktop-file arstack-studio.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/512x512/apps/arstack-studio.png \
+            --plugin qt --output appimage
+          shopt -s nullglob
+          images=( ./*.AppImage )
+          test "${#images[@]}" -eq 1
+          mv "${images[0]}" ARStack-Studio-M3H-exact-tag-linux-x86_64.AppImage
+          chmod +x ARStack-Studio-M3H-exact-tag-linux-x86_64.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen \
+            xvfb-run -a ./ARStack-Studio-M3H-exact-tag-linux-x86_64.AppImage --check-reference-template
+          sha256sum ARStack-Studio-M3H-exact-tag-linux-x86_64.AppImage > ARStack-Studio-M3H-exact-tag-linux-x86_64.sha256
+          sha256sum -c ARStack-Studio-M3H-exact-tag-linux-x86_64.sha256
+          echo 'PASS: exact M3.H source Linux AppImage compiled, bundled and ran headlessly'
+
+      - name: Store reviewed Linux candidate as CI artifact (never modify release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: m3h-exact-tag-linux-candidate
+          path: |
+            ARStack-Studio-M3H-exact-tag-linux-x86_64.AppImage
+            ARStack-Studio-M3H-exact-tag-linux-x86_64.sha256
+          if-no-files-found: error
+          retention-days: 30
