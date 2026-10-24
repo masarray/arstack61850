@@ -48,13 +48,12 @@ std::atomic_bool g_receiver_stop_pending{false};
 // Cancel only automatic boot attempts; operator PTP actions are authoritative.
 std::atomic_bool g_boot_source_autostart_allowed{true};
 std::atomic<std::uint32_t> g_ptp_policy_generation{1U};
-#if defined(CONFIG_AR_PTP_AUTO_PREFER_EXTERNAL) && CONFIG_AR_PTP_AUTO_PREFER_EXTERNAL
-std::atomic<ar_ptp_advanced_mode_t> g_advanced_ptp_mode{
-    AR_PTP_POLICY_AUTO_PREFER_EXTERNAL};
-#else
+// Compiling external-GM arbitration must NEVER silently opt the relay
+// test-set into handover. SOURCE stays its own GM across every SV STOP/START.
+// AUTO_PREFER_EXTERNAL is an explicit, operator-selected runtime policy;
+// the Kconfig option is a capability gate, NOT the power-on policy.
 std::atomic<ar_ptp_advanced_mode_t> g_advanced_ptp_mode{
     AR_PTP_POLICY_INTERNAL_GM_ONLY};
-#endif
 ar::iec61850::time_sync::PtpControlCancellationGate g_role_control;
 
 void stop_active_ptp_roles() noexcept;
