@@ -1792,9 +1792,11 @@ void sv_ptp_phase_observer_task(void* argument) {
             continue;
         }
 
+        // SV RUNNING and preflight are asynchronous publisher/session flags.
+        // STOP toggles RUNNING before the publisher can publish preflight.
+        // A still-owned GPTimer/EMAC PTP lease cannot lose clock alignment
+        // merely because both flags happen to be false during this handoff.
         if (events != 1U ||
-            (!live_tx_running() &&
-             !g_preflight_phase_clock_active.load(std::memory_order_acquire)) ||
             (xEventGroupGetBits(g_link_events) & kLinkUpBit) == 0U ||
             !same_sv_ptp_clock_lease(lease, read_ptp_epoch_clock_lease())) {
             revoke_with_reason("epoch_notification_or_link");
@@ -1913,16 +1915,20 @@ void sv_ptp_phase_observer_task(void* argument) {
             g_sample_clock_context.session_generation.load(
                 std::memory_order_acquire) == notified_session;
         const bool injecting = live_tx_running();
-        const bool preflight_active = g_preflight_phase_clock_active.load(
-            std::memory_order_acquire);
+        const bool clock_timer_owned_and_enabled =
+            g_monitored_sample_clock != nullptr &&
+            g_sample_clock_context.phase_enabled;
+        const bool auto_sync_mode =
+            smp_synch_lab_mode() == SvSyncPolicyMode::external_ptp_auto;
         if (g_sample_clock_context.epoch_generation.load(
                 std::memory_order_acquire) == observation.last_sv_epoch_generation &&
-            SvAutoPreflightPolicy::can_steer(
+            SvAutoPreflightPolicy::can_steer_owned_grid(
                 session_matches, decision.accepted,
                 same_sv_ptp_clock_lease(
                     armed_lease, g_sample_clock_context.armed_ptp_clock) &&
                 same_sv_ptp_clock_lease(lease, read_ptp_epoch_clock_lease()),
-                no_new_publisher_fault, injecting, preflight_active)) {
+                no_new_publisher_fault,
+                clock_timer_owned_and_enabled, auto_sync_mode)) {
             // The PRE-START clock must truly steer while SV TX is OFF.
             // The old live_tx_running() gate invalidated its servo on every
             // 1Hz observation; capture verified 120s of smpSynch=0.
@@ -2019,7 +2025,9 @@ void sv_ptp_phase_observer_task(void* argument) {
                     stable_local && lease.role == PtpAuthorityRole::receiver,
                     SvSyncLossReason::phase_or_mac, stamp_ms);
             } else {
-                if (preflight_active) {
+                // M3.E: the same owned timebase keeps steering throughout
+                // STOP->PARK->START, even before the publisher updates its
+                // optional preflight flag. No SV packet is emitted here.
                     // M3.A: keep *clock* qualification across an SV-only STOP.
                     // No SV frame exists while TX is off. Preserve a prior
                     // verified claim only while this SAME timer, lease,
@@ -2043,11 +2051,6 @@ void sv_ptp_phase_observer_task(void* argument) {
                         g_parked_source_clock_certified.store(
                             true, std::memory_order_release);
                     }
-                } else {
-                    local_acquisition.reset();
-                    source_fast_acquisition.reset();
-                    revoke_sv_auto_claims(SvSyncLossReason::publisher_stop);
-                }
             }
             committed = true;
         } else if (session_matches) {
