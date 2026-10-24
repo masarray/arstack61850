@@ -2265,7 +2265,7 @@ void DeviceController::processLine(const QString& rawLine) {
     // STOP. Never show an old burst as today's fault: bind to SVLIFE stop_seq
     // and the verified board boot, while keeping the normal RUNNING state clear.
     static const QRegularExpression kSvTxFault(
-        QStringLiteral("SVTXFAULT state=(RUNNING|STOPPED).*last_stop_seq=(\\d+)"
+        QStringLiteral("SVTXFAULT state=(RUNNING|STOPPED) svlife_stop_seq=(\\d+)"
                        ".*last_stop_first_error=(-?\\d+) last_stop_last_error=(-?\\d+)"
                        " last_stop_link_up=([01])"));
     const auto txFault = kSvTxFault.match(line);
