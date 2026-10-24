@@ -150,6 +150,17 @@ public:
         const bool serialConnected) noexcept {
         return owner == PortOwner::firmwareTool && !serialConnected;
     }
+    // No OS watcher / extra scan: react to the existing worker's 750-ms
+    // physical port inventory and queue semantic IDENTIFY only on arrival.
+    // A pure predicate makes COM renumbering testable without USB hardware.
+    [[nodiscard]] static bool hasNewlyEnumeratedPort(
+        const QStringList& previous, const QStringList& current) noexcept {
+        for (const QString& name : current) {
+            if (!previous.contains(name, Qt::CaseInsensitive)) return true;
+        }
+        return false;
+    }
+
     [[nodiscard]] static bool recoveryIdentityMatches(
         const QString& expectedDeviceId,
         const QString& observedDeviceId) noexcept {
@@ -413,6 +424,7 @@ private:
     bool setupError_{false};
     bool recoveryPending_{false};
     bool shuttingDown_{false};
+    QStringList lastEnumeratedPorts_;
     int unidentifiedDiscoveryTicks_{0};
     int updateReconnectAttempts_{0};
     int profileSyncAttempts_{0};
