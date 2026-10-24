@@ -1,4 +1,4 @@
-name: Publish M3.H Stable Product Landing to Project Pages
+name: Publish ARStack Latest Stable Product Landing to Project Pages
 
 on:
   push:
@@ -14,7 +14,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: arstack-m3h-project-pages
+  group: arstack-latest-project-pages
   cancel-in-progress: false
 
 jobs:
@@ -26,14 +26,17 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - name: Verify only the stable simulator landing is being deployed
+      - name: Validate evergreen product landing and packaged release links
         shell: bash
         run: |
           set -euo pipefail
-          grep -Fq 'Public Stable' index.html
-          grep -Fq 'a922e9bdba4e57a4' index.html
-          grep -Fq 'processbus-sim-m3h-20261024' index.html
-          grep -Fq 'simulated Global PTP Grandmaster' index.html
+          grep -Fq 'https://github.com/masarray/arstack61850/releases/latest' index.html
+          grep -Fq 'syncLatestRelease' index.html
+          grep -Fq 'data-asset="windows"' index.html
+          grep -Fq 'data-asset="portable"' index.html
+          grep -Fq 'data-asset="firmware"' index.html
+          grep -Fq 'M3.H' index.html
+          grep -Fq '163,048' index.html
           mkdir -p _site
           cp index.html _site/index.html
           touch _site/.nojekyll
@@ -44,3 +47,23 @@ jobs:
       - name: Deploy project Pages route /arstack61850/
         id: deployment
         uses: actions/deploy-pages@v4
+      - name: Confirm live GitHub Pages delivery
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 18); do
+            if curl --fail --location --silent --show-error \
+              "https://masarray.github.io/arstack61850/?build=$GITHUB_SHA&attempt=$attempt" \
+              -o /tmp/arstack-live.html; then
+              if grep -Fq 'syncLatestRelease' /tmp/arstack-live.html &&
+                 grep -Fq 'data-asset="windows"' /tmp/arstack-live.html &&
+                 grep -Fq 'data-asset="portable"' /tmp/arstack-live.html; then
+                echo 'PASS: latest-release links deployed on the public product URL'
+                exit 0
+              fi
+            fi
+            sleep 5
+          done
+          echo 'FAIL: Pages still serves an old product snapshot' >&2
+          exit 1
+
