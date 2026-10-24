@@ -1,5 +1,7 @@
 # SMV Injector status and completion boundary
 
+> **Latest public process-bus simulator progress (2026-10-24):** [M3.H Lab Edition](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h-20261024) adds an isolated-bench **internal simulated Global PTP GM**, EMAC hardware TX timestamp / phase evidence, `smpSynch AUTO` and 4I+4V SV at 4000 fps. Engineer PCAP recorded 163,048 consecutive SV frames in 40.763 s (all `smpSynch=2`, no missing/duplicate/malformed), 44 Announce, and 43 complete Sync/Follow_Up pairs. A voluntary/observed SV STOP interrupted the requested 120 s capture. No GPS or relay required for simulation; compatibility with actual relay subscribers not yet tested. See [release evidence and quick start](releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md). The 4800-fps SCL-derived experiment below is an **older independent engineering result**, not an advertised capability of this exact M3.H reference profile.
+
 This document records the current engineering status of the ESP32-P4 Sampled Values injector and defines what is considered complete versus what remains as validation, timing, analyzer and product-hardening work.
 
 ## Status summary
@@ -56,7 +58,7 @@ The first deployable embedded profile is deliberately bounded:
 - 64-byte sample payload;
 - configurable destination MAC, APPID, VLAN presence/VID/PCP, `svID`, `confRev` and supported ASDU field-presence options;
 - rational GPTimer scheduling for rates that are not an integer number of microseconds, including 4800 fps;
-- truthful `smpSynch=0` until measured synchronization exists.
+- `smpSynch=0` without timing evidence; in M3.H isolated simulated-Global-GM `AUTO`, `smpSynch=2` is supported only when the firmware's locally measured phase/MAC evidence is qualified.
 
 Structurally valid profiles outside this boundary may still be parsed and explained by the host compiler, but deployment must remain blocked rather than guessing an embedded payload layout.
 
