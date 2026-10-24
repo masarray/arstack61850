@@ -595,11 +595,12 @@ void print_state() noexcept {
     // condition. A restarted publisher may be RUNNING while last_stop_seq>0.
     const auto tx = live_tx_fault_snapshot();
     ESP_LOGI(kTag,
-             "SVTXFAULT state=%s burst_now=%lu failed_total=%lu bursts=%lu "
+             "SVTXFAULT state=%s svlife_stop_seq=%lu burst_now=%lu failed_total=%lu bursts=%lu "
              "recovered=%lu first_error=%ld last_error=%ld link_now_at_failure=%u "
              "last_stop_seq=%lu last_stop_uptime_ms=%lu last_stop_burst=%lu "
              "last_stop_first_error=%ld last_stop_last_error=%ld last_stop_link_up=%u",
              g_running.load(std::memory_order_acquire) ? "RUNNING" : "STOPPED",
+             static_cast<unsigned long>(g_sv_stop_seq.load(std::memory_order_acquire)),
              static_cast<unsigned long>(tx.current_streak),
              static_cast<unsigned long>(tx.failed_frames),
              static_cast<unsigned long>(tx.failure_bursts),
