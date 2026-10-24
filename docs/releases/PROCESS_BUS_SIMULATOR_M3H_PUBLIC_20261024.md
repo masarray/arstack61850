@@ -1,6 +1,6 @@
-# ARStack Process Bus Simulator — M3.H Lab Edition (24 October 2026)
+# ARStack Process Bus Simulator M3.H — Stable Lab Simulator Edition (24 October 2026)
 
-**Public experimental engineering release:** ESP32-P4 Ethernet Sampled Values publisher + IEC/IEEE 61850-9-3-style internal PTP grandmaster, operated through ARStack Studio on Windows.
+**Public stable engineering lab simulator release:** ESP32-P4 Ethernet Sampled Values publisher + IEC/IEEE 61850-9-3-style internal PTP grandmaster, operated through ARStack Studio on Windows.
 
 This release is intended for isolated process-bus experiments, engineering education, SV/PTP decoder testing, and preparation for interoperability testing with protection relays. It does **not** require an external GPS, Omicron, or relay to operate. It deliberately advertises the **simulated global grandmaster profile** for laboratory purposes. This is a simulation capability, not independently verified UTC accuracy.
 
