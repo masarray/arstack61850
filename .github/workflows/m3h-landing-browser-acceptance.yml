@@ -1,0 +1,65 @@
+name: M3.H Stable Landing Browser and Mobile Acceptance
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/m3h-landing-browser-acceptance.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Install isolated browser automation
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/m3h-browser
+          cd /tmp/m3h-browser
+          npm init -y >/dev/null
+          npm install --no-save --no-package-lock playwright@1.57.0 >/dev/null
+          npx playwright install chromium
+
+      - name: Render live desktop and mobile layouts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          cat > /tmp/m3h-browser/check.cjs <<'JS'
+          const {chromium}=require('playwright');
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            for(const width of [1440,768,390,360]){
+              const page=await browser.newPage({viewport:{width,height:900},deviceScaleFactor:1});
+              const response=await page.goto('https://masarray.github.io/arstack61850/',{waitUntil:'domcontentloaded',timeout:30000});
+              if(response.status()!==200)throw new Error('LIVE_HTTP_'+response.status());
+              const data=await page.evaluate(()=>{
+                const buttons=[...document.querySelectorAll('a[href*="setup.exe"],a[href*="portable.zip"],a[href*="firmware.bin"]')];
+                return {title:document.title, width:document.documentElement.clientWidth,scroll:document.documentElement.scrollWidth,
+                  stable:document.body.innerText.includes('Public Stable'),build:document.body.innerText.includes('a922e9bdba4e57a4'),
+                  buttons:buttons.length, anyVisible:buttons.some(el=>{const r=el.getBoundingClientRect();return r.width>0&&r.height>0}),
+                  og:!!document.querySelector('meta[property="og:title"]')};
+              });
+              console.log(width,JSON.stringify(data));
+              if(!data.stable||!data.build||!data.og||data.buttons<3||!data.anyVisible)throw new Error('MISSING_LANDING_CONTENT_'+width);
+              if(data.scroll>data.width+2)throw new Error('HORIZONTAL_OVERFLOW_'+width+':'+data.scroll+'>'+data.width);
+              await page.screenshot({path:'evidence/m3h-'+width+'.png',fullPage:true});
+              await page.close();
+            }
+            await browser.close();
+            console.log('PASS: LIVE desktop/tablet/mobile browsers without horizontal overflow');
+          })().catch(e=>{console.error(e);process.exit(1)});
+          JS
+          node /tmp/m3h-browser/check.cjs
+
+      - name: Archive actual rendered screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: m3h-public-stable-responsive-screenshots
+          path: evidence/
+          if-no-files-found: ignore
