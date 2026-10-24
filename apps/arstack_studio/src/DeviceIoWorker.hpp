@@ -132,6 +132,8 @@ public slots:
     void autoDetectAndConnect(quint64 generation);
     void connectPort(const QString& portName, quint64 generation);
     void disconnectPort(quint64 generation);
+    // Bounded no-reply recovery, different from manual DISCONNECT.
+    void retireUnresponsivePort(quint64 generation);
     void confirmIdentity(quint64 generation);
     void enqueueCommands(
         const QStringList& commands,
@@ -155,6 +157,9 @@ signals:
     void commandTransmitted(quint64 generation, const QString& command, bool quiet);
     void commandRejected(quint64 generation, const QString& message);
     void transportError(quint64 generation, const QString& message, bool fatal);
+    // Emitted only after the worker has CLOSED a failed verified COM port.
+    // Deliberate user disconnect must never emit an automatic recovery event.
+    void unexpectedPortLoss(quint64 generation, const QString& portName);
 
 private:
     friend class DeterministicSessionHarness;
