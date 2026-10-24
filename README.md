@@ -1,398 +1,59 @@
-# ARStack61850 — Open-source IEC 61850 Engineering Lab
+# ARStack61850
 
-Explore, simulate and test IEC 61850 in your own engineering lab. ARStack61850 combines a portable C++ protocol engine, desktop tools and real-time ESP32-P4 Sampled Values (SV) generation with PTP clock simulation.
+An open-source **IEC 61850 engineering lab** for exploring Sampled Values, PTP timing and process-bus behavior. Configure waveforms in a native desktop app, then generate real Ethernet traffic with an ESP32-P4 board.
 
-**[Download the latest release](https://github.com/masarray/arstack61850/releases/latest)** · **[Open the product website](https://masarray.github.io/arstack61850/)** · **[Installation guide](docs/INSTALL.md)** · **[Source code](https://github.com/masarray/arstack61850)**
+[![Latest release](https://img.shields.io/github/v/release/masarray/arstack61850?label=Latest%20release)](https://github.com/masarray/arstack61850/releases/latest)
+[![C++ CI](https://github.com/masarray/arstack61850/actions/workflows/cpp-ci.yml/badge.svg)](https://github.com/masarray/arstack61850/actions/workflows/cpp-ci.yml)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue)](LICENSE)
 
-### Get started
+[**Download latest release**](https://github.com/masarray/arstack61850/releases/latest) · [Product website](https://masarray.github.io/arstack61850/) · [Installation guide](docs/INSTALL.md) · [Report an issue](https://github.com/masarray/arstack61850/issues)
 
-1. Open **Latest release** and download the **Windows Setup** file; the portable package is also available.
-2. Install **ARStack Studio** and follow the built-in first-run flow.
-3. For real Ethernet SV/PTP experiments, connect a compatible ESP32-P4 Ethernet board and use the **firmware supplied with that same release**. You can explore the desktop interface before connecting hardware.
-4. Use a dedicated lab Ethernet connection for SV and PTP experiments.
+## What can you do with ARStack?
 
-**Windows command-line install** (downloads the current stable installer and verifies its SHA-256):
+| Capability | Your workflow |
+| --- | --- |
+| 4I + 4V Sampled Values | Set current, voltage, frequency and phase scenarios in ARStack Studio, then publish SV from an ESP32-P4 Ethernet board |
+| PTP laboratory timing | Explore a simulated grandmaster and observe Announce, Sync and Follow_Up frames |
+| Capture and inspect | Review traffic, counters, waveform/phasor behavior and timing evidence |
+| IEC 61850 engineering files | Explore SCL-based configurations and reference profiles in the desktop tooling |
+| Open protocol foundations | Build on C++20 MMS, GOOSE, Sampled Values, SCL and COMTRADE components |
+
+ARStack is made for hands-on experimentation, demonstrations and engineering validation. You can launch the desktop app and explore its controls before connecting hardware; Ethernet SV/PTP output uses the supported ESP32-P4 device.
+
+## Get started
+
+1. **Install Studio.** Open the [latest stable release](https://github.com/masarray/arstack61850/releases/latest) and download the Windows x64 Setup EXE or Portable ZIP.
+
+2. **Choose a scenario.** Open ARStack Studio and select the built-in **4I+4V** profile, or open a compatible SCL configuration.
+
+3. **Connect hardware for live output.** Attach your ESP32-P4 Ethernet board through USB and install the firmware shipped with the *same release* using Studio's Firmware panel.
+
+4. **Start your lab traffic.** Connect Ethernet to a dedicated test switch, set your signals and PTP mode, then use **Start / Stop** and inspect the resulting SV/PTP packets.
+
+Prefer installing from a Windows terminal? The verified installer script follows GitHub's current public stable release:
 
 ```powershell
-$installer = Join-Path $env:TEMP 'arstack-install.ps1'
-Invoke-WebRequest 'https://raw.githubusercontent.com/masarray/arstack61850/main/scripts/install-windows.ps1' -OutFile $installer
-& $installer
+$script = Join-Path $env:TEMP 'arstack-install.ps1'
+Invoke-WebRequest 'https://raw.githubusercontent.com/masarray/arstack61850/main/scripts/install-windows.ps1' -OutFile $script
+& $script
 ```
 
-**Linux:** An AppImage packaging workflow is available; the [latest release](https://github.com/masarray/arstack61850/releases/latest) lists a Linux download once its build and checks pass. See [Linux install instructions](docs/INSTALL.md). Windows remains the verified desktop installer for the M3.H release.
+For Linux x86_64, check [Downloads](https://github.com/masarray/arstack61850/releases/latest) for an AppImage when it is published; the [installation guide](docs/INSTALL.md) also covers Linux command-line setup and WinGet package status.
 
-### What you can explore
+## See it in action
 
-- **Sampled Values:** 4 currents + 4 voltages, simulated waveforms and real-time Ethernet output from supported ESP32-P4 hardware.
-- **PTP timing:** an internal simulated grandmaster, time-sync controls and on-wire timing evidence.
-- **Engineering tools:** SCL, COMTRADE, MMS, GOOSE and other IEC 61850 foundations in the source tree. Features depend on the chosen application and release.
-- **Reproducible experimentation:** open-source code, tests, example configurations and release notes.
+The released **M3.H** laboratory milestone captured **163,048 SV frames** in 40.763 seconds at **3,999.884 frames/s**, with continuous `smpCnt` and no missing, duplicate or malformed SV frames in that captured interval. The same test recorded PTP Announce / Sync / Follow_Up traffic.
 
-No external GPS receiver or protection relay is needed to begin exploring the simulator. Network traffic generation is intended for a separate test bench, not an energized operational substation network.
+[View the M3.H engineering results](docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md) · [Explore the product page](https://masarray.github.io/arstack61850/)
 
-### Verified M3.H milestone
+## Developers & contributors
 
-The [24 October 2026 M3.H release](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h-20261024) recorded 163,048 consecutive SV packets over 40.76 seconds, at 3,999.884 frames/s, with `smpSynch=2` across the captured interval and no missing or malformed SV frames. That result is a measured laboratory milestone, not a claim about later builds or external device acceptance. See the [test record](docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md).
+ARStack includes a portable C++20 IEC 61850 engine, Qt desktop applications, embedded targets and automated protocol tests.
 
-**Release downloads always resolve through [GitHub's latest stable release](https://github.com/masarray/arstack61850/releases/latest)** rather than a hard-coded version. Release notes identify the firmware/software pairing and validated features for each build.
+- [Technical & developer reference](docs/DEVELOPER_GUIDE.md) — architecture, build commands, implemented modules and lab validation
+- [Project direction](NORTH_STAR.md) — product goals and architecture
+- [Studio operator guide](apps/arstack_studio/README.md) — usage and firmware handling
+- [IEC 61850 simulator](apps/ied_simulator/README.md) — MMS server and model-based engineering workbench
+- [Issues and discussions](https://github.com/masarray/arstack61850/issues) — report a problem or share a reproducible test
 
----
-
-## Developer and technical documentation
-
-The portable C++20 stack originated from the ARIEC61850 behavioral model. The engineering north star is deterministic IEC 61850 process-bus instrumentation with bounded runtime behavior, protocol evidence and platform-specific hardware timing.
-
-## Start here
-
-For a new engineer or AI development thread, read these before making architecture changes:
-
-1. [`NORTH_STAR.md`](NORTH_STAR.md) — product thesis, standards, hardware roadmap and definition of success.
-2. [`docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md`](docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md) — latest public process-bus laboratory simulator evidence, setup and release boundary; [`v0.1.0 historical evidence`](docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md).
-3. [`PROJECT_HANDOFF.md`](PROJECT_HANDOFF.md) — current repository handoff and separation between released SMV work and active follow-on tracks.
-4. [`apps/arstack_studio/README.md`](apps/arstack_studio/README.md) — operator workflow, firmware recovery and Windows distribution details.
-5. [`docs/ONLINE_MODEL_CONNECT_DECISION.md`](docs/ONLINE_MODEL_CONNECT_DECISION.md) — short decision contract separating full live discovery from SCL-assisted online connect.
-6. [`LIVE_DISCOVERY_PROFILE.md`](LIVE_DISCOVERY_PROFILE.md) — detailed live-discovery and online-model interoperability boundary.
-7. [`embedded/esp32p4_smv_injector/ARCHITECTURE.md`](embedded/esp32p4_smv_injector/ARCHITECTURE.md) — embedded real-time architecture boundaries.
-8. [`docs/GLOBAL_BENCHMARK.md`](docs/GLOBAL_BENCHMARK.md) — vendor-neutral standards/industry research behind the direction.
-
-The project deliberately separates **wire facts**, **configured expectations**, **profile claims**, and **synchronization evidence**. A packet that decodes in a host capture tool is not, by itself, a conformance or timing claim.
-
-## Current process-bus simulator milestone
-
-**M3.H Lab Edition is published publicly** as a stable lab-simulator SV publisher + internal PTP grandmaster emulator. The 40.76-second raw PCAP validates stable lab traffic and hardware-evidence-qualified `smpSynch=2`; it does not prove a subscriber relay would accept or lock without alarms. No external GPS/certification is a dependency for running or releasing this lab simulator.
-
-The older v0.1.0/v0.1.1 products remain available as historical releases. Further work: independent relay/IED interoperability when hardware is available, deeper 120-second and multi-cycle captures, alternate SV profiles, and optional external time references—not blockers for M3.H public distribution.
-
-## Lineage and portable core
-
-The original work began as an incremental C++20 migration of the ARIEC61850 C# protocol stack. The C# implementation remains a behavioral oracle where cross-language equivalence is still useful, while ARStack-specific work adds deterministic RTOS/hardware execution and evidence that a normal desktop stack cannot provide.
-
-The project is **not yet a complete IEC 61850 replacement stack**. Current
-Public Alpha work focuses on a useful read-only MMS engineering client, process
-bus codecs/runtime foundations, reproducible cross-language evidence, and an
-MCU-safe protocol boundary.
-
-## Implemented
-
-### Phase 0 — portable foundation
-
-- CMake-based C++20 static library.
-- BER and MMS data/UTC-time codecs.
-- Ethernet/VLAN process-bus framing and classic PCAP support.
-- GOOSE and Sampled Values codecs plus offline/runtime supervision foundations.
-- SCL read-only parsing and COMTRADE CFG/DAT support for host engineering tools.
-- RFC 1006 TPKT, COTP, ISO Session, Presentation, ACSE, and MMS Initiate.
-- Confirmed MMS GetNameList, GetVariableAccessAttributes, Read, and Write codecs.
-- Read-only MMS FileDirectory/FileOpen/FileRead/FileClose codecs and bounded streaming runtime.
-- DataSet directory, InformationReport, RCB state, and report-subscription foundations.
-
-### Phase 1A–1E — deterministic process-bus core
-
-- IEC 61850 UTC time and recursive MMS Data/AllData codec.
-- Complete GOOSE PDU/frame codecs and offline publisher/subscriber supervision.
-- Sampled Values ASDU, multi-ASDU PDU, Ethernet frame, payload, quality, counter, and stream supervision.
-- C#-derived synthetic PCAP equivalence evidence.
-- Sanitizer, deterministic mutation-smoke, and LLVM libFuzzer coverage.
-- Receive-only isolated-laboratory tooling.
-
-A codec existing in the library does **not** mean the corresponding mutating
-operation is enabled in live Phase 4C discovery.
-
-### Phase 2A — SCL foundation
-
-- Bounded, dependency-free XML/SCL reader.
-- IED, DataSet, FCDA, GOOSE, Sampled Values, report-control, and communication mapping.
-- SCL edition detection, type-template resolution, DataSet binding, diagnostics, and SCL/XML fuzzing.
-
-### Phase 2B — COMTRADE foundation
-
-- CFG parsing for IEEE C37.111-style 1991/1999/2013 records.
-- ASCII, BINARY, BINARY32, and FLOAT32 DAT readers.
-- Analog engineering scaling (`a * raw + b`) and packed digital status decoding.
-- Timestamp multiplier and multi-rate fallback scheduling.
-- Default `Va/Vb/Vc/Vn/Ia/Ib/Ic/In` channel mapping.
-- Deterministic SCL Sampled Values to COMTRADE channel binding.
-- Read-only `ariec61850_comtrade_inspect` human/JSON CLI.
-- C#-derived ASCII and binary fixtures, mutation smoke, sanitizer, and libFuzzer corpus.
-
-### Phase 3A — MMS transport foundation
-
-- RFC 1006 TPKT frame encode/decode with strict version, reserved-octet, and length validation.
-- Incremental TPKT stream framing for fragmented and coalesced TCP byte streams.
-- COTP Connection Request, Connection Confirm, Data, Disconnect Request, and Error TPDU decoding.
-- Default C#-compatible CR vector, TPDU-size negotiation, and TSAP selector mirroring.
-- COTP Data segmentation by negotiated TPDU size and bounded EOT reassembly.
-- Fragment-count, byte-count, and empty non-final fragment abuse guards.
-- C#-derived golden vectors, deterministic mutation smoke, sanitizer, and libFuzzer coverage.
-
-### Phase 3B — MMS association codecs
-
-- Bounded ISO Session Connect/Accept SPDU and data-transfer profile codecs.
-- Presentation CP/CPA context definitions, negotiation results, selectors, and PDV routing.
-- ACSE and MMS context negotiation using BER transfer syntax.
-- Structured ACSE AARQ/AARE application context, AP-title, AE-qualifier, result, and diagnostic parsing.
-- EXTERNAL user-information handling with MMS Initiate retained as an opaque Phase 3C payload.
-- Deterministic association-response construction with session and context mirroring.
-- Byte-exact C# request/response golden vectors, mutation smoke, sanitizer, and libFuzzer coverage.
-
-### Phase 4C — live read-only MMS discovery
-
-`ariec61850_live_discover` currently provides:
-
-- built-in Windows/POSIX TCP transport;
-- MMS association through the implemented OSI stack;
-- domain and variable GetNameList discovery;
-- named-variable-list/DataSet inventory;
-- bounded variable-type probes;
-- bounded RCB read evidence;
-- LD/LN/DO/DA live-model projection;
-- IED identity inference;
-- CDC/type heuristics compatible with the C# oracle;
-- GOOSE/SV/setting-group/log control-block name inventory;
-- dynamic RCB `Bound` / `Unbound` / `NotRead` / `ReadFailed` evidence;
-- read-only RCB candidate planning and conservative operational availability.
-
-The live discovery surface sends only read-only services such as GetNameList,
-GetVariableAccessAttributes, GetNamedVariableListAttributes and Read. It does
-**not** authorize or perform Write, control, GI, RCB reservation/enable,
-dynamic DataSet mutation, or file-service mutation.
-
-### Phase 4E - MMS file transfer client
-
-`ariec61850_file_transfer` adds an explicit read-only file-service surface:
-
-- root/nested FileDirectory with bounded continuation;
-- streaming FileOpen/FileRead/FileClose download to a caller-owned sink;
-- full signed Integer32 FRSM support;
-- exact Confirmed-Error evidence and bounded diagnostics;
-- best-effort FileClose that preserves the primary failure; and
-- a single oracle-matched rooted-backslash fallback for file-non-existent.
-
-The default CLI operation is directory listing. Download requires both
-`--remote` and `--output`; upload/delete/rename are not implemented. See
-`docs/MMS_FILE_TRANSFER.md` for API, safety, CLI, exit-code, and acceptance
-details.
-
-#### Public Alpha A1 model work
-
-The live model now projects C#-style:
-
-- `proposedLnTypeId` and `proposedDoTypeId`;
-- `typeTemplates`;
-- `variableTypeDiscoveries`;
-- deterministic IED identity evidence;
-- DataSet/RCB/control-block inventory.
-
-Dynamic report configuration is separated from static model identity with three
-fingerprints during migration:
-
-- `fingerprint` — legacy canonical fingerprint retained for compatibility;
-- `structuralFingerprint` — LD/LN/DO/DA + control identities, excluding mutable
-  DataSet/RCB runtime state;
-- `runtimeSnapshotFingerprint` — current DataSet inventory and RCB binding/state.
-
-For IEDs with dynamic DataSets, a changed runtime fingerprint with an unchanged
-structural fingerprint is expected and does not by itself mean the IED model or
-firmware changed.
-
-### Phase 3C — MMS service codecs
-
-- MMS Initiate request/response and confirmed request/response/error envelopes.
-- Invoke-ID routing, ObjectName, GetNameList, GetVariableAccessAttributes, Read, and Write.
-- Recursive bounded TypeSpecification and mixed success/failure access results.
-- C#-derived vectors, sanitizer, deterministic mutation smoke, and libFuzzer coverage.
-
-### Phase 4A — offline DataSet and report monitoring
-
-- DataSet and buffered/unbuffered RCB inventory from supplied GetNameList evidence.
-- GetNamedVariableListAttributes request/response and IEC reference normalization.
-- Strict InformationReport and OptFlds-driven report-frame decoding.
-- RCB attribute read-plan/state mapping with cautious availability confidence.
-- Sequence, configuration, DataSet, overflow, and segmentation continuity tracking.
-- Bounded offline report monitor and dedicated MMS-reporting fuzz corpus.
-
-### Hardware process-bus runtime — ESP32-P4 P0/P1/P2 foundation
-
-The portable core still does not silently open raw sockets or physical IED sessions. **Active process-bus transmission exists only in explicitly enabled hardware/lab targets**, currently `embedded/esp32p4_smv_injector`, and is intended for isolated bench use.
-
-The current ESP32-P4 target adds:
-
-- RMII hardware bring-up;
-- active Layer-2 SV TX;
-- fixed/prebuilt runtime templates;
-- deterministic GPTimer cadence;
-- separate canonical vs diagnostic stream identities;
-- 4I+4V balanced waveform generation;
-- once-per-second realtime telemetry;
-- a path toward EMAC hardware timestamps and PTP-disciplined synchronization.
-
-See the embedded README/architecture files and `PROJECT_HANDOFF.md` for the exact current state.
-
-## Phase 4B: association and report-subscription runtime
-
-The C++ core now includes a transport-injected MMS association runtime and persistent RCB subscription state machine. It performs COTP, Session, Presentation, ACSE/MMS Initiate, confirmed-service routing, timeout/cancellation handling, RCB re-probe, URCB reservation, `RptEna`, optional GI, InformationReport delivery, and ownership-aware cleanup. See `ASSOCIATION_RUNTIME_PROFILE.md`.
-
-The core deliberately does not ship a default socket transport in this phase. Applications that intentionally enable live IED access must provide an `MmsByteTransport` implementation.
-
-## Build
-
-### Windows
-
-```powershell
-cmake -S . -B build -A x64 -DARIEC61850_WARNINGS_AS_ERRORS=ON
-cmake --build build --config Release --parallel
-ctest --test-dir build -C Release --output-on-failure
-```
-
-### Linux
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DARIEC61850_WARNINGS_AS_ERRORS=ON
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-```
-
-### Sanitizers
-
-```bash
-CC=clang CXX=clang++ cmake -S . -B build-sanitizers \
-  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  -DARIEC61850_ENABLE_SANITIZERS=ON
-cmake --build build-sanitizers --parallel
-ctest --test-dir build-sanitizers --output-on-failure
-```
-
-## Read-only tools
-
-### Inspect a COMTRADE record
-
-```powershell
-.\build\Release\ariec61850_comtrade_inspect.exe .\record.cfg --json
-```
-
-### Analyze a saved process-bus PCAP
-
-```powershell
-.\scripts\run-lab-check.ps1 -Pcap .\captures\device-session.pcap
-```
-
-## Live discovery quick start
-
-Human summary:
-
-```powershell
-.\build\Release\ariec61850_live_discover.exe 192.168.1.10 102
-```
-
-Bounded read-only RCB evidence:
-
-```powershell
-.\build\Release\ariec61850_live_discover.exe `
-  192.168.1.10 102 `
-  --timeout-ms 30000 `
-  --no-types `
-  --no-datasets `
-  --max-rcb 50 `
-  --rcb-plan dynamic `
-  --rcb-availability
-```
-
-Model JSON with bounded type discovery:
-
-```powershell
-New-Item -ItemType Directory -Force .artifacts\parity | Out-Null
-
-.\build\Release\ariec61850_live_discover.exe `
-  192.168.1.10 102 `
-  --timeout-ms 120000 `
-  --no-datasets `
-  --no-rcb `
-  --max-types 256 `
-  --model-json `
-  | Set-Content -Encoding utf8 .artifacts\parity\cpp-model.json
-```
-
-Inspect fingerprint/type evidence:
-
-```powershell
-$model = Get-Content .artifacts\parity\cpp-model.json -Raw | ConvertFrom-Json
-$model.fingerprint
-$model.structuralFingerprint
-$model.runtimeSnapshotFingerprint
-$model.typeTemplates.Count
-$model.variableTypeDiscoveries.Count
-```
-
-## Same-IED C# ↔ C++ parity
-
-The canonical comparator is:
-
-```powershell
-python .\tools\compare_live_model_json.py `
-  .artifacts\parity\csharp\ied-model.json `
-  .artifacts\parity\cpp-model.json
-```
-
-Optional evidence:
-
-```powershell
-python .\tools\compare_live_model_json.py `
-  .artifacts\parity\csharp\ied-model.json `
-  .artifacts\parity\cpp-model.json `
-  --types `
-  --runtime
-```
-
-Default pass/fail is structural. Runtime DataSet/RCB drift is informational.
-The historical `scripts/compare-live-model-parity.py` path remains only as a
-compatibility wrapper around this comparator.
-
-See `docs/LIVE_MODEL_PARITY.md` for the complete C# export + comparison flow.
-
-## Embedded direction
-
-The wire core is being separated from host engineering services. Current target
-roles are documented in `docs/EMBEDDED_TARGETS.md`:
-
-- ESP32-P4-ETH: protocol/performance reference after Public Alpha;
-- Waveshare ESP32-S3-POE-ETH-8DI-8DO: real I/O application reference;
-- STM32H7/NXP class: later portability/industrialization target.
-
-The embedded profile already excludes host TCP/live-discovery/PCAP/COMTRADE/SCL
-parser tooling and provides a no-RTTI host-simulation gate. The portable MMS
-file-service runtime is included through abstract transport/sink boundaries;
-its filesystem-backed CLI remains host-only. Sampled Values also
-has a caller-owned `encode_into(span)` path so the eventual publisher does not
-need to allocate a fresh Ethernet frame buffer per sample.
-
-## Validation boundary
-
-Implemented code and green CI do not equal full field acceptance. Current
-validation includes GCC/Clang/MSVC builds, deterministic tests, sanitizer/fuzz
-workflows, and selected live read-only interoperability evidence. Full
-replacement claims still require same-IED C#↔C++ evidence, repeated live cycles,
-packet capture review, and multi-vendor physical/simulator interoperability.
-
-See `docs/FEATURE_MATRIX.md` for a conservative status table and
-`PHASE_4C1_LIVE_MODEL_INTEROP.md` for the live-evidence boundary.
-
-See `REPORTING_PROFILE.md` for the offline report decoder profile, `LAB_INTEROP_CHECKLIST.md` before using a physical IED, and `MIGRATION_CHECKLIST.md` for the detailed progress ledger.
-
-## North-star reminder
-
-ARStack is not intended to become a UI-heavy packet viewer with timing bolted on later. The architecture priority is:
-
-```text
-standards truth
-    > measured hardware evidence
-    > deterministic execution
-    > interoperability evidence
-    > usability
-    > convenience hacks
-```
-
-The long-term product family — injector, process-bus analyzer, digital-substation probe and real-time MU/closed-loop simulator — should share the same real-time/evidence core.
-
-## Public-repository naming policy
-
-Public project documentation should remain vendor-neutral. Do not add commercial competitor names, product comparisons, logos, screenshots, or vendor marketing references. Standards, protocol identifiers, and technical platform/dependency names required to build or reproduce the project are allowed.
+The application is free and open source under the [GPL-3.0 license](LICENSE). Keep active SV/PTP publishing on a dedicated lab network rather than a live substation LAN.
