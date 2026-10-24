@@ -141,7 +141,7 @@ public:
     static constexpr std::size_t maximum_identifiers = 128U;
 
     // reference IEC 61850 client performs bounded bulk reads while walking a full IEC 61850 model.
-    // The proven ARIEC61850 trace for the SIPROTEC reference model contains a
+    // The proven ARIEC61850 trace for the reference IEC 61850 model contains a
     // single 78-variable Read request. Keep the portable span profile bounded,
     // but leave enough headroom for that real discovery pattern.
     static constexpr std::size_t maximum_variables = 128U;
