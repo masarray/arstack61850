@@ -51,6 +51,7 @@ using ar::iec61850::time_sync::PtpPortIdentity;
 using ar::iec61850::time_sync::PtpPublisherOptions;
 using ar::iec61850::time_sync::PtpPublisherRuntime;
 using ar::iec61850::time_sync::PtpSourceReadinessGate;
+using ar::iec61850::time_sync::PtpSourceEvidenceContinuity;
 using ar::iec61850::time_sync::PtpSourceEvidenceFreshness;
 using ar::iec61850::time_sync::conservative_lab_time_properties;
 using ar::iec61850::time_sync::inspect_ptp_power_profile_cadence;
@@ -949,20 +950,28 @@ void ptp_lab_task(void* argument) {
             }
             success = pair_delivered && success;
         }
-        // A failed peer-delay response in the same batch must also revoke
-        // any freshly sent core messages; no readiness resurrection by Pdelay.
+        // A failed TX batch invalidates *cold* readiness: it must not
+        // promote a new SOURCE based on one new message. However it MUST
+        // NOT zero the timestamps of independently successful Announce and
+        // Sync/Follow_Up packets. That was tearing down the still-running
+        // source clock lease beside every 1-Hz PTP TX epoch even while all
+        // three packets appeared on the wire, cycling SV smpSynch 2->0->2.
+        // Positive evidence ages out naturally within the existing bounded
+        // ~3s SOURCE freshness interval. Any physical STOP/clock fault still
+        // invalidates the lease, and this does not assert UTC traceability.
         if (!success) {
             source_readiness.invalidate();
-            g_ptp_last_announce_us.store(0LL, std::memory_order_release);
-            g_ptp_last_sync_pair_us.store(0LL, std::memory_order_release);
         }
-        const bool qualified_ready = source_readiness.ready() &&
-            PtpSourceEvidenceFreshness::fresh(
-                esp_timer_get_time(),
-                g_ptp_last_announce_us.load(std::memory_order_acquire),
-                g_ptp_last_sync_pair_us.load(std::memory_order_acquire),
-                g_ptp_freshness_timeout_us.load(std::memory_order_acquire));
         const bool was_ready = g_ptp_ready.load(std::memory_order_acquire);
+        const bool positive_evidence_fresh = PtpSourceEvidenceFreshness::fresh(
+            esp_timer_get_time(),
+            g_ptp_last_announce_us.load(std::memory_order_acquire),
+            g_ptp_last_sync_pair_us.load(std::memory_order_acquire),
+            g_ptp_freshness_timeout_us.load(std::memory_order_acquire));
+        const bool qualified_ready = PtpSourceEvidenceContinuity::ready(
+            source_readiness.ready(), was_ready, positive_evidence_fresh,
+            g_ptp_started.load(std::memory_order_acquire),
+            g_stop_requested.load(std::memory_order_acquire));
         if (!qualified_ready) {
             g_ptp_ready.store(false, std::memory_order_release);
         } else if (!was_ready) {
