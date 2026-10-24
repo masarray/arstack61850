@@ -104,11 +104,14 @@ jobs:
           New-Item -ItemType Directory -Path 'studio-ui-evidence' -Force | Out-Null
           Remove-Item Env:ARSTACK_STUDIO_QA_DIR -ErrorAction SilentlyContinue
           Remove-Item Env:ARSTACK_STUDIO_QA_NATIVE_ONLY -ErrorAction SilentlyContinue
-          foreach ($scale in @('1', '1.5', '1.75')) {
+          foreach ($scale in @('1', '1.25', '1.5', '1.75')) {
             $env:QT_SCALE_FACTOR = $scale
             $suffix = 'dpi-' + [string][int]([double]::Parse($scale, [System.Globalization.CultureInfo]::InvariantCulture) * 100)
             $logdir = Join-Path (Join-Path $PWD 'studio-ui-evidence') $suffix
             New-Item -ItemType Directory -Path $logdir -Force | Out-Null
+            # Software viewport shots, when grabWindow supports the CI backend.
+            # Native Windows fidelity is verified separately below.
+            $env:ARSTACK_STUDIO_QA_DIR = $logdir
             $stdout = Join-Path $logdir 'geometry-stdout.txt'
             $stderr = Join-Path $logdir 'geometry-stderr.txt'
             $probe = Start-Process -FilePath $exe -ArgumentList '--check-operator-ui' -Wait -PassThru `
@@ -136,11 +139,11 @@ jobs:
           if ($probe.ExitCode -ne 0) {
             throw "Native Windows screenshot acceptance failed, exit=$($probe.ExitCode)"
           }
-          $png = Join-Path $env:ARSTACK_STUDIO_QA_DIR 'studio-960x620.png'
+          $png = Join-Path $env:ARSTACK_STUDIO_QA_DIR 'studio-960x680.png'
           if (-not (Test-Path $png) -or (Get-Item $png).Length -lt 10000) {
-            throw 'Native Windows 960x620 screenshot was missing or empty'
+            throw 'Native Windows 960x680 screenshot was missing or empty'
           }
-          Write-Host 'Windows Qt deterministic 3-viewports x 3-DPI geometry + native 960x620 screenshot: PASS'
+          Write-Host 'Windows Qt deterministic 5-viewports x 4-DPI geometry + native 960x680 screenshot: PASS'
       - name: Upload desktop layout evidence
         if: always()
         uses: actions/upload-artifact@v4

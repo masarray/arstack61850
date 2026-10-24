@@ -2,6 +2,12 @@ name: ESP32-P4 SMV Injector
 
 on:
   workflow_call:
+    inputs:
+      phase_sync_preview:
+        description: "Build PTP-to-SV measured-local AUTO candidate only for Studio preview"
+        type: boolean
+        default: false
+        required: false
   workflow_dispatch:
   push:
     branches: [main]
@@ -50,7 +56,10 @@ env:
 
 jobs:
   build-esp32p4:
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    # On draft consolidation, do not run ordinary expensive standalone builds.
+    # The Studio Native Preview explicitly requests a paired firmware via
+    # workflow_call phase_sync_preview=true; allow only that purposeful build.
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft || (inputs.phase_sync_preview == true && (github.event.pull_request.head.ref == 'feat/ptp-source-policy-fsm-20261022' || github.event.pull_request.head.ref == 'fix/autolive-from-pcap-proven-7c95-20261023' || github.event.pull_request.head.ref == 'feat/m3a-persistent-sv-grid-20261023' || github.event.pull_request.head.ref == 'feat/m3b-boot-timebase-supervisor-20261023' || github.event.pull_request.head.ref == 'feat/m3c-safe-external-gm-handover-20261023' || github.event.pull_request.head.ref == 'feat/m3d-ptp-advanced-policy-diagnostics-20261024')) || github.event.pull_request.head.ref == 'feat/m3a-persistent-sv-grid-20261023' || github.event.pull_request.head.ref == 'feat/m3b-boot-timebase-supervisor-20261023' || github.event.pull_request.head.ref == 'feat/m3c-safe-external-gm-handover-20261023' || github.event.pull_request.head.ref == 'feat/m3d-ptp-advanced-policy-diagnostics-20261024' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -106,8 +115,59 @@ jobs:
           echo "ARSTACK_FIRMWARE_BUILD_ID=${ARSTACK_SOURCE_COMMIT:0:16}" >> "$GITHUB_ENV"
           echo "Exact firmware build identity pinned to ${ARSTACK_SOURCE_COMMIT:0:16}"
 
+      # Run the host-only SOURCE phase/MAC regression in the *same exact
+      # checkout* that produces the board image; Draft #286 otherwise skips
+      # the PTP Core workflow, making the physical 0<->2 fix untested.
+      - name: Regress internal GM microsecond sync without 0-2-0 flapping
+        if: ${{ inputs.phase_sync_preview == true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Embedded job defaults to embedded/esp32p4_smv_injector;
+          # this standalone host test lives at the repository root.
+          cd "$GITHUB_WORKSPACE"
+          g++ -std=c++20 -O2 -Wall -Wextra -Werror -Iinclude tests/test_sv_tx_egress_evidence.cpp -o /tmp/arstack_sv_egress_regression
+          /tmp/arstack_sv_egress_regression
+          echo 'PTP-SV SOURCE phase and MAC continuity regression: PASS'
+
+      - name: Enable PTP-SV measured AUTO preview profile
+        if: ${{ inputs.phase_sync_preview == true }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          cfg = Path('sdkconfig.defaults')
+          content = cfg.read_text(encoding='utf-8')
+          original = 'CONFIG_AR_SMV_BROADCAST_MIRROR=y'
+          assert content.count(original) == 1, 'expected controlled mirror policy'
+          content = content.replace(original, '# CONFIG_AR_SMV_BROADCAST_MIRROR is not set')
+          content += ('\n# SOURCE PTP-SV AUTO phase qualification - preview only\n'
+                      'CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y\n'
+                      'CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL=y\n')
+          cfg.write_text(content, encoding='utf-8')
+          PY
+
       - name: Select ESP32-P4 target
         run: source /opt/esp/idf/export.sh && idf.py set-target esp32p4
+
+      - name: Verify phase-qualified Studio preview is the actual compiled profile
+        if: ${{ inputs.phase_sync_preview == true }}
+        run: |
+          set -euo pipefail
+          grep -qx 'CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y' sdkconfig
+          # M3.B must really be linked into the exact shipped ESP32-P4 binary.
+          # A disabled dependency would otherwise silently negate sdkconfig.defaults.
+          grep -qx 'CONFIG_AR_PTP_BOOT_SOURCE_AUTOSTART=y' sdkconfig
+          # A LOCAL default can pass phase/MAC gates but the relay requires
+          # globally synchronized samples. Never ship a preview where the
+          # isolated lab Global GM boot option silently compiled out.
+          grep -qx 'CONFIG_AR_PTP_BOOT_SIMULATED_GLOBAL_GM=y' sdkconfig
+          grep -qx 'CONFIG_AR_PTP_AUTO_PREFER_EXTERNAL=y' sdkconfig
+          grep -qx 'CONFIG_AR_PTP_AUTO_LOCAL_FALLBACK=y' sdkconfig
+          grep -qx 'CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL=y' sdkconfig
+          grep -qx '# CONFIG_AR_SMV_BROADCAST_MIRROR is not set' sdkconfig
+          grep -qx 'CONFIG_AR_PTP_OPERATING_ROLE=0' sdkconfig
+          echo 'SOURCE simulated Global GM preview: PTP autostart ON; servo ON; canonical MAC TX evidence ON; mirror OFF'
 
       - name: Verify P0 pre-v3 silicon policy
         run: |
@@ -124,7 +184,10 @@ jobs:
           grep -qx 'CONFIG_AR_PTP_DOMAIN=0' sdkconfig
           grep -qx 'CONFIG_AR_PTP_TRANSPORT_SPECIFIC=0' sdkconfig
           grep -qx 'CONFIG_AR_PTP_RESPOND_PDELAY=y' sdkconfig
-          grep -qx 'CONFIG_AR_PTP_SYNC_INTERVAL_MS=250' sdkconfig
+          grep -qx 'CONFIG_AR_PTP_VLAN=y' sdkconfig
+          grep -qx 'CONFIG_AR_PTP_VLAN_ID=0' sdkconfig
+          grep -qx 'CONFIG_AR_PTP_VLAN_PRIORITY=4' sdkconfig
+          grep -qx 'CONFIG_AR_PTP_SYNC_INTERVAL_MS=1000' sdkconfig
           grep -qx 'CONFIG_AR_PTP_ANNOUNCE_INTERVAL_MS=1000' sdkconfig
           echo 'Production timing profile: PASS · serialized shared EMAC TX · PTP-P2 LAB_SOURCE · HW timestamp adapter compiled'
 
@@ -148,9 +211,9 @@ jobs:
           start_begin = source.index('if (take_start_request())')
           start_end = source.index('if (!live_tx_running())', start_begin)
           start_block = source[start_begin:start_end]
-          clock_start = start_block.rindex(
-              'sample_clock = start_sample_clock(task_handle, active_profile.publisher_rate_hz);'
-          )
+          # M3 passes the ETH/PTP epoch context as additional arguments.
+          # Assert that the timer is still armed after the final console log.
+          clock_start = start_block.rindex('sample_clock = start_sample_clock(')
           assert start_block.rindex('ESP_LOGI') < clock_start
           assert 'ESP_LOG' not in start_block[clock_start:]
           assert 'static_assert(std::atomic<std::uint32_t>::is_always_lock_free);' in source
@@ -194,7 +257,21 @@ jobs:
           import os
           import re
           import sys
+          from pathlib import Path
           image, sha256, source_commit = sys.argv[1:]
+          cfg = Path('sdkconfig').read_text(encoding='utf-8')
+          servo = 'CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y' in cfg
+          mac_evidence = 'CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL=y' in cfg
+          no_mirror = '# CONFIG_AR_SMV_BROADCAST_MIRROR is not set' in cfg
+          gm_boot = 'CONFIG_AR_PTP_BOOT_SIMULATED_GLOBAL_GM=y' in cfg
+          source_boot = 'CONFIG_AR_PTP_BOOT_SOURCE_AUTOSTART=y' in cfg
+          candidate = servo and mac_evidence and no_mirror and gm_boot and source_boot
+          # External GM arbitration is compiled for Advanced operator use.
+          # It must NEVER silently become the power-on time source.
+          facade = Path('main/ptp_mode_facade.cpp').read_text(encoding='utf-8')
+          default_mode = facade.split('g_advanced_ptp_mode{', 1)[1].split('};', 1)[0]
+          if 'AR_PTP_POLICY_INTERNAL_GM_ONLY' not in default_mode or 'AR_PTP_POLICY_AUTO_PREFER_EXTERNAL' in default_mode:
+              raise SystemExit('Unsafe implicit AUTO GM handover: FAT SOURCE must default INTERNAL_GM_ONLY')
           if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
               raise SystemExit("Firmware source SHA unavailable/invalid; refusing a zero-provenance package")
           manifest = {
@@ -211,6 +288,15 @@ jobs:
               "espIdf": "5.5.4",
               "sourceCommit": source_commit,
               "buildId": source_commit[:16],
+              "phaseSyncPreview": candidate,
+              "bootSimulatedGlobalGmEnabled": gm_boot,
+              "bootSourceAutostartEnabled": source_boot,
+              "defaultPtpPolicy": "INTERNAL_GM_ONLY",
+              "globalGmTraceabilityPhysicallyProven": False,
+              "phaseServoEnabled": servo,
+              "canonicalMacTxEvidenceEnabled": mac_evidence,
+              "broadcastMirrorEnabled": not no_mirror,
+              "smpSynchQualifiedAtBuild": False,
           }
           with open("build/firmware-manifest.json", "w", encoding="utf-8", newline="\n") as handle:
               json.dump(manifest, handle, indent=2, sort_keys=True)

@@ -17,6 +17,15 @@ typedef enum ar_ptp_role_t {
     AR_PTP_ROLE_MONITOR = 2,
 } ar_ptp_role_t;
 
+// M3.D operator policy: verified board readback, no implicit SV START.
+// Runtime choice is RAM-only; reboot returns to compiled isolated-LAB default.
+typedef enum ar_ptp_advanced_mode_t {
+    AR_PTP_POLICY_INTERNAL_GM_ONLY = 0,
+    AR_PTP_POLICY_AUTO_PREFER_EXTERNAL = 1,
+    AR_PTP_POLICY_EXTERNAL_ONLY = 2,
+    AR_PTP_POLICY_MONITOR_ONLY = 3,
+} ar_ptp_advanced_mode_t;
+
 typedef enum ar_ptp_discipline_state_t {
     AR_PTP_DISCIPLINE_UNLOCKED = 0,
     AR_PTP_DISCIPLINE_ACQUIRING = 1,
@@ -46,6 +55,14 @@ typedef struct ar_ptp_lab_config_t {
     uint16_t offset_scaled_log_variance;
     uint8_t time_source;
     int16_t current_utc_offset;
+    // Isolated test-set mode: GNSS-like Grandmaster on the local EMAC clock.
+    // The PC supplies an approximate UTC epoch, not a physical GPS input.
+    bool bench_global_gm;
+    uint32_t bench_utc_epoch_seconds;
+    // Millisecond fraction of the same UTC second. Sending seconds alone
+    // previously introduced up to 999 ms of avoidable clock seed error.
+    uint16_t bench_utc_epoch_millisecond;
+    int64_t bench_epoch_received_mono_us;
 
     // P2 measured discipline thresholds. These are used only in TIME_RECEIVER.
     int64_t maximum_path_delay_ns;
@@ -94,6 +111,9 @@ typedef struct ar_ptp_lab_status_t {
     bool globally_traceable;
     bool measured_smp_synch_valid;
     uint8_t measured_smp_synch;
+    // Clock authority lease only; neither field proves SMV/PPS phase.
+    uint32_t timing_authority_generation;
+    bool timing_authority_clock_usable;
 } ar_ptp_lab_status_t;
 
 /** Fill a configuration snapshot from the firmware's Kconfig defaults. */
@@ -104,6 +124,10 @@ void ar_ptp_lab_get_default_config(ar_ptp_lab_config_t* config);
  * Returns false when the profile is invalid or the task is running.
  */
 bool ar_ptp_lab_configure(const ar_ptp_lab_config_t* config);
+
+/** Stable, allocation-free control-plane reason for last rejected profile.
+ * Return value remains readable after the failed CONFIG command. */
+const char* ar_ptp_lab_last_config_error(void);
 
 /** Return the currently selected runtime profile (override or Kconfig default). */
 bool ar_ptp_lab_get_config(ar_ptp_lab_config_t* config);
@@ -117,6 +141,22 @@ bool ar_ptp_lab_get_config(ar_ptp_lab_config_t* config);
  */
 bool ar_ptp_lab_try_start(esp_eth_handle_t eth_handle);
 
+// M3.B boot-only supervisor. Operator PTP START/STOP/CONFIG permanently
+// disables background SOURCE-start attempts until the next device boot.
+// It never disables the actual timebase or SV sample grid on SV STOP.
+void ar_ptp_boot_supervisor_operator_override(void);
+bool ar_ptp_boot_supervisor_autostart_allowed(void);
+// Runtime ownership is not equivalent to verified SOURCE READY.
+bool ar_ptp_source_runtime_active(void);
+// Requires both EMAC roles STOPPED (and SV TX STOP enforced by the
+// serial command caller). Changes the configured role atomically.
+bool ar_ptp_lab_set_advanced_policy(ar_ptp_advanced_mode_t mode);
+ar_ptp_advanced_mode_t ar_ptp_lab_advanced_policy(void);
+uint32_t ar_ptp_lab_advanced_policy_generation(void);
+const char* ar_ptp_lab_advanced_policy_name(ar_ptp_advanced_mode_t mode);
+// Passive SOURCE-side foreign Announce monitor: evidence only, never PTP LOCK.
+bool ar_ptp_source_external_candidate_stable(void);
+
 /**
  * Legacy start entry point retained for P1.5 source ABI compatibility.
  * New user-facing control paths should call ar_ptp_lab_try_start().
@@ -128,6 +168,33 @@ void ar_ptp_lab_stop(void);
 
 /** Return whether the selected PTP runtime is currently ready/running. */
 bool ar_ptp_lab_is_running(void);
+
+/** Nonzero only for a currently ready SOURCE. Increments when PTP SOURCE
+ * becomes ready after START or after a clock/TX failure; not traceability. */
+uint32_t ar_ptp_lab_source_generation(void);
+
+/** True only for a fresh, active, bench-emulated GM with hardware PTP TX.
+ * The SV phase/MAC qualification is checked separately for smpSynch=2. */
+bool ar_ptp_lab_bench_global_ready(void);
+
+/** Read-only SOURCE startup result. Persists after failed task teardown and
+ * never changes clock authority, SV lock gating or transmission scheduling. */
+const char* ar_ptp_source_last_start_reason(void);
+
+// Role-tagged clock lease. Not an SV phase or egress certificate.
+typedef struct ar_ptp_timing_authority_t {
+    ar_ptp_role_t role;
+    uint32_t generation;
+    bool clock_usable;
+    bool source_selected;
+    uint8_t selected_source_clock_identity[8];
+    uint16_t selected_source_port_number;
+    bool globally_traceable;
+    bool sv_phase_qualified;
+} ar_ptp_timing_authority_t;
+
+/** Quiet fail-closed status projection for the PTP clock authority. */
+bool ar_ptp_lab_get_timing_authority(ar_ptp_timing_authority_t* authority);
 
 /** Obtain a coherent live status snapshot for serial/GUI observability. */
 bool ar_ptp_lab_get_status(ar_ptp_lab_status_t* status);

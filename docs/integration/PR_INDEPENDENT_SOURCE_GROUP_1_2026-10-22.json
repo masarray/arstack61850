@@ -1,0 +1,598 @@
+{
+  "schema": "arstack61850.independent-pr-retention.v1",
+  "date": "2026-10-22",
+  "group": 1,
+  "tip_sha": "e6c489cdb7794d8e2b72d6fed36fcb61378657a4",
+  "repo": "masarray/arstack61850",
+  "method": "PR changed-file paths retained with source SHA; existence in PTP tip is NOT content or semantic equivalence. Independent PRs require distinct convergence lane.",
+  "records": [
+    {
+      "number": 230,
+      "title": "P0 Workbench Reports: port ARIEC61850 fail-closed SCL semantic member binding",
+      "head_sha": "b55452b85f29b59f0dc88e3be12aa5b8b9f264f1",
+      "base_sha": "aee03f1743260c72af70c3c3a4b83030e52c797f",
+      "changed_file_count": 6,
+      "source_paths_not_in_ptp_tip": [
+        "apps/ied_simulator/src/BrowserReportSemanticBinding.hpp"
+      ],
+      "changed_paths": [
+        {
+          "path": "apps/ied_simulator/qml/BrowserReportPane.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/BrowserReportMemberProjection.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/BrowserReportSemanticBinding.hpp",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": "apps/ied_simulator/src/MmsReportController.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/ied_report_workspace_qa.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/test_browser_convergence.py",
+          "currently_exists_in_ptp_tip": true
+        }
+      ],
+      "status": "INDEPENDENT_LANE_UNMERGED_DO_NOT_CLOSE"
+    },
+    {
+      "number": 228,
+      "title": "P0 Workbench Reports: verified GVAA DO→DA labels, q/t details and fail-closed type binding",
+      "head_sha": "80bd9003b459bcd6fa09ccce02363c6fc8572108",
+      "base_sha": "467e064a6cf68dcdca485b0cf87f867215e078ca",
+      "changed_file_count": 6,
+      "source_paths_not_in_ptp_tip": [
+        "apps/ied_simulator/src/BrowserVerifiedReportTypes.hpp"
+      ],
+      "changed_paths": [
+        {
+          "path": "apps/ied_simulator/qml/BrowserReportPane.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/BrowserReportMemberProjection.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/BrowserVerifiedReportTypes.hpp",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": "apps/ied_simulator/src/MmsReportController.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/ied_browser_large_model_qa.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/test_browser_convergence.py",
+          "currently_exists_in_ptp_tip": true
+        }
+      ],
+      "status": "INDEPENDENT_LANE_UNMERGED_DO_NOT_CLOSE"
+    },
+    {
+      "number": 219,
+      "title": "Workbench Reports UX: replace opaque MMS struct strings with bounded, expandable typed rows",
+      "head_sha": "3d8edd4449ecb9371c85a7f7f86c8905d919dbb7",
+      "base_sha": "6ddd707a232ef07144d1e0b8fd94892ee7559d49",
+      "changed_file_count": 5,
+      "source_paths_not_in_ptp_tip": [],
+      "changed_paths": [
+        {
+          "path": "apps/ied_simulator/qml/BrowserReportPane.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/BrowserReportMemberProjection.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/MmsReportController.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/ied_report_workspace_qa.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/test_browser_convergence.py",
+          "currently_exists_in_ptp_tip": true
+        }
+      ],
+      "status": "INDEPENDENT_LANE_UNMERGED_DO_NOT_CLOSE"
+    },
+    {
+      "number": 172,
+      "title": "M2I: validate selected native Quality/TimeQuality with rendered GUI evidence",
+      "head_sha": "3c11cd3a132516930409cac18c556ce5dad4b69c",
+      "base_sha": "9a780133157db207314ce5256bde446de761b778",
+      "changed_file_count": 9,
+      "source_paths_not_in_ptp_tip": [
+        "apps/ied_simulator/src/BrowserEvidenceVisualQa.hpp"
+      ],
+      "changed_paths": [
+        {
+          "path": ".github/workflows/ied-simulator-qt.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/qml/BrowserDataModelPane.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/qml/BrowserDataSetPane.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/qml/IedBrowserWorkspace.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/BrowserEvidenceVisualQa.hpp",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": "apps/ied_simulator/src/IedEngineeringContextController.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/ied_engineering_context_qa.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/main.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/test_browser_convergence.py",
+          "currently_exists_in_ptp_tip": true
+        }
+      ],
+      "status": "INDEPENDENT_LANE_UNMERGED_DO_NOT_CLOSE"
+    },
+    {
+      "number": 164,
+      "title": "M2D-1: typed IEC 61850 Quality and TimeQuality in native Workbench",
+      "head_sha": "54cc8e4793199594743b4e4cabdabd25868250f1",
+      "base_sha": "d4374434ddf810fff25d2d7ba1571d38c5a7b2b2",
+      "changed_file_count": 8,
+      "source_paths_not_in_ptp_tip": [
+        "apps/ied_simulator/src/MmsSemanticValue.hpp"
+      ],
+      "changed_paths": [
+        {
+          "path": "apps/ied_simulator/qml/BrowserDataModelPane.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/qml/BrowserDataSetPane.qml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/MmsClientController.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/MmsLiveTreeModel.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/MmsLiveTreeModel.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/src/MmsSemanticValue.hpp",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": "apps/ied_simulator/src/ied_browser_large_model_qa.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "apps/ied_simulator/test_browser_convergence.py",
+          "currently_exists_in_ptp_tip": true
+        }
+      ],
+      "status": "INDEPENDENT_LANE_UNMERGED_DO_NOT_CLOSE"
+    },
+    {
+      "number": 166,
+      "title": "M3C.1: bind SV sample-zero epochs to consecutive PTP seconds",
+      "head_sha": "bc7f5c204331852b571b5c2d8e01fb90be6c0a3e",
+      "base_sha": "be7ef029af8491e9cc1d332abc14137c69dbd802",
+      "changed_file_count": 41,
+      "source_paths_not_in_ptp_tip": [
+        ".github/workflows/ptp-m3e-bench-preflight.yml",
+        "scripts/ptp_m3e_bench_gate.py"
+      ],
+      "changed_paths": [
+        {
+          "path": ".github/workflows/esp32p4-ptp-lab.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/esp32p4-smv-injector.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/ptp-core-ci.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/ptp-m3e-bench-preflight.yml",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": "docs/PTP_CANONICAL_RUNTIME_AUTHORITY_M3A.md",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "docs/PTP_EMAC_ROLE_OWNERSHIP_M3D1.md",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "docs/PTP_M3E_BENCH_EVIDENCE_GATE.md",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "docs/PTP_RECEIVER_CLOCK_AUTHORITY_M3B.md",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "docs/PTP_START_STOP_CANCELLATION_M3D2.md",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "docs/PTP_SV_CONTINUOUS_EPOCH_BINDING_M3C.md",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "docs/PTP_SV_EPOCH_M1_ACCEPTANCE.md",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "docs/PTP_SV_RECEIVER_EPOCH_BINDING_M3C2.md",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/app_main.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/ptp_lab_task.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/ptp_mode_facade.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/ptp_receiver_task.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/ptp_receiver_task.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/smp_synch_lab.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/smp_synch_lab.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/tools/stage_ptp_experimental.py",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "include/ariec61850/time_sync/ptp_canonical_authority.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "include/ariec61850/time_sync/ptp_control_cancellation.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "include/ariec61850/time_sync/ptp_emac_role_ownership.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "include/ariec61850/time_sync/ptp_receiver_clock_authority.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "include/ariec61850/time_sync/sv_ptp_clock_lease.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "include/ariec61850/time_sync/sv_ptp_epoch.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "include/ariec61850/time_sync/sv_ptp_phase_authority.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "include/ariec61850/time_sync/sv_tx_egress_evidence.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "scripts/ptp_m3e_bench_gate.py",
+          "currently_exists_in_ptp_tip": false
+        },
+        {
+          "path": "tests/ptp_profile/CMakeLists.txt",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tests/test_ptp_canonical_authority.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tests/test_ptp_control_cancellation.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tests/test_ptp_emac_role_ownership.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tests/test_ptp_m3e_bench_gate.py",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tests/test_ptp_power_profile.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tests/test_ptp_receiver_clock_authority.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tests/test_sv_ptp_clock_lease.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tests/test_sv_ptp_epoch.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tests/test_sv_ptp_phase_authority.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tests/test_sv_tx_egress_evidence.cpp",
+          "currently_exists_in_ptp_tip": true
+        }
+      ],
+      "status": "INDEPENDENT_LANE_UNMERGED_DO_NOT_CLOSE"
+    },
+    {
+      "number": 157,
+      "title": "M2A: bounded continuous PTP–SMV phase authority and guarded ESP32-P4 observer",
+      "head_sha": "be7ef029af8491e9cc1d332abc14137c69dbd802",
+      "base_sha": "ccec6c41e48dde58af2d0fcc2f427b7c34d700e7",
+      "changed_file_count": 50,
+      "source_paths_not_in_ptp_tip": [],
+      "changed_paths": [
+        {
+          "path": ".github/workflows/arstack-studio-qt.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/arstack-studio-rc2-policy.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/arstack-studio-release.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/arstack-studio-windows-lifecycle.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/brcb-hard-profile-ci.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/ci-routing-policy.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/control-hard-profile-ci.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/control-interop-harness-ci.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/control-mms-profile-ci.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/control-session-profile-ci.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/control-termination-profile-ci.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/cpp-ci.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/dynamic-rcb-trial-ci.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/embedded-ci.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/esp32p4-ptp-lab.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/esp32p4-smv-injector.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/ied-simulator-qt.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/ied-simulator-release-hardening.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/interoperability-server-ci.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/mms-r12-server-ci.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/ptp-core-ci.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/scl-assisted-connect-ci.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/scl-assisted-workbench-ci.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/security-evidence.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": ".github/workflows/smv-injector-gui.yml",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "CMakeLists.txt",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "docs/CI_WORKFLOW_ROUTING.md",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "docs/PTP_SOURCE_FRESHNESS_M2F.md",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "docs/PTP_SOURCE_HEALTH_M2E.md",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "docs/PTP_SV_HARDWARE_TX_EVIDENCE_M2C.md",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "docs/PTP_SV_PHASE_AUTHORITY_M2A.md",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "docs/PTP_SV_WIRE_AUDIT_M2B.md",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/Kconfig.projbuild",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/app_main.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/ptp_lab_task.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/ptp_mode_facade.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "include/ariec61850/capture/pcap.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "include/ariec61850/time_sync/ptp_power_profile.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "include/ariec61850/time_sync/ptp_runtime.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "include/ariec61850/time_sync/sv_ptp_phase_authority.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "include/ariec61850/time_sync/sv_tx_egress_evidence.hpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "scripts/check_ci_trigger_policy.py",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "src/capture/pcap.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tests/ptp_profile/CMakeLists.txt",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tests/test_ptp_power_profile.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tests/test_ptp_runtime.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tests/test_sv_ptp_phase_authority.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tests/test_sv_tx_egress_evidence.cpp",
+          "currently_exists_in_ptp_tip": true
+        },
+        {
+          "path": "tools/ptp_sv_wire_audit.cpp",
+          "currently_exists_in_ptp_tip": true
+        }
+      ],
+      "status": "INDEPENDENT_LANE_UNMERGED_DO_NOT_CLOSE"
+    }
+  ]
+}

@@ -2,16 +2,33 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import ARStack.Studio 1.0
 
 SurfacePanel {
     id: panel
     property var controller
     property var device
     property var session
+    property var profiles
     property string uiFont: "Inter"
     property string monoFont: "Inter"
     property var roleValues: ["SOURCE", "RECEIVER", "MONITOR"]
     property bool advancedVisible: false
+    property int policyDraftIndex: -1
+    readonly property var ptpPolicyModes: [
+        "INTERNAL_GM_ONLY", "AUTO_PREFER_EXTERNAL",
+        "EXTERNAL_ONLY", "MONITOR_ONLY"
+    ]
+    function ptpPolicyIndex(mode) {
+        const index = panel.ptpPolicyModes.indexOf(mode)
+        return index >= 0 ? index : 0
+    }
+    readonly property bool canConfigurePolicy: panel.session &&
+        panel.device && panel.device.deviceVerified &&
+        panel.device.ptpAvailable && !panel.device.running &&
+        !panel.device.ptpRunning && !panel.startPending &&
+        !panel.session.updatingFirmware
+
     readonly property bool startPending: panel.device && panel.device.ptpStarting
 
     function roleIndex(role) {
@@ -27,30 +44,49 @@ SurfacePanel {
         return 0
     }
 
-    function ptpProfile() {
+    function ptpProfile(role) {
         return {
             domain: Number(domainField.text),
             transportSpecific: Number(transportField.text),
             vlanEnabled: vlanCheck.checked,
             vlanId: Number(vlanField.text),
             vlanPriority: Number(pcpField.text),
-            announceIntervalMs: Number(announceField.text),
-            syncIntervalMs: Number(syncField.text),
-            respondToPeerDelay: pdelayCheck.checked
+            // Standard SOURCE cadence is not operator-tunable in this
+            // process-bus profile. Expert Follower/Monitor fields remain
+            // configurable. Direct API callers are independently validated.
+            announceIntervalMs: role === "SOURCE" ? 1000 : Number(announceField.text),
+            syncIntervalMs: role === "SOURCE" ? 1000 : Number(syncField.text),
+            // IEC/IEEE 61850-9-3 SOURCE always requires Pdelay capability.
+            // An optional bench-only mode must never be silently substituted.
+            respondToPeerDelay: role === "SOURCE" ? true : pdelayCheck.checked,
+            benchGlobalGm: role === "SOURCE" && benchGmCheck.checked
         }
     }
 
     function applyProfile() {
-        return panel.session && panel.session.requestConfigurePtp(panel.ptpProfile())
+        return panel.session && panel.session.requestConfigurePtp(
+            panel.ptpProfile(panel.activeRole))
+    }
+
+    function matchSvVlan() {
+        if (!panel.profiles || !panel.profiles.hasProfiles)
+            return false
+        const sv = panel.profiles.selectedProfile
+        vlanCheck.checked = Boolean(sv.vlanPresent)
+        vlanField.text = String(sv.vlanId)
+        pcpField.text = String(sv.vlanPriority)
+        return true
     }
 
     function startRole(role) {
         if (!panel.session || !panel.device.ptpAvailable || !panel.device.deviceVerified
                 || panel.device.ptpRunning || panel.startPending || panel.session.updatingFirmware)
             return false
-        const accepted = panel.session.requestStartPtpConfigured(role, panel.ptpProfile())
+        const accepted = panel.session.requestStartPtpConfigured(role, panel.ptpProfile(role))
         if (!accepted && panel.controller)
-            panel.controller.showMessage("PTP start blocked. Check timing diagnostics.", true)
+            panel.controller.showMessage("PTP could not start: " +
+                (panel.device.ptpLastStartFailure.length > 0
+                    ? panel.device.ptpLastStartFailure : panel.device.ptpStatus), true)
         return Boolean(accepted)
     }
 
@@ -65,6 +101,17 @@ SurfacePanel {
         : panel.device.smpSynchMeasured
             ? "MEASURED SYNC FLAG · verify sample-phase evidence independently"
             : "FREE-RUN / UNQUALIFIED · PTP packets do not prove SV sample lock"
+    readonly property string gmTxEvidence: panel.sourceRole && panel.device.ptpRunning
+        ? (panel.sourceEvidence ? "TX OBSERVED" : "TX ACQUIRING")
+        : "NOT TRANSMITTING"
+    readonly property string svPhaseEvidence: panel.device.smpSynchSimulated
+        ? "MANUAL FLAG ONLY"
+        : panel.device.smpSynchMeasured
+            ? "MEASURED · smpSynch " + panel.device.smpSynchValue
+            : "NOT QUALIFIED"
+    // Firmware cannot observe another device's PTP servo or SV acceptance.
+    // Do not manufacture a relay LOCKED state from local Announce counters.
+    readonly property string relayLockEvidence: "NOT OBSERVED · CHECK RELAY"
     readonly property bool receiverRole: activeRole === "RECEIVER"
     readonly property bool sourceEvidence: Number(panel.device.ptpAnnounceSent) > 0
         && Number(panel.device.ptpSyncSent) > 0
@@ -80,7 +127,7 @@ SurfacePanel {
         : panel.device.ptpRunning
             ? (panel.receiverRole ? (panel.device.ptpDiscipline === "LOCKED" ? "BOARD LOCKED" : panel.device.ptpDiscipline)
                 : panel.activeRole + " ACTIVE")
-            : panel.device.ptpStatus === "PTP start failed" ? "START FAILED" : "OFF"
+            : panel.device.ptpStatus.indexOf("PTP start failed") === 0 ? "START FAILED" : "OFF"
 
     Timer {
         // Status refresh only. Native C++ verifies ACKs and owns timeouts.
@@ -125,17 +172,27 @@ SurfacePanel {
                     theme: panel.theme
                     uiFont: panel.uiFont
                     text: "PTP"
-                    checked: Boolean(panel.device.ptpRunning)
+                    // Command intent is amber while START is awaiting actual
+                    // board ACK/readback; GREEN is used only after RUNNING.
+                    checked: Boolean(panel.device.ptpRunning ||
+                        (panel.startPending && !panel.stopPending))
+                    busy: Boolean(panel.startPending)
                     enabled: panel.session && panel.device.ptpAvailable
                         && !panel.startPending && !panel.session.updatingFirmware
                     ToolTip.visible: hovered
-                    ToolTip.text: "PTP on/off · board verified"
+                    ToolTip.text: panel.startPending ? "Waiting for verified PTP startup"
+                        : "PTP on/off · verified by board"
                     onClicked: {
                         const wantsRunning = checked
-                        checked = Qt.binding(function() { return Boolean(panel.device.ptpRunning) })
                         if (wantsRunning) panel.startSelectedMode()
                         else if (panel.session && !panel.session.requestStopPtp() && panel.controller)
                             panel.controller.showMessage("PTP stop was not accepted. Copy diagnostics.", true)
+                        // Switch check state remains owned by board telemetry
+                        // + pending transaction, not a momentary QML click.
+                        checked = Qt.binding(function() {
+                            return Boolean(panel.device.ptpRunning ||
+                                (panel.startPending && !panel.stopPending))
+                        })
                     }
                 }
                 StateBadge {
@@ -146,6 +203,45 @@ SurfacePanel {
                         : panel.receiverRole && panel.device.ptpRunning ? panel.theme.amber
                         : panel.device.ptpRunning ? panel.theme.green
                         : panel.startPending ? panel.theme.amber : panel.theme.muted
+                }
+            }
+
+            // Board-issued Ethernet event evidence, never a USB/COM guess.
+            // A DOWN or UNKNOWN PHY cannot authorize SOURCE START.
+            RowLayout {
+                visible: panel.device && panel.device.deviceVerified
+                Layout.fillWidth: true
+                spacing: 10
+                Label {
+                    text: "Ethernet (board)"
+                    color: panel.theme.muted
+                    font.family: panel.uiFont
+                    font.pixelSize: 10
+                }
+                Label {
+                    text: "Driver " + panel.device.ptpEthernetDriver +
+                          "  ·  PHY " + panel.device.ptpEthernetLink
+                    color: panel.device.ptpEthernetLink === "DOWN" ||
+                           panel.device.ptpEthernetDriver === "STOPPED"
+                        ? panel.theme.red
+                        : panel.device.ptpEthernetLink === "UP" &&
+                          panel.device.ptpEthernetDriver === "STARTED"
+                        ? panel.theme.green : panel.theme.amber
+                    font.family: panel.monoFont
+                    font.pixelSize: 10
+                    font.weight: Font.DemiBold
+                }
+                Item { Layout.fillWidth: true }
+                Label {
+                    text: panel.device.ptpEthernetLink === "DOWN"
+                        ? "Check Ethernet cable / active switch"
+                        : panel.device.ptpEthernetLink === "UNKNOWN"
+                        ? "Refresh to read physical link"
+                        : "Link status from ESP32-P4"
+                    color: panel.device.ptpEthernetLink === "DOWN"
+                        ? panel.theme.red : panel.theme.muted
+                    font.family: panel.uiFont
+                    font.pixelSize: 9
                 }
             }
 
@@ -216,6 +312,56 @@ SurfacePanel {
                 }
             }
 
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: 52
+                radius: 7
+                color: panel.theme.panelAlt
+                border.width: 1
+                border.color: panel.theme.lineSoft
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 10
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Label { text: "PTP GM TX"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
+                        Label { text: panel.gmTxEvidence; color: panel.sourceEvidence && panel.sourceRole ? panel.theme.green : panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: 10 }
+                    }
+                    Rectangle { width: 1; Layout.fillHeight: true; color: panel.theme.lineSoft }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Label { text: "SV phase / MAC"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
+                        Label { text: panel.svPhaseEvidence; color: panel.device.smpSynchMeasured && !panel.device.smpSynchSimulated ? panel.theme.green : panel.theme.textSoft; font.family: panel.monoFont; font.pixelSize: 10 }
+                    }
+                    Rectangle { width: 1; Layout.fillHeight: true; color: panel.theme.lineSoft }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Label { text: "Relay follower"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
+                        Label { text: panel.relayLockEvidence; color: panel.theme.muted; font.family: panel.monoFont; font.pixelSize: 10 }
+                    }
+                }
+            }
+
+            StudioDarkCheckBox {
+                id: benchGmCheck
+                Layout.fillWidth: true
+                visible: modeCombo.currentIndex === 0
+                theme: panel.theme
+                uiFont: panel.uiFont
+                checked: true
+                text: "Relay test bench · Simulated GNSS PTP Grandmaster + measured SV phase lock"
+                enabled: panel.session && panel.device.ptpAvailable &&
+                         !panel.device.ptpRunning && !panel.startPending &&
+                         !panel.session.updatingFirmware
+                ToolTip.visible: hovered
+                ToolTip.text: "Isolated relay test network only. No GPS required; PTP and SV share ESP32-P4 EMAC timebase. smpSynch=2 only after real phase/MAC evidence."
+            }
+
             // Simulation is intentionally simple: auto or explicit SV flag.
             // The firmware already marks overrides as simulated, independently
             // of PTP clock discipline and without pretending sample phase lock.
@@ -266,6 +412,16 @@ SurfacePanel {
                     font.pixelSize: 11
                 }
 
+            Label {
+                Layout.fillWidth: true
+                visible: panel.session && panel.session.firmwareUpdateAvailable
+                text: "Updated matching ESP32-P4 firmware available in Firmware. Install it for current PTP fixes."
+                color: panel.theme.amber
+                font.family: panel.uiFont
+                font.pixelSize: 10
+                wrapMode: Text.WordWrap
+            }
+
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 8
@@ -300,11 +456,30 @@ SurfacePanel {
                 CalmButton {
                     theme: panel.theme
                     uiFont: panel.uiFont
+                    text: "Inspect SV lock"
+                    enabled: panel.session && panel.device.deviceVerified &&
+                             !panel.session.updatingFirmware
+                    onClicked: {
+                        if (!panel.session.requestSyncDiagnostics() && panel.controller)
+                            panel.controller.showMessage(
+                                "SV lock inspection is waiting for an active configuration transaction to finish.", true)
+                    }
+                }
+                CalmButton {
+                    theme: panel.theme
+                    uiFont: panel.uiFont
                     text: "Copy diagnostics"
                     enabled: panel.session && panel.device.deviceVerified
                     onClicked: {
-                        StudioClipboard.copyText(panel.session.diagnosticsText())
-                        if (panel.controller) panel.controller.showMessage("PTP and firmware diagnostics copied.", false)
+                        const snapshot = panel.session ? panel.session.diagnosticsText() : ""
+                        if (StudioClipboard.copyText(snapshot)) {
+                            if (panel.controller)
+                                panel.controller.showMessage("PTP and firmware diagnostics copied.", false)
+                        } else if (panel.controller) {
+                            panel.controller.showMessage(
+                                "Windows clipboard unavailable. Select diagnostics in the opened window and press Ctrl+C.", true)
+                            panel.controller.openDiagnostics()
+                        }
                     }
                 }
                 Item { Layout.fillWidth: true }
@@ -319,6 +494,57 @@ SurfacePanel {
                     palette.windowText: panel.theme.text
                     palette.text: panel.theme.text
                 }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                radius: 8
+                color: panel.theme.surface2
+                border.width: 1
+                border.color: panel.theme.lineSoft
+                implicitHeight: flightContent.implicitHeight + 24
+                ColumnLayout {
+                    id: flightContent
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.margins: 12
+                    spacing: 6
+                    Label {
+                        Layout.fillWidth: true
+                        text: "SV LOCK · INTERNAL FLIGHT RECORDER"
+                        color: panel.theme.text
+                        font.family: panel.uiFont
+                        font.pixelSize: 10
+                        font.weight: Font.DemiBold
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: panel.device.syncDiagnostics
+                        color: panel.theme.textSoft
+                        font.family: panel.monoFont
+                        font.pixelSize: 9
+                        wrapMode: Text.WrapAnywhere
+                    }
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Last 16 board LOCK transitions are retained in RAM; no per-frame logging. Internal evidence only—not an independently verified PTP/IED lock."
+                        color: panel.theme.muted
+                        font.family: panel.uiFont
+                        font.pixelSize: 9
+                        wrapMode: Text.WordWrap
+                    }
+                }
+            }
+
+            Label {
+                Layout.fillWidth: true
+                visible: panel.device.ptpLastStartFailure.length > 0
+                text: "PTP start did not complete · " + panel.device.ptpLastStartFailure
+                color: panel.theme.amber
+                font.family: panel.uiFont
+                font.pixelSize: 10
+                wrapMode: Text.WordWrap
             }
 
             Rectangle {
@@ -392,7 +618,79 @@ SurfacePanel {
                 spacing: 10
 
                 Rectangle { Layout.fillWidth: true; height: 1; color: panel.theme.lineSoft }
-                Label { text: "Advanced PTP profile"; color: panel.theme.text; font.family: panel.uiFont; font.pixelSize: 12; font.weight: Font.DemiBold }
+                Label { text: "Advanced PTP policy & profile"; color: panel.theme.text; font.family: panel.uiFont; font.pixelSize: 12; font.weight: Font.DemiBold }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+                    Label {
+                        text: "Time source"
+                        color: panel.theme.muted
+                        font.family: panel.uiFont
+                        font.pixelSize: 10
+                    }
+                    StudioDarkComboBox {
+                        id: policyCombo
+                        Layout.fillWidth: true
+                        model: [
+                            "Internal GM only — laboratory SOURCE",
+                            "AUTO — prefer better external GM",
+                            "External only — PTP RECEIVER",
+                            "Monitor only — passive observation"
+                        ]
+                        currentIndex: panel.policyDraftIndex >= 0
+                            ? panel.policyDraftIndex
+                            : panel.ptpPolicyIndex(panel.device.ptpPolicy)
+                        enabled: panel.canConfigurePolicy
+                        onActivated: function(index) {
+                            panel.policyDraftIndex = index
+                        }
+                    }
+                    CalmButton {
+                        theme: panel.theme
+                        uiFont: panel.uiFont
+                        text: "Set policy"
+                        enabled: panel.canConfigurePolicy &&
+                            panel.device.ptpPolicy !== "UNKNOWN"
+                        onClicked: {
+                            const mode = panel.ptpPolicyModes[policyCombo.currentIndex]
+                            if (panel.session.requestPtpAdvancedPolicy(mode)) {
+                                panel.policyDraftIndex = -1
+                                if (panel.controller)
+                                    panel.controller.showMessage(
+                                        "PTP policy queued — confirming board readback.", false)
+                            } else if (panel.controller) {
+                                panel.controller.showMessage(
+                                    "PTP policy rejected. Stop SV/PTP first and inspect diagnostics.", true)
+                            }
+                        }
+                    }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    text: "Board policy: " + panel.device.ptpPolicy +
+                          "  ·  Actual role: " + panel.device.ptpRole +
+                          "  ·  Supervisor: " +
+                          (panel.device.ptpPolicyBootAuto === "1" ? "ENABLED" : "MANUAL/INACTIVE") +
+                          "  ·  External candidate: " +
+                          (panel.device.ptpCandidate === "1" ? "STABLE ANNOUNCE (not LOCK)" : "NONE") +
+                          "  ·  Source generation: " + panel.device.ptpSourceGeneration
+                    color: panel.theme.textSoft
+                    font.family: panel.monoFont
+                    font.pixelSize: 10
+                }
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    text: "Changing source policy requires SV STOP and verified PTP STOP. " +
+                          "AUTO handover occurs only while SV is OFF; external LOCK requires " +
+                          "measured Pdelay/offset. Policy is kept in board RAM until reboot. " +
+                          "All internal-GM and automatic fallback modes are for isolated lab networks."
+                    color: panel.theme.muted
+                    font.family: panel.uiFont
+                    font.pixelSize: 10
+                }
 
                 GridLayout {
                     Layout.fillWidth: true
@@ -403,15 +701,44 @@ SurfacePanel {
                     NumericField { id: domainField; theme: panel.theme; monoFont: panel.uiFont; text: panel.device.ptpDomain === "-" ? "0" : panel.device.ptpDomain; validator: IntValidator { bottom: 0; top: 255 } }
                     Label { text: "transportSpecific"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: transportField; theme: panel.theme; monoFont: panel.uiFont; text: panel.device.ptpTransportSpecific === "-" ? "0" : String(Number(panel.device.ptpTransportSpecific)); validator: IntValidator { bottom: 0; top: 15 } }
-                    Label { text: "Announce interval (ms)"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
-                    NumericField { id: announceField; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 100; top: 10000 } }
-                    Label { text: "Sync interval (ms)"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
-                    NumericField { id: syncField; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 20; top: 5000 } }
-                    StudioDarkCheckBox { id: vlanCheck; theme: panel.theme; uiFont: panel.uiFont; text: "VLAN" }
-                    NumericField { id: vlanField; enabled: vlanCheck.checked; theme: panel.theme; monoFont: panel.uiFont; text: "100"; validator: IntValidator { bottom: 1; top: 4094 } }
+                    Label { text: "Announce interval (ms)"; visible: modeCombo.currentIndex !== 0; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
+                    NumericField { id: announceField; visible: modeCombo.currentIndex !== 0; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 100; top: 10000 } }
+                    Label { text: "Sync interval (ms)"; visible: modeCombo.currentIndex !== 0; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
+                    NumericField { id: syncField; visible: modeCombo.currentIndex !== 0; theme: panel.theme; monoFont: panel.uiFont; text: "1000"; validator: IntValidator { bottom: 20; top: 5000 } }
+                    StudioDarkCheckBox { id: vlanCheck; theme: panel.theme; uiFont: panel.uiFont; text: "VLAN"; checked: true }
+                    NumericField { id: vlanField; enabled: vlanCheck.checked; theme: panel.theme; monoFont: panel.uiFont; text: "0"; validator: IntValidator { bottom: 0; top: 4094 } }
                     Label { text: "VLAN PCP"; color: panel.theme.muted; font.family: panel.uiFont; font.pixelSize: 9 }
                     NumericField { id: pcpField; enabled: vlanCheck.checked; theme: panel.theme; monoFont: panel.uiFont; text: "4"; validator: IntValidator { bottom: 0; top: 7 } }
-                    StudioDarkCheckBox { id: pdelayCheck; theme: panel.theme; uiFont: panel.uiFont; text: "Peer-delay response"; checked: true }
+                    CalmButton {
+                        theme: panel.theme
+                        uiFont: panel.uiFont
+                        text: "Match SV VLAN"
+                        enabled: panel.profiles && panel.profiles.hasProfiles &&
+                            !panel.device.ptpRunning && !panel.startPending
+                        onClicked: panel.matchSvVlan()
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Copy current SV profile VLAN enable, VID and PCP into PTP settings"
+                    }
+                    Label {
+                        visible: modeCombo.currentIndex === 0
+                        Layout.columnSpan: 4
+                        text: "SOURCE profile: 1 s Announce · 1 s Sync · hardware Pdelay REQUIRED"
+                        color: panel.theme.textSoft
+                        font.family: panel.uiFont
+                        font.pixelSize: 10
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
+                    StudioDarkCheckBox {
+                        id: pdelayCheck
+                        visible: modeCombo.currentIndex !== 0
+                        theme: panel.theme
+                        uiFont: panel.uiFont
+                        text: "Peer-delay exchange"
+                        checked: true
+                        ToolTip.visible: hovered
+                        ToolTip.text: "SOURCE always requires hardware Pdelay; other roles are configurable."
+                    }
                     CalmButton {
                         theme: panel.theme
                         uiFont: panel.uiFont

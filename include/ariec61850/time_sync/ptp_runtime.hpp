@@ -99,9 +99,10 @@ struct PtpPublisherOptions final {
     PtpClockIdentity clock_identity{0x02U, 0x00U, 0x00U, 0xFFU, 0xFEU, 0x00U, 0x00U, 0x01U};
     std::uint16_t port_number{1U};
     std::chrono::milliseconds announce_interval{1000};
-    std::chrono::milliseconds sync_interval{250};
+    std::chrono::milliseconds sync_interval{1000};
     std::chrono::milliseconds follow_up_delay{};
     bool two_step_clock{true};
+    PtpTimeProperties time_properties{};
     bool respond_to_peer_delay{true};
     std::uint8_t priority1{128U};
     std::uint8_t priority2{128U};
@@ -189,9 +190,10 @@ public:
             error = "VLAN priority must be 0..7";
             return false;
         }
-        if (options.vlan_id.has_value() &&
-            (*options.vlan_id == 0U || *options.vlan_id > 4094U)) {
-            error = "VLAN ID must be 1..4094";
+        // IEEE 802.1Q priority-tagged VLAN 0 / PCP 4 is the Power
+        // Utility Profile default. 4095 is reserved; VID 0 is valid.
+        if (options.vlan_id.has_value() && *options.vlan_id > 4094U) {
+            error = "VLAN ID must be 0..4094";
             return false;
         }
         if (options.port_number == 0U) {
@@ -204,6 +206,11 @@ public:
         }
         if (options.sync_interval <= std::chrono::milliseconds::zero()) {
             error = "Sync interval must be greater than zero";
+            return false;
+        }
+        if (options.time_properties.current_utc_offset_valid &&
+            !options.time_properties.ptp_timescale) {
+            error = "A valid TAI-UTC offset requires the PTP timescale";
             return false;
         }
         if (options.follow_up_delay < std::chrono::milliseconds::zero()) {
@@ -271,11 +278,13 @@ public:
 
         if (monotonic_time >= next_announce_) {
             due.announce = true;
-            next_announce_ = monotonic_time + options_.announce_interval;
+            next_announce_ = advance_deadline(
+                next_announce_, monotonic_time, options_.announce_interval);
         }
         if (monotonic_time >= next_sync_) {
             due.sync = true;
-            next_sync_ = monotonic_time + options_.sync_interval;
+            next_sync_ = advance_deadline(
+                next_sync_, monotonic_time, options_.sync_interval);
         }
         return due;
     }
@@ -407,6 +416,17 @@ public:
     }
 
 private:
+    // Preserve the originally anchored 1Hz power-profile cadence across
+    // delayed poll()/peer-delay processing. O(1), never emit catch-up bursts.
+    // Sleep/task latency can still affect packet egress and must be measured.
+    [[nodiscard]] static std::chrono::steady_clock::time_point advance_deadline(
+        const std::chrono::steady_clock::time_point previous,
+        const std::chrono::steady_clock::time_point observed,
+        const std::chrono::milliseconds interval) noexcept {
+        const auto missed_intervals = (observed - previous) / interval;
+        return previous + interval * (missed_intervals + 1);
+    }
+
     [[nodiscard]] static std::int8_t interval_to_log2(
         const std::chrono::milliseconds interval) noexcept {
         auto milliseconds = interval.count();
@@ -435,6 +455,7 @@ private:
         result.sequence_id = sequence_id;
         result.log_message_interval = log_message_interval;
         result.two_step = two_step;
+        result.time_properties = options_.time_properties;
         result.priority1 = options_.priority1;
         result.priority2 = options_.priority2;
         result.clock_class = options_.clock_class;

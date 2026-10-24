@@ -11,12 +11,18 @@ Item {
     property var device
     property var profiles
     property var session
+    property real signalFrequency: 50.0
     property string uiFont: "Inter"
     property string monoFont: "Inter"
+    property bool captureTabVisited: false
 
     function openEngineeringFile() { profileInspector.openEngineeringFile() }
     function showRecovery() { expertTabs.currentIndex = 1 }
     function showTiming() { expertTabs.currentIndex = 3 }
+    function showCapture() {
+        captureTabVisited = true
+        expertTabs.currentIndex = 4
+    }
     // The Main tray always shares the Advanced PTP profile and verified
     // guided START state machine; never create an independent START sequence.
     function startPtpRole(role) { return timingPanel.startRole(role) }
@@ -34,13 +40,13 @@ Item {
         font.weight: checked ? Font.DemiBold : Font.Medium
         contentItem: Label {
             text: parent.text
-            color: parent.checked ? hub.theme.text : hub.theme.muted
+            color: parent.hovered ? "#142334" : parent.checked ? hub.theme.text : hub.theme.muted
             font: parent.font
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
         }
         background: Rectangle {
-            color: parent.checked ? hub.theme.raised : "transparent"
+            color: parent.hovered ? "#edf5ff" : parent.checked ? hub.theme.raised : "transparent"
             radius: 6
             border.width: parent.checked ? 1 : 0
             border.color: hub.theme.line
@@ -79,7 +85,7 @@ Item {
                     font.weight: Font.DemiBold
                 }
                 Label {
-                    text: "Lab simulation controls · configure one task at a time"
+                    text: "Signals, firmware, PTP and device settings"
                     color: hub.theme.muted
                     font.family: hub.uiFont
                     font.pixelSize: 11
@@ -116,6 +122,7 @@ Item {
 
         TabBar {
             id: expertTabs
+            onCurrentIndexChanged: if (currentIndex === 4) hub.captureTabVisited = true
             Layout.fillWidth: true
             implicitHeight: 42
             spacing: 4
@@ -129,6 +136,7 @@ Item {
             ExpertTab { text: "Firmware" }
             ExpertTab { text: "Waveform" }
             ExpertTab { text: "Time Sync" }
+            ExpertTab { text: "Capture" }
             ExpertTab { text: "Device" }
         }
 
@@ -167,14 +175,29 @@ Item {
                 theme: hub.theme
                 controller: hub.controller
                 device: hub.device
+                profiles: hub.profiles
                 session: hub.session
                 uiFont: hub.uiFont
                 monoFont: hub.monoFont
+            }
+            Loader {
+                // Capture adapter discovery starts ONLY after the operator opens
+                // this workspace. Keep the worker alive during tab navigation,
+                // including sustained 3600 s captures, without another owner.
+                active: hub.captureTabVisited
+                sourceComponent: SvCapturePanel {
+                    theme: hub.theme
+                    device: hub.device
+                    signalFrequency: hub.signalFrequency
+                    uiFont: hub.uiFont
+                    monoFont: hub.monoFont
+                }
             }
             DeviceExpertPanel {
                 theme: hub.theme
                 device: hub.device
                 session: hub.session
+                signalFrequency: hub.signalFrequency
                 uiFont: hub.uiFont
                 monoFont: hub.monoFont
             }

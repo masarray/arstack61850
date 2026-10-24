@@ -1,0 +1,457 @@
+{
+  "schema": "arstack61850.side-file-blob-audit.v1",
+  "date": "2026-10-22",
+  "group": 1,
+  "repo": "masarray/arstack61850",
+  "tip_sha": "f31eac027d0ed6dd3d622f7ade63da396c339b4f",
+  "method": "Match only exact blob SHAs of source PR changed paths; DIFFERENT_BLOB and MISSING are not proof of lost or equivalent behavior, and EXACT_BLOB is only file-level identity.",
+  "records": [
+    {
+      "number": 251,
+      "title": "P0 SMV: atomic 8-channel firmware scenario commit with token/hash ACK and verified START",
+      "source_sha": "fd8f2fc92ee7b533f71474d9149db69741285e54",
+      "base_sha": "eb7448b23ef37721ecc02a2907554c969fa24dcb",
+      "source_changed_files_count": 9,
+      "exact_blob_count": 0,
+      "source_unique_paths": [
+        "include/ariec61850/sampled_values/live_scenario_transaction.hpp"
+      ],
+      "files": [
+        {
+          "path": "apps/arstack_studio/qml/WorkflowBar.qml",
+          "source_blob_sha": "890dbb7d06f4a3f49d3712f9e3547daedbe29d33",
+          "tip_blob_sha": "91eb993331ce7c94e2de0e6519997f7bad53535c",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeterministicSessionHarness.cpp",
+          "source_blob_sha": "f6c76de9faaaffcf8c7c1c53e49af312fd9fa17b",
+          "tip_blob_sha": "71056ebff315327cfa8d4fed3f7d125e74c652e4",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeviceController.cpp",
+          "source_blob_sha": "d834d76cf6cc181a16d5a775718ed8b66a1623bc",
+          "tip_blob_sha": "9f65485564b0dd1f0497fda6b49e593db70b9592",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeviceController.hpp",
+          "source_blob_sha": "9c81510344fe43456776af17ac6738f228517c34",
+          "tip_blob_sha": "c0244f32b056c318552fc87c9fd3e1b7db614cf6",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/tests/check_operator_workspace.py",
+          "source_blob_sha": "f60d3620bccc25c23f62b0e9789a2d6105263d07",
+          "tip_blob_sha": "0ad7e54db0d1d575cff95ba7e0efe201f0bf2587",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/live_control.cpp",
+          "source_blob_sha": "a26afc0e697df01940f45a1eb6bad2adc16e4549",
+          "tip_blob_sha": "97c236f12329c6a4e918a8201170931dc5db02a0",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/live_control_commands.md",
+          "source_blob_sha": "b50b85c6448a40f73eef72002ddb7409c046b258",
+          "tip_blob_sha": "0e05e68edb80db6a1352030d29a9920c8fb9c235",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "include/ariec61850/sampled_values/live_scenario_transaction.hpp",
+          "source_blob_sha": "1ab6d8239fdebd00c8c66f26732a68842341f596",
+          "tip_blob_sha": null,
+          "status": "MISSING_IN_TIP_REVIEW"
+        },
+        {
+          "path": "tests/test_live_signal.cpp",
+          "source_blob_sha": "3df6fc2d0b66ea0a6eb06431d1284ebaf29b2727",
+          "tip_blob_sha": "211cc68eebf99ea79aafa5e05c4a55525eabbdb0",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        }
+      ]
+    },
+    {
+      "number": 253,
+      "title": "P0-B: atomic running 4I+4V live setpoints with firmware commit/readback",
+      "source_sha": "a858967b7e35f3a65efd327b96b6da73c0688d47",
+      "base_sha": "1efacd37154269c23fa4db7fe508dcf122a3e368",
+      "source_changed_files_count": 14,
+      "exact_blob_count": 0,
+      "source_unique_paths": [],
+      "files": [
+        {
+          "path": "apps/arstack_studio/qml/Main.qml",
+          "source_blob_sha": "d2fd723bbc21f2e3295cbcd844ac4a310f54c91d",
+          "tip_blob_sha": "d4846724403275c0e553086bc8b55d2b6eb0193a",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/SignalMatrix.qml",
+          "source_blob_sha": "cb8edd52bf1cb54c30a175780eee694996d4791f",
+          "tip_blob_sha": "b7bc89a41a644149385774764a6f3a32de30a2fd",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/WorkflowBar.qml",
+          "source_blob_sha": "a1f2b776758d2a70f7dfc7614694d1f7cc4f614a",
+          "tip_blob_sha": "91eb993331ce7c94e2de0e6519997f7bad53535c",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeterministicSessionHarness.cpp",
+          "source_blob_sha": "fc78189105afe96e26859d56f5260aeaceeb5a6d",
+          "tip_blob_sha": "71056ebff315327cfa8d4fed3f7d125e74c652e4",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeviceController.cpp",
+          "source_blob_sha": "007d60454cfd043f084c5b45754d83a045084059",
+          "tip_blob_sha": "9f65485564b0dd1f0497fda6b49e593db70b9592",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeviceController.hpp",
+          "source_blob_sha": "d949178e2ef4d5185036c3ca950d984b54d6cf8c",
+          "tip_blob_sha": "c0244f32b056c318552fc87c9fd3e1b7db614cf6",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeviceIoWorker.cpp",
+          "source_blob_sha": "6bd1cf59dbe19c5e908f80fb7c1bc1d5ec7271f5",
+          "tip_blob_sha": "3bad2b79bcc6ee50838f66d5e891687e886edca9",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/SmartSessionController.cpp",
+          "source_blob_sha": "f731cc919e56bf0972c01495da358dd56189ccd4",
+          "tip_blob_sha": "96c83c6866f7e6c80242be1aa9402219ab290379",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/SmartSessionController.hpp",
+          "source_blob_sha": "4275199e4444bb28b9f84f14c822fdda0d69cad7",
+          "tip_blob_sha": "6cd1b5a22b8d87e1b237da0e85f0cfbf13b0c9b4",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/StudioDeviceController.hpp",
+          "source_blob_sha": "a0f4729c2a2f8865c551da136a92f6b1b45d6a52",
+          "tip_blob_sha": "a10be566c34d2259920d6bf9efebcfa639947937",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/tests/check_operator_workspace.py",
+          "source_blob_sha": "c2bb514296900892f6f5d622843f197ccf3d9bd7",
+          "tip_blob_sha": "0ad7e54db0d1d575cff95ba7e0efe201f0bf2587",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/live_control.cpp",
+          "source_blob_sha": "24aa00477fbb92eb50fb6549695c063bbd4a2d4e",
+          "tip_blob_sha": "97c236f12329c6a4e918a8201170931dc5db02a0",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "include/ariec61850/sampled_values/live_signal_transaction.hpp",
+          "source_blob_sha": "b49c2e7fb4d3871cf60a031a59055ba5cf2b4982",
+          "tip_blob_sha": "f3a12439e62a50ff294d0a036e7c30c81eb6a3de",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "tests/test_sv_scenario_transaction.cpp",
+          "source_blob_sha": "4c732ba9de25c46c33bc94cf955e5ff8d5d92f10",
+          "tip_blob_sha": "e29921818649707f07310718ebb26f7a70248abd",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        }
+      ]
+    },
+    {
+      "number": 248,
+      "title": "P0 SMV SSOT reliability: concurrent snapshot safety and fail-closed START",
+      "source_sha": "832db687fb9cb6c15c2934c61d43057e47a67fb2",
+      "base_sha": "f3e445616e9e7d8ba10e787ba4248a1a0396e557",
+      "source_changed_files_count": 13,
+      "exact_blob_count": 0,
+      "source_unique_paths": [],
+      "files": [
+        {
+          "path": ".github/workflows/esp32p4-smv-injector.yml",
+          "source_blob_sha": "560f01558612ab1f5c37efc25be7489671438664",
+          "tip_blob_sha": "96a2caefde768d30f4fcdb42848ec85b1db4f171",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "CMakeLists.txt",
+          "source_blob_sha": "148e0500be6f7da439e030220ed095e4f1894df3",
+          "tip_blob_sha": "7f552e51b543e4ec34332aa5bdbf9f1b6a71dae2",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/Main.qml",
+          "source_blob_sha": "7b31cfcb50098cb7c6b94a25b9ea3050ab4204d2",
+          "tip_blob_sha": "d4846724403275c0e553086bc8b55d2b6eb0193a",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/SignalMatrix.qml",
+          "source_blob_sha": "91f5a50aae3cf9a44a85586063b916252563d10e",
+          "tip_blob_sha": "b7bc89a41a644149385774764a6f3a32de30a2fd",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeviceController.cpp",
+          "source_blob_sha": "b97205b3abc7a5564dc3ec083e4d31a19d64b837",
+          "tip_blob_sha": "9f65485564b0dd1f0497fda6b49e593db70b9592",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeviceController.hpp",
+          "source_blob_sha": "cfeb616e828b9ce000ded9fbc246f50607001a51",
+          "tip_blob_sha": "c0244f32b056c318552fc87c9fd3e1b7db614cf6",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/StudioDeviceController.hpp",
+          "source_blob_sha": "606db1ab93513bedf3b5ce9c72bacd1e9a70b166",
+          "tip_blob_sha": "a10be566c34d2259920d6bf9efebcfa639947937",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/main.cpp",
+          "source_blob_sha": "775b21c39d02e33f0433e028237a0d8d69dbe146",
+          "tip_blob_sha": "1eb412506a25c376288c657d29d4ee4fe1087b20",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/tests/check_operator_workspace.py",
+          "source_blob_sha": "79615f537e0b54ef473e65d2322f0ab72d8870f8",
+          "tip_blob_sha": "0ad7e54db0d1d575cff95ba7e0efe201f0bf2587",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/app_main.cpp",
+          "source_blob_sha": "3137c8406091606af653429a8a6f742e6370b7c3",
+          "tip_blob_sha": "89c7dbfab7df892e3187a2bbf5789a023e349cda",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/live_control.cpp",
+          "source_blob_sha": "03adf780c841ee6237f1428aaca3218c0e1d789e",
+          "tip_blob_sha": "97c236f12329c6a4e918a8201170931dc5db02a0",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "include/ariec61850/sampled_values/live_signal_state.hpp",
+          "source_blob_sha": "aba2d138471ea2fae3ec40428edb93a36c25e382",
+          "tip_blob_sha": "83dce1d7f0a06939d3198107deddfcea798e97e2",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "tests/test_live_signal.cpp",
+          "source_blob_sha": "ac55750df0e502cdcbb0a7e686c474b9c01e67f9",
+          "tip_blob_sha": "211cc68eebf99ea79aafa5e05c4a55525eabbdb0",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        }
+      ]
+    },
+    {
+      "number": 250,
+      "title": "P0 Studio: cancel queued SV START with bounded priority STOP and block bare START",
+      "source_sha": "eb7448b23ef37721ecc02a2907554c969fa24dcb",
+      "base_sha": "f3e445616e9e7d8ba10e787ba4248a1a0396e557",
+      "source_changed_files_count": 7,
+      "exact_blob_count": 0,
+      "source_unique_paths": [],
+      "files": [
+        {
+          "path": "apps/arstack_studio/qml/ModernRibbon.qml",
+          "source_blob_sha": "c8222c3b544836976dca5d26217683857131d780",
+          "tip_blob_sha": "bce90ffec6ecdebd24482a43c34bbcc483fa6497",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/WorkflowBar.qml",
+          "source_blob_sha": "7c8d4308e5859fc21d4e4fa49187ce5def34ab7c",
+          "tip_blob_sha": "91eb993331ce7c94e2de0e6519997f7bad53535c",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeterministicSessionHarness.cpp",
+          "source_blob_sha": "1c8fda205d20462beeaa2413ba631e4eb4e56e7f",
+          "tip_blob_sha": "71056ebff315327cfa8d4fed3f7d125e74c652e4",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeviceController.cpp",
+          "source_blob_sha": "8066c0fd965f7faf6ca559d6742716bafb9e35cf",
+          "tip_blob_sha": "9f65485564b0dd1f0497fda6b49e593db70b9592",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeviceIoWorker.cpp",
+          "source_blob_sha": "35a8fc83b40dd85f400dc0fda4c186c4334c883f",
+          "tip_blob_sha": "3bad2b79bcc6ee50838f66d5e891687e886edca9",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeviceIoWorker.hpp",
+          "source_blob_sha": "6ca4003d8fbcda4a1f7d1512e39e9e6143164e4f",
+          "tip_blob_sha": "00cbdd7cffffbb133d1185e6522bb09f1276dd95",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/SmartSessionController.cpp",
+          "source_blob_sha": "8566083a942460400a24544ca5d48376709e0551",
+          "tip_blob_sha": "96c83c6866f7e6c80242be1aa9402219ab290379",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        }
+      ]
+    },
+    {
+      "number": 249,
+      "title": "P0 Studio: fix live GUI frequency and channel ENABLE delivery; define on-wire acceptance",
+      "source_sha": "1f9616873f8bd6bf1199ce2f9c3958088ce7b1a4",
+      "base_sha": "f3e445616e9e7d8ba10e787ba4248a1a0396e557",
+      "source_changed_files_count": 4,
+      "exact_blob_count": 0,
+      "source_unique_paths": [
+        "docs/STUDIO_BOARD_WIRE_RELIABILITY_AUDIT_2026-10-19.md"
+      ],
+      "files": [
+        {
+          "path": "apps/arstack_studio/qml/Main.qml",
+          "source_blob_sha": "5869ef86ebf0411e0422d5aacc28d27cbeaf66b1",
+          "tip_blob_sha": "d4846724403275c0e553086bc8b55d2b6eb0193a",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/SignalMatrix.qml",
+          "source_blob_sha": "68bc5807eb1508641a9d1a4657ef840514729539",
+          "tip_blob_sha": "b7bc89a41a644149385774764a6f3a32de30a2fd",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/tests/check_operator_workspace.py",
+          "source_blob_sha": "f0b41c8ec6fc99093dab30496de436079093e668",
+          "tip_blob_sha": "0ad7e54db0d1d575cff95ba7e0efe201f0bf2587",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "docs/STUDIO_BOARD_WIRE_RELIABILITY_AUDIT_2026-10-19.md",
+          "source_blob_sha": "adbf9c849e6a5b56ea45f46e9a46af4aa34f1764",
+          "tip_blob_sha": null,
+          "status": "MISSING_IN_TIP_REVIEW"
+        }
+      ]
+    },
+    {
+      "number": 255,
+      "title": "P1 Studio: checkbox-free 4I+4V tables and accessible 3-phase switch",
+      "source_sha": "b3632b182bd31840da5500d367dddb98a8427c56",
+      "base_sha": "b0fa8361f77facbfa8e9e752564a474e45923e4c",
+      "source_changed_files_count": 5,
+      "exact_blob_count": 1,
+      "source_unique_paths": [],
+      "files": [
+        {
+          "path": "apps/arstack_studio/CMakeLists.txt",
+          "source_blob_sha": "4fa8163e1539920b911a0621652cf59d7c78f59b",
+          "tip_blob_sha": "79db977ea80e8dd8c90a404d661a6f37051746fe",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/Main.qml",
+          "source_blob_sha": "d36223f43ef361aecff87f9bd5468a2ba52bd16e",
+          "tip_blob_sha": "d4846724403275c0e553086bc8b55d2b6eb0193a",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/SignalMatrix.qml",
+          "source_blob_sha": "20477ffd850dd11288ae55c71f22b9c89ce31328",
+          "tip_blob_sha": "b7bc89a41a644149385774764a6f3a32de30a2fd",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/StudioLinkSwitch.qml",
+          "source_blob_sha": "251f0d8e39d335e0b5a0ee7a82a5c891213acaae",
+          "tip_blob_sha": "251f0d8e39d335e0b5a0ee7a82a5c891213acaae",
+          "status": "EXACT_BLOB_MATCH"
+        },
+        {
+          "path": "apps/arstack_studio/tests/check_operator_workspace.py",
+          "source_blob_sha": "3a065fd5ddf7358137e48d97e46d96d1b2f5dfb7",
+          "tip_blob_sha": "0ad7e54db0d1d575cff95ba7e0efe201f0bf2587",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        }
+      ]
+    },
+    {
+      "number": 259,
+      "title": "P0 Studio field fixes: delayed USB firmware verification, truthful START, capture phase evidence",
+      "source_sha": "a852170c2e990eb75d2b8c024942f3a494651e8e",
+      "base_sha": "c959486a658b1861b064c3cc67e77e3798efde70",
+      "source_changed_files_count": 9,
+      "exact_blob_count": 0,
+      "source_unique_paths": [],
+      "files": [
+        {
+          "path": "apps/arstack_studio/qml/ModernRibbon.qml",
+          "source_blob_sha": "a5753c9fe66b14f61a5bd4ca40308bcd85a7a34c",
+          "tip_blob_sha": "bce90ffec6ecdebd24482a43c34bbcc483fa6497",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/SvCapturePanel.qml",
+          "source_blob_sha": "bd29ab381f9509cde4ef5badd6013692349ba526",
+          "tip_blob_sha": "e729c46b86caeddb66461d6871d1587eb7c59cc0",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/WorkflowBar.qml",
+          "source_blob_sha": "25e9a78958417a56fc2a6f5fb3c87eb9a714c999",
+          "tip_blob_sha": "91eb993331ce7c94e2de0e6519997f7bad53535c",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeterministicSessionHarness.cpp",
+          "source_blob_sha": "c3fad02f3baa46e489ecc8c5e0d7f3984d0bbdcc",
+          "tip_blob_sha": "71056ebff315327cfa8d4fed3f7d125e74c652e4",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/SmartSessionController.cpp",
+          "source_blob_sha": "76dd9f49fc3518326dc2cea4de174774c43dc7c0",
+          "tip_blob_sha": "96c83c6866f7e6c80242be1aa9402219ab290379",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/SmartSessionController.hpp",
+          "source_blob_sha": "ffd3f955c5b8fafc9acf4137a46ba9b792f7ae0c",
+          "tip_blob_sha": "6cd1b5a22b8d87e1b237da0e85f0cfbf13b0c9b4",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/SvCaptureController.cpp",
+          "source_blob_sha": "39e86e4f14ac4da7327c2b632f50c95f8395533a",
+          "tip_blob_sha": "5ec9f7a3aeeb043020ea8989c9a3486ed1456319",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/SvCaptureHarness.cpp",
+          "source_blob_sha": "9c1e68efcf6073c28b3c6e7228a250c3ea4efd40",
+          "tip_blob_sha": "40df159c293ab27246be5d56915faf24021ad8d9",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/tests/check_operator_workspace.py",
+          "source_blob_sha": "bb45d6c4b3ea33b71b986783c9b95b817b8ec8a5",
+          "tip_blob_sha": "0ad7e54db0d1d575cff95ba7e0efe201f0bf2587",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        }
+      ]
+    }
+  ]
+}

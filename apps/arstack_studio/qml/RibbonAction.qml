@@ -39,7 +39,10 @@ Button {
         : tone === "danger" ? "#ffe3e6"
         : tone === "accent" || checked ? "#e1f1ff" : theme.textSoft
     contentItem: ColumnLayout {
-        spacing: 3
+        spacing: 4
+        // Qt Quick Controls sizes the content rectangle; equal stretchers
+        // center the icon and caption vertically without anchor conflicts.
+        Item { Layout.fillHeight: true }
         Image {
             visible: control.iconSource.toString().length > 0
             source: control.hovered && control.enabled ? control.hoverPath : control.iconSource
@@ -56,11 +59,14 @@ Button {
             text: control.text
             color: control.textColor
             font: control.font
-            Layout.alignment: Qt.AlignHCenter
+            Layout.alignment: Qt.AlignHCenter | Qt.AlignVCenter
+            Layout.fillWidth: true
+            Layout.preferredHeight: 18
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
         }
+        Item { Layout.fillHeight: true }
     }
     background: Rectangle {
         radius: 9

@@ -22,6 +22,12 @@ esp_eth_handle_t ar_esp32p4_eth_init(void);
 /** Restart the optional PTP lab runtime on the initialized Ethernet device. */
 bool ar_esp32p4_ptp_start(void);
 
+/** Last PTP START transport preflight failure, or NULL (no failure). */
+const char *ar_esp32p4_ptp_preflight_reason(void);
+
+/** Snapshot of actual ESP-IDF driver and physical PHY link state in PTP SHOW. */
+void ar_esp32p4_ptp_print_link_status(void);
+
 #ifdef __cplusplus
 }
 #endif

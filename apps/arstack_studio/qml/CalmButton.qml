@@ -10,6 +10,7 @@ Button {
     property url iconSource
     property real iconSize: 16
     property string toolTipText: ""
+    readonly property string hoverPath: iconSource.toString().replace("/assets/material/", "/assets/material_dark/")
 
     implicitHeight: theme ? theme.controlHeight : 36
     implicitWidth: Math.max(64, contentItem.implicitWidth + 20)
@@ -22,29 +23,36 @@ Button {
     Behavior on scale { NumberAnimation { duration: 70; easing.type: Easing.OutCubic } }
 
     readonly property color activeFill: !enabled ? "#10161d" :
+                                        hovered ? "#edf5ff" :
                                         tone === "success" ? (hovered ? "#1e5c43" : "#194d38") :
                                         tone === "danger" ? (hovered ? "#523039" : theme.redSoft) :
                                         tone === "accent" ? (hovered ? "#1d3c5e" : theme.accentSoft) :
                                         (down ? "#1a2530" : hovered ? theme.raisedHover : "#141c25")
     readonly property color activeEdge: !enabled ? theme.lineSoft :
+                                         hovered ? "#aac9e9" :
                                         tone === "success" ? "#347a59" :
                                         tone === "danger" ? "#86434b" :
                                         tone === "accent" ? "#315f8d" :
                                         (activeFocus ? theme.accent : hovered ? "#3a4a5b" : theme.line)
     readonly property color activeText: !enabled ? theme.muted2 :
+                                        hovered ? "#142334" :
                                         tone === "success" ? "#d6f4e6" :
                                         tone === "danger" ? "#ffdce0" :
                                         tone === "accent" ? "#dcebff" : theme.textSoft
 
-    contentItem: Row {
-        spacing: control.iconSource.toString().length > 0 ? 7 : 0
-        anchors.centerIn: parent
+    contentItem: Item {
+        implicitWidth: centeredContent.implicitWidth
+        implicitHeight: centeredContent.implicitHeight
+        Row {
+            id: centeredContent
+            anchors.centerIn: parent
+            spacing: control.iconSource.toString().length > 0 ? 7 : 0
         Image {
             visible: control.iconSource.toString().length > 0
             width: control.iconSize
             height: control.iconSize
             anchors.verticalCenter: parent.verticalCenter
-            source: control.iconSource
+            source: control.hovered && control.enabled ? control.hoverPath : control.iconSource
             sourceSize.width: control.iconSize * 2
             sourceSize.height: control.iconSize * 2
             opacity: control.enabled ? 0.94 : 0.30
@@ -55,6 +63,7 @@ Button {
             font: control.font
             anchors.verticalCenter: parent.verticalCenter
             Behavior on color { ColorAnimation { duration: 90 } }
+        }
         }
     }
 

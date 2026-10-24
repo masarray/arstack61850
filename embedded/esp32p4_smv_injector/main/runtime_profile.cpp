@@ -53,6 +53,19 @@ bool runtime_profile_validate(const RuntimePublisherProfile& profile) noexcept {
          !ar::iec61850::ethernet::is_valid_vlan_priority(profile.vlan_priority))) {
         return false;
     }
+    if (profile.include_sample_rate) {
+        const auto declared = profile.wire_sample_rate == 0U
+            ? profile.publisher_rate_hz
+            : static_cast<std::uint32_t>(profile.wire_sample_rate);
+        if (declared == 0U || declared > 65535U ||
+            profile.wire_sample_mode > 1U ||
+            (profile.wire_sample_mode == 1U && declared != profile.publisher_rate_hz) ||
+            (profile.wire_sample_mode == 0U &&
+             profile.publisher_rate_hz != declared * 50U &&
+             profile.publisher_rate_hz != declared * 60U)) {
+            return false; // Reject unit-inconsistent metadata.
+        }
+    }
     if (profile.include_data_set && profile.data_set_reference[0] == '\0') {
         return false;
     }

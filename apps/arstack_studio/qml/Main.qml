@@ -7,10 +7,10 @@ import ARStack.Studio 1.0
 
 ApplicationWindow {
     id: root
-    width: 1240
-    height: 760
-    minimumWidth: 960
-    minimumHeight: 620
+    width: 1024
+    height: 748
+    minimumWidth: 940
+    minimumHeight: 640
     visible: true
     title: "ARStack Studio · SMV + PTP · v" + Qt.application.version
     color: studioTheme.bg
@@ -49,13 +49,41 @@ ApplicationWindow {
         return { version: 1, hz: signalFrequency, current: values(currentModel),
                  voltage: values(voltageModel), linked: phaseLink }
     }
+    // One full 4I+4V firmware transaction per committed edit, coalesced across
+    // focus/Enter/context-menu events. Never emit serial commands per keystroke.
+    Timer {
+        id: autoLiveApplyTimer
+        interval: 40
+        repeat: false
+        onTriggered: root.drainAutoLiveEdits()
+    }
+    function scheduleAutoLiveEdit() {
+        if (!device.running || !device.deviceVerified || !workflowBar.injectionRunning)
+            return
+        autoLiveQueuedRevision = scenarioRevision
+        autoLiveApplyTimer.restart()
+    }
+    function drainAutoLiveEdits() {
+        if (autoLiveQueuedRevision < 0) return
+        if (!device.deviceVerified || !device.running || !workflowBar.injectionRunning) {
+            autoLiveQueuedRevision = -1
+            return
+        }
+        // No START or STOP: wait for the previous verified CFG COMMIT+readback
+        // to complete, then submit the newest snapshot, never stale drafts.
+        if (!workflowBar.session || !workflowBar.session.liveControlReady ||
+            device.scenarioApplying) return
+        autoLiveQueuedRevision = -1
+        // On rejection, retain pendingApply and surface the error. Do not
+        // silently retry forever or advance the claimed applied revision.
+        applyLiveScenario()
+    }
     function markScenarioDirty() {
         if (restoringScenario) return
         saveScenarioTimer.restart()
-        // While STOPPED, a new edit belongs to the next supervised Start batch.
-        // Only a genuinely RUNNING board receives incremental live SETs.
-        if (!workflowBar.injectionRunning)
-            pendingApply = true
+        pendingApply = true
+        scenarioRevision += 1
+        scheduleAutoLiveEdit()
     }
     function restoreLocalScenario() {
         const saved = scenarioSettings.lastScenario
@@ -84,12 +112,20 @@ ApplicationWindow {
             validate(data.current, 0)
             validate(data.voltage, 1)
             restoringScenario = true
+            // Legacy presets can contain disabled output rows. This simple
+            // matrix has no channel enable controls by design. At application
+            // startup ONLY (never during live RUNNING), migrate disabled
+            // outputs to enabled channels with zero magnitude, preserving
+            // the previous zero-output effect without hidden OFF flags.
+            var migratedDisabled = 0
             function assign(model, rows) {
                 for (var i = 0; i < 4; ++i) {
-                    model.setProperty(i, "magnitude", rows[i][0])
+                    const wasDisabled = rows[i][2] === false
+                    model.setProperty(i, "magnitude", wasDisabled ? 0 : rows[i][0])
                     model.setProperty(i, "phase", rows[i][1])
-                    model.setProperty(i, "enabled", rows[i][2])
+                    model.setProperty(i, "enabled", true)
                     model.setProperty(i, "quality", rows[i][3])
+                    if (wasDisabled) migratedDisabled += 1
                 }
             }
             assign(currentModel, data.current)
@@ -102,6 +138,13 @@ ApplicationWindow {
             refreshPreview()
             restoringScenario = false
             pendingApply = true
+            if (migratedDisabled > 0) {
+                // Persist the migration to avoid redoing it on next launch.
+                // Explicitly notify the operator; no serial output is sent.
+                scenarioSettings.lastScenario = JSON.stringify(scenarioSnapshot())
+                showMessage("Legacy preset: " + migratedDisabled +
+                    " disabled channel(s) restored as enabled at 0 magnitude. Review before START.", true)
+            }
         } catch (e) {
             restoringScenario = false
             scenarioSettings.lastScenario = ""
@@ -115,6 +158,17 @@ ApplicationWindow {
     property bool phaseLink: false
     property bool profileDirty: false
     property bool pendingApply: true
+    property int scenarioRevision: 0
+    property int liveSubmissionRevision: -1
+    property int autoLiveQueuedRevision: -1
+    // Session-only operator intent. Never persist across application launches:
+    // an explicit PTP ON can be restored after a firmware reflash/reconnect
+    // without introducing an uncontrolled power-on publisher.
+    property bool ptpDesiredForSession: false
+    property string ptpDesiredRole: "SOURCE"
+    property bool ptpRestoreAfterFirmware: false
+    property int ptpRestoreChecks: 0
+    property bool ptpDefaultStartAttempted: false
     property bool restoringScenario: false
     property bool offlinePreviewRunning: false
     property real currentScale: 1000.0
@@ -170,7 +224,7 @@ ApplicationWindow {
         source: Qt.resolvedUrl("../assets/InterVariable.ttf")
     }
 
-    readonly property bool compactLayout: width < 1120
+    readonly property bool compactLayout: width < 1220
     readonly property bool canDeploy: workflowBar.session ? workflowBar.session.canDeployProfile : false
     readonly property bool canStart: workflowBar.session ? workflowBar.session.startReady : false
     readonly property string toastMessage: transientMessage
@@ -188,9 +242,112 @@ ApplicationWindow {
         function onDeviceMessage(message) {
             root.showMessage(message, false)
         }
+        function onLastErrorChanged() {
+            if (device.lastError && device.lastError.length > 0)
+                root.showMessage(device.lastError, true)
+        }
+        function onSvStopReasonChanged() {
+            if (!device.running && device.svStopReason !== "" &&
+                device.svStopReason !== "AWAITING_BOARD_CAUSE") {
+                root.showMessage(
+                    "ESP32-P4 stopped SV: " + device.svStopReason +
+                    ". PTP state is independent. Open Copy diagnostics.", true)
+            }
+        }
         function onDeviceVerifiedChanged() {
             root.pendingApply = true
+            root.liveSubmissionRevision = -1
+            root.autoLiveQueuedRevision = -1
+            autoLiveApplyTimer.stop()
             root.offlinePreviewRunning = false
+        }
+        function onRunningChanged() {
+            // An operator STOP or a firmware fault cancels unsent live edits.
+            // Reconnect/START must never replay edits from a previous session.
+            if (!device.running) {
+                root.autoLiveQueuedRevision = -1
+                autoLiveApplyTimer.stop()
+            }
+        }
+        function onScenarioApplicationFinished() {
+            // The board ACK/readback gate is now idle. If the operator edited
+            // another field during the transaction, drain that newest edit.
+            if (root.autoLiveQueuedRevision >= 0 && device.running)
+                autoLiveApplyTimer.restart()
+        }
+        function onLiveScenarioApplied() {
+            if (root.liveSubmissionRevision >= 0 &&
+                root.liveSubmissionRevision === root.scenarioRevision) {
+                root.pendingApply = false
+                root.showMessage("4I+4V live setpoints verified by firmware readback.", false)
+            } else {
+                root.pendingApply = true
+                root.showMessage("Live setpoints verified; newer edits remain pending.", false)
+            }
+            root.liveSubmissionRevision = -1
+        }
+    }
+
+    Connections {
+        target: workflowBar.session
+        function onStateChanged() {
+            // If a committed edit was queued while the serial/session
+            // transport was briefly not ready, deliver it once the
+            // verified RUNNING session becomes writable again.
+            if (root.autoLiveQueuedRevision >= 0 && device.running &&
+                !device.scenarioApplying)
+                autoLiveApplyTimer.restart()
+        }
+        function onFirmwareUpdateFinished(success) {
+            // Reset during firmware install stops the board's PTP SOURCE.
+            // If the operator explicitly enabled it in this live Studio
+            // session, restore once after the verified board is ready.
+            // Do not preserve intent after a fresh Studio launch.
+            if (success && root.ptpDesiredForSession) {
+                root.ptpRestoreChecks = 0
+                root.ptpRestoreAfterFirmware = true
+            }
+        }
+    }
+
+    // Operator-friendly default: start SOURCE with the verified profile
+    // once the connected board is READY, never in a blind reconnect loop.
+    // A deliberate OFF cancels this default for the rest of the session.
+    Timer {
+        interval: 500
+        repeat: true
+        running: !root.ptpDefaultStartAttempted
+        onTriggered: {
+            const session = workflowBar.session
+            if (!session || !device.deviceVerified || !session.startReady ||
+                    session.updatingFirmware || device.ptpStarting) return
+            root.ptpDefaultStartAttempted = true
+            if (!device.ptpRunning && !root.startPtpRole("SOURCE"))
+                root.showMessage("PTP could not start automatically; use PTP On to retry.", true)
+        }
+    }
+
+    Timer {
+        interval: 300
+        repeat: true
+        running: root.ptpRestoreAfterFirmware
+        onTriggered: {
+            // Time-bounded one-shot restoration: never retry indefinitely.
+            root.ptpRestoreChecks += 1
+            if (root.ptpRestoreChecks > 120) {
+                root.ptpRestoreAfterFirmware = false
+                root.showMessage("PTP restart was not confirmed after reconnect. Use PTP On to retry.", true)
+                return
+            }
+            const session = workflowBar.session
+            if (!session || session.updatingFirmware || !session.startReady ||
+                    !device.deviceVerified || !device.ptpAvailable ||
+                    device.ptpStarting)
+                return
+            root.ptpRestoreAfterFirmware = false
+            if (device.ptpRunning || !root.ptpDesiredForSession) return
+            if (!root.startPtpRole(root.ptpDesiredRole))
+                root.showMessage("PTP did not restart after firmware installation. Use PTP On to retry.", true)
         }
     }
 
@@ -225,10 +382,46 @@ ApplicationWindow {
         ListElement { timeText: "--:--:--"; messageText: "ARStack Studio ready."; isError: false }
     }
 
+    property string lastToastKey: ""
+    property double lastToastAt: 0
+    function explainFailure(message) {
+        const m = String(message || "")
+        if (m.indexOf("ETHERNET_LINK_DOWN") >= 0 ||
+            m.indexOf("Ethernet PHY link is DOWN") >= 0 ||
+            m.indexOf("source did not emit") >= 0 ||
+            m.indexOf("no verified Announce") >= 0)
+            return "PTP belum bisa aktif. Sambungkan kabel LAN ESP32-P4 ke switch/port Ethernet aktif, tunggu PHY UP, lalu START PTP."
+        if (m.indexOf("ETHERNET_DRIVER_NOT_STARTED") >= 0 ||
+            m.indexOf("ETHERNET_DRIVER_UNAVAILABLE") >= 0)
+            return "Driver Ethernet ESP32-P4 belum siap. Periksa koneksi board, lalu restart perangkat bila driver tetap STOPPED."
+        if (m.indexOf("ETHERNET_TX_INVALID_STATE") >= 0 ||
+            m.indexOf("ESP_ERR_INVALID_STATE") >= 0)
+            return "PTP TX ditolak EMAC. Periksa Driver/PHY di Advanced → Time Sync; salin diagnostics jika PHY sudah UP."
+        if (m.indexOf("LEASE_EXPIRED") >= 0)
+            return "Injeksi SV berhenti: heartbeat kontrol USB terputus. Periksa kabel USB/COM lalu START kembali."
+        if (m.indexOf("RUNTIME_FAULT") >= 0)
+            return "Board menghentikan injeksi SV karena gangguan runtime. Buka Copy diagnostics sebelum START ulang."
+        return m
+    }
     function showMessage(message, error) {
+        if (!message || String(message).trim().length === 0) return
         statusMessage = message
-        transientMessage = error === true ? message : ""
-        transientError = error === true
+        const critical = error === true
+        const userMessage = critical ? explainFailure(message) : String(message)
+        const key = (critical ? "E:" : "I:") + userMessage
+        const now = Date.now()
+        const duplicate = key === lastToastKey && now - lastToastAt < 4000
+        const meaningful = critical || /accepted|ready|connected|installed|updated|stopped|started|saved|completed|success/i.test(userMessage)
+        if (meaningful && !duplicate) {
+            lastToastKey = key
+            lastToastAt = now
+            transientMessage = userMessage
+            transientError = critical
+            messageTimer.interval = critical ? 4200 : 2300
+            messageTimer.restart()
+        }
+        if (critical && !duplicate && device)
+            device.recordUiDiagnostic(String(message) + " | displayed=" + userMessage)
         statusHistoryModel.append({
             timeText: new Date().toLocaleTimeString(Qt.locale(), "HH:mm:ss"),
             messageText: message,
@@ -236,7 +429,6 @@ ApplicationWindow {
         })
         while (statusHistoryModel.count > 100)
             statusHistoryModel.remove(0)
-        messageTimer.restart()
     }
 
     function detachPhasor() {
@@ -257,6 +449,13 @@ ApplicationWindow {
         workflowBar.openEngineeringDialog()
     }
 
+    function openCapture() {
+        // A single first-class Studio capture workspace. Reuse the same
+        // lifetime-owned panel even while changing advanced tabs.
+        profilePanel.showCapture()
+        openConfiguration()
+    }
+
     function openConfiguration() {
         configurationWindow.show()
         configurationWindow.raise()
@@ -269,7 +468,19 @@ ApplicationWindow {
     }
 
     function startPtpRole(role) {
-        return profilePanel.startPtpRole(role)
+        const accepted = profilePanel.startPtpRole(role)
+        if (accepted) {
+            root.ptpDesiredForSession = true
+            root.ptpDesiredRole = role
+        }
+        return accepted
+    }
+
+    function requestStopPtp() {
+        root.ptpDefaultStartAttempted = true
+        root.ptpDesiredForSession = false
+        root.ptpRestoreAfterFirmware = false
+        return workflowBar.session && workflowBar.session.requestStopPtp()
     }
 
     function openDiagnostics() {
@@ -291,15 +502,16 @@ ApplicationWindow {
 
     function parseOperatorNumber(text) {
         var normalized = String(text).trim()
-            .replace(/\s/g, "")
             .replace(/degrees?/ig, "")
             .replace(/deg/ig, "")
             .replace(/°/g, "")
             .replace(/Hz/ig, "")
-            .replace(/[AV]$/i, "")
+            .replace(/[AV]$/i, "").trim()
+        // Decimal comma and dot are equally valid. Never interpret mixed
+        // punctuation or thousands-grouping as a silently altered number.
         if (normalized.indexOf(",") >= 0 && normalized.indexOf(".") < 0)
             normalized = normalized.replace(",", ".")
-        if (!normalized.length || normalized === "+" || normalized === "-" || normalized === ".")
+        if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(normalized))
             return NaN
         return Number(normalized)
     }
@@ -410,15 +622,14 @@ ApplicationWindow {
         }
 
         selectSignal(group, row)
+        // Running edits only change the draft. Apply live sends one verified
+        // eight-channel transaction instead of partial per-channel SETs.
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply) {
-            if (phaseLink && row < 3) sendLinkedGroup(group)
-            else sendSignal(group, row)
-        }
         return true
     }
 
     function applyAllSignals() {
+        if (workflowBar.injectionRunning) return applyLiveScenario()
         if (!workflowBar.session || !workflowBar.session.liveControlReady) return false
         var ok = workflowBar.session.requestSetFrequency(signalFrequency)
         for (var group = 0; group < 2; ++group)
@@ -430,7 +641,28 @@ ApplicationWindow {
                        : "One or more draft commands could not be queued; retry after checking the board.", !ok)
         return ok
     }
-    function startScenarioSnapshot() {
+    function startScenarioSnapshot(flushDrafts) {
+        // Flush every local draft once before serializing the canonical
+        // 4I+4V scenario. An invalid draft cannot be sent to the board.
+        if (flushDrafts !== false &&
+            (!currentMatrix.flushPendingEdits() || !voltageMatrix.flushPendingEdits())) {
+            showMessage("Invalid signal input: correct highlighted field before Start.", true)
+            return null
+        }
+        // START always serializes the same ListModels that draw the table,
+        // including all eight current phase angles and enabled flags.
+        // Never silently START with an invisible disabled channel. The
+        // legacy restore path migrates at boot; an unexpected future state
+        // must be corrected explicitly instead of serialized unnoticed.
+        for (var group = 0; group < 2; ++group) {
+            var rows = groupModel(group)
+            for (var row = 0; row < 4; ++row) {
+                if (rows.get(row).enabled !== true) {
+                    showMessage("Hidden disabled channel detected. Restore the scenario before START.", true)
+                    return null
+                }
+            }
+        }
         var draft = scenarioSnapshot()
         draft.currentScale = currentScale
         draft.voltageScale = voltageScale
@@ -439,17 +671,53 @@ ApplicationWindow {
         return draft
     }
 
+    function applyLiveScenario() {
+        if (!workflowBar.injectionRunning || !workflowBar.session ||
+            !workflowBar.session.liveControlReady || device.scenarioApplying) return false
+        // Live must transmit committed model values only. A second text cell
+        // that is still being typed remains a draft until Enter/focus-out.
+        const snapshot = startScenarioSnapshot(false)
+        if (!snapshot) return false
+        const revision = scenarioRevision
+        if (!workflowBar.session.requestApplyLiveScenario(snapshot)) {
+            pendingApply = true
+            showMessage("Live setpoints not queued; check board and retry.", true)
+            return false
+        }
+        liveSubmissionRevision = revision
+        showMessage("Applying eight setpoints; awaiting firmware commit/readback.", false)
+        return true
+    }
+
     function setFrequencyValue(value) {
         if (!validFrequency(value)) return false
+        if (signalFrequency === value) {
+            frequencyField.text = value.toFixed(3)
+            frequencyField.frequencyDirty = false
+            frequencyField.invalidInput = false
+            return true
+        }
         signalFrequency = value
         if (value > 0) previousAcFrequency = value
         frequencyField.text = value.toFixed(3)
+        frequencyField.frequencyDirty = false
         frequencyField.invalidInput = false
         refreshPreview()
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
-            workflowBar.session.requestSetFrequency(value)
         return true
+    }
+    function commitFrequencyEditor() {
+        if (!frequencyField.frequencyDirty) return true
+        const value = parseOperatorNumber(frequencyField.text)
+        if (!validFrequency(value)) {
+            frequencyField.text = signalFrequency.toFixed(3)
+            frequencyField.invalidInput = false
+            frequencyField.frequencyDirty = false
+            showMessage("Frequency must be within 0..1000 Hz (0 = DC).", true)
+            return false
+        }
+        frequencyField.frequencyDirty = false
+        return setFrequencyValue(value)
     }
 
     function setWaveformMode(mode) {
@@ -569,8 +837,8 @@ ApplicationWindow {
 
     Shortcut { sequence: "Ctrl+B"; enabled: !workflowBar.startQueued; onActivated: root.balanced() }
     Shortcut { sequence: "Ctrl+0"; enabled: !workflowBar.startQueued; onActivated: root.zeroAll() }
-    Shortcut { sequence: "F5"; enabled: workflowBar.session && workflowBar.session.state !== "RUNNING"; onActivated: workflowBar.requestStart() }
-    Shortcut { sequence: "F6"; enabled: workflowBar.session && workflowBar.session.state === "RUNNING"; onActivated: workflowBar.requestStop() }
+    Shortcut { sequence: "F5"; enabled: workflowBar.session && !workflowBar.injectionRunning && !workflowBar.startQueued; onActivated: workflowBar.requestStart() }
+    Shortcut { sequence: "F6"; enabled: workflowBar.session && (workflowBar.injectionRunning || workflowBar.startQueued); onActivated: workflowBar.requestStop() }
 
     Dialog {
         id: diagnosticsDialog
@@ -597,15 +865,50 @@ ApplicationWindow {
                     font.pixelSize: 9
                 }
                 Item { Layout.fillWidth: true }
-                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "Copy diagnostics"; onClicked: StudioClipboard.copyText(workflowBar.session.diagnosticsText()) }
+                CalmButton {
+                    theme: studioTheme
+                    uiFont: root.uiFont
+                    text: "Copy diagnostics"
+                    onClicked: {
+                        const snapshot = workflowBar.session ? workflowBar.session.diagnosticsText() : ""
+                        if (StudioClipboard.copyText(snapshot)) {
+                            root.showMessage("Diagnostics copied to clipboard.", false)
+                        } else {
+                            root.showMessage("Clipboard unavailable. Select text below and press Ctrl+C.", true)
+                        }
+                    }
+                }
+                CalmButton {
+                    theme: studioTheme
+                    uiFont: root.uiFont
+                    text: "Open log folder"
+                    onClicked: {
+                        if (!device.openDiagnosticLogFolder())
+                            root.showMessage("Diagnostic log folder is not accessible.", true)
+                    }
+                }
                 CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "Clear"; onClicked: device.clearLog() }
+            }
+            Label {
+                Layout.fillWidth: true
+                text: "Auto-saved system log: " + device.diagnosticLogPath
+                color: studioTheme.muted
+                font.family: root.monoFont
+                font.pixelSize: 9
+                wrapMode: Text.WrapAnywhere
             }
             ScrollView {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 TextArea {
                     readOnly: true
-                    text: device.logText
+                    // Include the complete same session/PTP snapshot used by
+                    // the Copy button, rather than showing only raw serial lines.
+                    // Selectable fall-back remains available if native clipboard
+                    // ownership is denied by Windows or another process.
+                    text: diagnosticsDialog.visible && workflowBar.session
+                        ? workflowBar.session.diagnosticsText() : device.logText
+                    selectByMouse: true
                     color: studioTheme.textSoft
                     selectionColor: studioTheme.accent
                     font.family: root.monoFont
@@ -634,16 +937,25 @@ ApplicationWindow {
             Label {
                 text: !device.deviceVerified
                     ? "No ESP32 board detected · Preview mode only"
-                    : device.portName + " · ESP32-P4" + (workflowBar.injectionRunning ? " · Injecting" : " · Ready")
-                color: device.deviceVerified ? studioTheme.textSoft : studioTheme.muted
+                    : device.portName + " · ESP32-P4 · " + workflowBar.displayState
+                color: workflowBar.unexpectedSvStop ? studioTheme.red
+                     : device.deviceVerified ? studioTheme.textSoft : studioTheme.muted
+                Layout.maximumWidth: root.compactLayout ? 255 : 410
+                elide: Text.ElideRight
                 font.family: root.uiFont
                 font.pixelSize: 9
-                font.weight: Font.Medium
+                font.weight: workflowBar.unexpectedSvStop ? Font.DemiBold : Font.Medium
             }
             Rectangle { width: 1; height: 12; color: studioTheme.lineSoft }
             Label {
-                text: "4I + 4V · 4000 samples/s"
-                color: studioTheme.muted
+                text: root.pendingApply
+                    ? (workflowBar.injectionRunning
+                        ? (device.scenarioApplying ? "4I + 4V · Applying live..." :
+                           "4I + 4V · Auto-apply pending")
+                        : "4I + 4V · Setpoints pending · Start to apply")
+                    : "4I + 4V · 4000 samples/s"
+                color: root.pendingApply
+                    ? studioTheme.amber : studioTheme.muted
                 font.family: root.uiFont
                 font.pixelSize: 9
             }
@@ -696,6 +1008,15 @@ ApplicationWindow {
             configurationWindow.hide()
         }
 
+        StatusToast {
+            anchors.centerIn: parent
+            z: 1500
+            theme: studioTheme
+            uiFont: root.uiFont
+            message: root.toastMessage
+            error: root.toastError
+        }
+
         DockFrame {
             anchors.fill: parent
             anchors.margins: 10
@@ -710,6 +1031,7 @@ ApplicationWindow {
                 id: profilePanel
                 anchors.fill: parent
                 theme: studioTheme
+                signalFrequency: root.signalFrequency
                 controller: root
                 device: device
                 profiles: sclProfiles
@@ -865,26 +1187,44 @@ ApplicationWindow {
 
                 SurfacePanel {
                     objectName: "studioInjectionSurface"
-                    SplitView.fillWidth: true
                     SplitView.fillHeight: true
-                    SplitView.minimumWidth: root.compactLayout ? 500 : 550
-                    SplitView.preferredWidth: root.compactLayout ? 700 : 860
+                    SplitView.minimumWidth: 405
+                    SplitView.preferredWidth: 425
+                    SplitView.maximumWidth: 465
+                    SplitView.fillWidth: false
                     theme: studioTheme
 
-                    ColumnLayout {
+                    // Clicking unoccupied workspace commits the focused cell.
+                    // Controls above this background retain their own taps.
+                    MouseArea {
                         anchors.fill: parent
-                        anchors.margins: root.compactLayout ? 11 : 13
-                        spacing: root.compactLayout ? 6 : 8
+                        onClicked: root.contentItem.forceActiveFocus()
+                    }
+
+                    ColumnLayout {
+                        z: 1
+                        anchors.fill: parent
+                        // Injection width stays 405..465px at every desktop size.
+                        // Never expand its children just because the whole window
+                        // crosses the 1220px toolbar breakpoint.
+                        anchors.margins: 10
+                        spacing: 6
 
                         RowLayout {
                             Layout.fillWidth: true
                             ColumnLayout {
                                 spacing: 1
-                                Label { text: "4I + 4V Injection"; color: studioTheme.text; font.family: root.uiFont; font.pixelSize: root.compactLayout ? 17 : 18; font.weight: Font.DemiBold }
+                                Label { text: "4I + 4V Injection"; color: studioTheme.text; font.family: root.uiFont; font.pixelSize: 17; font.weight: Font.DemiBold }
                             }
                             Item { Layout.fillWidth: true }
-                            // START owns the single ordered scenario transaction.
-                            // No redundant Apply button in the operator workflow.
+                            Label {
+                                visible: workflowBar.injectionRunning
+                                text: device.scenarioApplying ? "LIVE · VERIFYING" : "LIVE · AUTO"
+                                color: device.scenarioApplying ? studioTheme.amber : studioTheme.green
+                                font.family: root.uiFont
+                                font.pixelSize: 10
+                                font.weight: Font.DemiBold
+                            }
                         }
 
                         Rectangle {
@@ -941,66 +1281,63 @@ ApplicationWindow {
                                     }
                                     theme: studioTheme
                                     monoFont: root.monoFont
-                                    compact: root.compactLayout
+                                    compact: true
                                     implicitWidth: 90
                                     text: "50.000"
                                     suffixText: "Hz"
                                     enabled: true
                                     validator: DoubleValidator { bottom: 0.0; top: 1000.0; decimals: 3 }
+                                    property bool frequencyDirty: false
                                     onTextEdited: {
-                                        var value = root.parseOperatorNumber(text)
-                                        if (root.validFrequency(value)) {
-                                            invalidInput = false
-                                            root.signalFrequency = value
-                                            if (value > 0) root.previousAcFrequency = value
-                                            root.refreshPreview()
-                                            root.markScenarioDirty()
-                                            if (workflowBar.session && workflowBar.session.liveControlReady && !root.pendingApply)
-                                                workflowBar.session.requestSetFrequency(value)
-                                        } else invalidInput = true
+                                        frequencyDirty = true
+                                        invalidInput = !root.validFrequency(
+                                            root.parseOperatorNumber(text))
                                     }
-                                    onEditingFinished: {
-                                        var value = root.parseOperatorNumber(text)
-                                        if (!root.validFrequency(value)) {
-                                            text = root.signalFrequency.toFixed(3)
-                                            invalidInput = false
-                                            root.showMessage("Frequency must be within 0..1000 Hz (0 = DC).", true)
-                                        } else text = value.toFixed(3)
+                                    onEditingFinished: root.commitFrequencyEditor()
+                                    onAccepted: root.commitFrequencyEditor()
+                                    onActiveFocusChanged: {
+                                        if (!activeFocus) root.commitFrequencyEditor()
                                     }
                                 }
 
-                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "0"; implicitWidth: 44; toolTipText: "DC"; onClicked: root.setFrequencyValue(0) }
-                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "50"; implicitWidth: 44; onClicked: root.setFrequencyValue(50) }
-                                CalmButton { theme: studioTheme; uiFont: root.uiFont; text: "60"; implicitWidth: 44; onClicked: root.setFrequencyValue(60) }
-                                Rectangle { width: 1; height: 24; color: studioTheme.lineSoft }
-                                StudioDarkCheckBox {
+                                StudioLinkSwitch {
                                     theme: studioTheme
                                     uiFont: root.uiFont
-                                    enabled: root.signalFrequency > 0
+                                    enabled: root.signalFrequency > 0 && !workflowBar.startQueued
                                     checked: root.phaseLink
-                                    text: "3-phase link"
                                     onToggled: {
+                                        // Link is an editing preference, not a wire
+                                        // setpoint. No 8-channel live replay or
+                                        // pendingApply on a presentation-only switch.
                                         root.phaseLink = checked
-                                        root.markScenarioDirty()
+                                        root.saveScenarioTimer.restart()
                                     }
-                                    font.family: root.uiFont
-                                    font.pixelSize: 9
                                 }
                                 Item { Layout.fillWidth: true }
                             }
                         }
 
-                        RowLayout {
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: root.compactLayout ? 214 : 224
-                            Layout.maximumHeight: root.compactLayout ? 214 : 224
-                            spacing: 9
+                            // Two stacked tables consume their actual content
+                            // heights, never stretch four tiny rows into an
+                            // oversized empty card at tall window sizes.
+                            Layout.fillHeight: false
+                            // Reserve vertical room for frequency, timing,
+                            // and quality controls even at 960x620. Larger
+                            // windows can use full natural matrix height.
+                            Layout.preferredHeight: Math.min(410, Math.max(215, root.height - 365))
+                            Layout.maximumHeight: 410
+                            Layout.minimumHeight: 195
+                            spacing: 8
                             SignalMatrix {
                                 id: voltageMatrix
                                 enabled: !workflowBar.startQueued
                                 objectName: "studioVoltageMatrix"
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
+                                Layout.preferredHeight: 196
+                                Layout.minimumHeight: 92
                                 theme: studioTheme
                                 controller: root
                                 device: device
@@ -1012,7 +1349,7 @@ ApplicationWindow {
                                 titleText: "Voltage"
                                 symbolText: "U"
                                 unitText: root.signalFrequency === 0 ? "V DC" : "V RMS"
-                                compact: root.compactLayout
+                                compact: true
                             }
                             SignalMatrix {
                                 id: currentMatrix
@@ -1020,6 +1357,8 @@ ApplicationWindow {
                                 objectName: "studioCurrentMatrix"
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
+                                Layout.preferredHeight: 196
+                                Layout.minimumHeight: 92
                                 theme: studioTheme
                                 controller: root
                                 device: device
@@ -1031,7 +1370,7 @@ ApplicationWindow {
                                 titleText: "Current"
                                 symbolText: "I"
                                 unitText: root.signalFrequency === 0 ? "A DC" : "A RMS"
-                                compact: root.compactLayout
+                                compact: true
                             }
 
                         }
@@ -1047,23 +1386,18 @@ ApplicationWindow {
                             session: workflowBar.session
                             uiFont: root.uiFont
                             monoFont: root.monoFont
-                            compact: root.compactLayout
+                            compact: true
                         }
                         Rectangle { Layout.fillWidth: true; height: 1; color: studioTheme.lineSoft }
                         RowLayout {
                             objectName: "studioQualityRow"
                             Layout.fillWidth: true
-                            spacing: 8
+                            spacing: 6
                             Rectangle { width: 6; height: 6; radius: 3; color: studioTheme.accent }
                             Label { text: root.activeSignal; color: studioTheme.textSoft; font.family: root.monoFont; font.pixelSize: studioTheme.labelSize; font.weight: Font.Bold }
-                            Label {
-                                text: root.signalFrequency === 0
-                                    ? root.activeMagnitude.toFixed(3) + " " + root.activeUnit + " DC"
-                                    : root.activeMagnitude.toFixed(3) + " " + root.activeUnit + " RMS · " + root.activePhase.toFixed(2) + "°"
-                                color: studioTheme.muted
-                                font.family: root.uiFont
-                                font.pixelSize: 9
-                            }
+                            // The same magnitude/phase is already visible in
+                            // the active matrix row and plots. Removing this
+                            // duplicate avoids squeezing the quality controls.
                             Rectangle { width: 1; height: 20; color: studioTheme.lineSoft }
                             QualityEditor {
                                 enabled: !workflowBar.startQueued
@@ -1074,19 +1408,20 @@ ApplicationWindow {
                                 uiFont: root.uiFont
                                 monoFont: root.monoFont
                                 qualityValue: root.activeQuality
-                                compact: root.compactLayout
+                                compact: true
                             }
                         }
-                        Item { Layout.fillHeight: true }
+                        // No trailing filler: vertically stacked matrices
+                        // expand to use the otherwise blank injection space.
                     }
                 }
 
                 SplitView {
                     visible: (root.phasorDockVisible && !root.phasorDetached) ||
                              (root.waveformDockVisible && !root.waveformDetached)
-                    SplitView.preferredWidth: root.compactLayout ? 300 : 380
-                    SplitView.minimumWidth: root.compactLayout ? 270 : 300
-                    SplitView.maximumWidth: 680
+                    SplitView.preferredWidth: 560
+                    SplitView.minimumWidth: 390
+                    SplitView.fillWidth: true
                     SplitView.fillHeight: true
                     orientation: Qt.Vertical
                     handle: Rectangle {
@@ -1103,11 +1438,11 @@ ApplicationWindow {
                     }
 
                     DockFrame {
+                        objectName: "studioPhasorDock"
                         visible: root.phasorDockVisible && !root.phasorDetached
                         SplitView.fillWidth: true
                         SplitView.minimumHeight: 170
-                        SplitView.preferredHeight: 225
-                        SplitView.maximumHeight: 265
+                        SplitView.preferredHeight: Math.max(170, (workspaceSplit.height - 9) / 2)
                         SplitView.fillHeight: false
                         theme: studioTheme
                         titleText: "Phasor"
@@ -1143,10 +1478,11 @@ ApplicationWindow {
                     }
 
                     DockFrame {
+                        objectName: "studioWaveformDock"
                         visible: root.waveformDockVisible && !root.waveformDetached
                         SplitView.fillWidth: true
                         SplitView.minimumHeight: 170
-                        SplitView.preferredHeight: 328
+                        SplitView.preferredHeight: Math.max(170, (workspaceSplit.height - 9) / 2)
                         SplitView.fillHeight: true
                         theme: studioTheme
                         titleText: "Waveform"
@@ -1205,9 +1541,8 @@ ApplicationWindow {
     }
 
     StatusToast {
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 38
+        anchors.centerIn: parent
+        z: 1500
         theme: studioTheme
         uiFont: root.uiFont
         message: root.toastMessage

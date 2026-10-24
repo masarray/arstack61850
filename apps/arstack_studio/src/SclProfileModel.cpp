@@ -234,6 +234,7 @@ void SclProfileModel::installDocument(
         document_->sampled_values_streams.size(),
         referenceTemplate ? SvProfileFamily::legacy_9_2le
                           : SvProfileFamily::unspecified);
+    vlanOverrides_.assign(document_->sampled_values_streams.size(), std::nullopt);
     rows_.clear();
     selectedIndex_ = -1;
     fatalError_.clear();
@@ -296,6 +297,7 @@ void SclProfileModel::clear() {
     confirmedCounterModulus_.reset();
     confirmedNominalFrequencyMilliHz_.reset();
     profileFamilies_.clear();
+    vlanOverrides_.clear();
     rows_.clear();
     selectedIndex_ = -1;
     fatalError_.clear();
@@ -313,6 +315,22 @@ void SclProfileModel::selectStream(const int row) {
     selectedIndex_ = normalized;
     emit selectedIndexChanged();
     emit selectedProfileChanged();
+}
+
+bool SclProfileModel::configureSelectedVlan(const bool present, const int vid, const int pcp) {
+    if (!document_.has_value() || selectedIndex_ < 0 ||
+        selectedIndex_ >= static_cast<int>(vlanOverrides_.size()) ||
+        vid < 0 || vid > 4094 || pcp < 0 || pcp > 7) return false;
+    const auto index = static_cast<std::size_t>(selectedIndex_);
+    if (index >= rows_.size() || !rows_[index].profile.has_value()) return false;
+    const auto& current = *rows_[index].profile;
+    if (current.vlan_present == present &&
+        current.vlan_id == static_cast<std::uint16_t>(vid) &&
+        current.vlan_priority == static_cast<std::uint8_t>(pcp)) return true;
+    vlanOverrides_[index] = VlanOverride{
+        present, static_cast<std::uint16_t>(vid), static_cast<std::uint8_t>(pcp)};
+    rebuildRows();
+    return true;
 }
 
 bool SclProfileModel::confirmCounterModulus(const int modulus) {
@@ -403,6 +421,13 @@ void SclProfileModel::rebuildRows() {
             row.deviceSupport = QStringLiteral("blocked");
         } else {
             row.profile = std::move(compiled.profile);
+            if (streamIndex < vlanOverrides_.size() &&
+                vlanOverrides_[streamIndex].has_value()) {
+                const auto& override = *vlanOverrides_[streamIndex];
+                row.profile->vlan_present = override.present;
+                row.profile->vlan_id = override.vid;
+                row.profile->vlan_priority = override.pcp;
+            }
             const auto& profile = *row.profile;
             row.compatibilityClass =
                 profile.profile_family_resolution == SvProfileFamilyResolution::resolved &&
@@ -493,6 +518,15 @@ QVariantMap SclProfileModel::profileToVariantMap(const SvPublisherProfile& p) co
     map.insert(QStringLiteral("channelLeafCount"), static_cast<qulonglong>(p.channels.size()));
     map.insert(QStringLiteral("includeDataSet"), p.asdu_options.data_set);
     map.insert(QStringLiteral("includeSampleRate"), p.asdu_options.sample_rate);
+    map.insert(QStringLiteral("wireSmpRate"),
+        p.asdu_options.sample_rate
+            ? QVariant::fromValue(static_cast<qulonglong>(p.timing.configured_sample_rate))
+            : QVariant{});
+    map.insert(QStringLiteral("wireSmpMod"),
+        p.asdu_options.sample_rate
+            ? QVariant::fromValue(p.timing.sampling_basis == SvSampleMode::samples_per_period
+                ? 0 : p.timing.sampling_basis == SvSampleMode::samples_per_second ? 1 : -1)
+            : QVariant{});
     map.insert(QStringLiteral("sampleSynchronizedField"), p.asdu_options.sample_synchronized);
 
     map.insert(QStringLiteral("iec61869Present"), p.iec61869_9.has_value());

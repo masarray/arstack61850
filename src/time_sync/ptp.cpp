@@ -74,7 +74,8 @@ void write_u64_be(const std::span<std::uint8_t> destination, const std::uint64_t
     span[1] = ptp_version;
     write_u16_be(span.subspan(2U, 2U), static_cast<std::uint16_t>(message_length));
     span[4] = options.domain_number;
-    write_u16_be(span.subspan(6U, 2U), options.two_step ? 0x0200U : 0U);
+    write_u16_be(span.subspan(6U, 2U), static_cast<std::uint16_t>(
+        (options.two_step ? 0x0200U : 0U) | options.time_properties.flags()));
     write_u64_be(span.subspan(8U, 8U), static_cast<std::uint64_t>(options.correction_field));
     std::copy(
         options.source_port_identity.clock_identity.begin(),

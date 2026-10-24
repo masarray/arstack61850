@@ -38,6 +38,17 @@ public:
             serviceControlHealth();
         });
 
+        connect(this, &DeviceController::scenarioApplicationFinished, this, [this] {
+            if (profileArmed() && (frequencyPending_ || !pendingSignals_.isEmpty()))
+                scheduleLiveFlush();
+        });
+        connect(this, &DeviceController::profileStateChanged, this, [this] {
+            // An initial 4I+4V edit must not compete with BINSTATUS/BINCHUNK.
+            // Replay only after a fully verified and armed profile.
+            if (profileArmed() && !profileDeploying() &&
+                (frequencyPending_ || !pendingSignals_.isEmpty()))
+                scheduleLiveFlush();
+        });
         connect(this, &DeviceController::connectedChanged, this, [this] {
             if (!connected()) {
                 clearPendingLiveCommands();
@@ -65,18 +76,9 @@ public:
             // so it naturally suppresses unnecessary health retries while RUNNING.
             confirmControlHealth();
         });
-        connect(this, &DeviceController::portsChanged, this, [this] {
-            // QSerialPort errors are still authoritative, but the worker's
-            // 750 ms enumeration snapshot closes the gap where Windows removes
-            // a COM device before Qt surfaces ResourceError/DeviceNotFoundError.
-            const QString activePort = portName().trimmed();
-            if (connected() && !activePort.isEmpty() && !ports().contains(activePort)) {
-                emit deviceMessage(QStringLiteral(
-                    "%1 disappeared from USB/COM enumeration. Releasing the stale session for automatic recovery.")
-                    .arg(activePort));
-                disconnectPort();
-            }
-        });
+        // M3.G: The serial worker owns confirmed USB disappearance and its
+        // two-snapshot hysteresis. Never disconnect here on a single UI
+        // portsChanged event: duplicate owners caused spurious teardown.
 
     }
 
@@ -241,10 +243,11 @@ private:
             return;
         }
 
-        // Profile deployment is an exclusive transport transaction. Health
-        // observation is deferred instead of interleaving another command or
-        // treating intentional queue exclusivity as a missed response.
-        if (profileDeploying()) return;
+        // Canonical BIN and CFG scenario transactions both own the serial
+        // console. Suppress only probe accounting during known exclusivity,
+        // never the worker's independent safety heartbeat/STOP. Resume
+        // measured liveness normally as soon as the transaction completes.
+        if (profileDeploying() || scenarioApplying()) return;
 
         if (healthProbeOutstanding_) {
             ++missedHealthReplies_;
@@ -256,7 +259,10 @@ private:
                 emit deviceMessage(QStringLiteral(
                     "Device control health timed out after bounded probes. Reconnecting without restarting SMV automatically."));
                 emit controlHealthFailed();
-                disconnectPort();
+                // A no-reply serial handle is a transport fault, NOT an
+                // operator DISCONNECT. Retire it through the worker's sole
+                // ownership path; notify the supervisor for prompt reconnect.
+                recoverUnresponsivePort();
                 return;
             }
         }
@@ -282,6 +288,9 @@ private:
 
     bool flushLiveCommands() {
         liveFlushTimer_.stop();
+        // Preserve last-value-wins edits while firmware applies the immutable START snapshot.
+        // Retry once at terminal transaction notification; never silently drop newer edits.
+        if (scenarioApplying() || profileDeploying() || !profileArmed()) return true;
         if (!deviceVerified()) {
             clearPendingLiveCommands();
             return false;

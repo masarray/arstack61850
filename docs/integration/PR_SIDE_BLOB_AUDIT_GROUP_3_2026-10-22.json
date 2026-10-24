@@ -1,0 +1,551 @@
+{
+  "schema": "arstack61850.side-file-blob-audit.v1",
+  "date": "2026-10-22",
+  "group": 3,
+  "repo": "masarray/arstack61850",
+  "tip_sha": "521979ead2560fade3713c27bf32571a126f9b28",
+  "method": "Source changed paths versus tip blob SHA, not semantic verification. Equal is file identity only, absence requires review.",
+  "records": [
+    {
+      "number": 263,
+      "title": "P0 Studio: exact firmware build identity and stage-aware PTP START recovery",
+      "source_sha": "8d50911172d4f2c52fdf950f5c33f255e90ef351",
+      "base_sha": "4ab78f90b8fa38e6ea51e431b00a825fd1a263e2",
+      "source_changed_files_count": 13,
+      "exact_blob_count": 0,
+      "source_unique_paths": [],
+      "files": [
+        {
+          "path": "apps/arstack_studio/qml/ConfigurationHub.qml",
+          "source_blob_sha": "7a445ebc329416f8623714b8e723083db87ad391",
+          "tip_blob_sha": "cc41ad14df4582637da0caac05563babbd303408",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/FirmwarePanel.qml",
+          "source_blob_sha": "994a11b45b97753e25489bc0d4eca381c6bc1605",
+          "tip_blob_sha": "552ba4f11df58335a81bed459615c800ee051eba",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/ModernRibbon.qml",
+          "source_blob_sha": "c836faa6917c2b1f8e3a6d2f98c11e7e07aee80c",
+          "tip_blob_sha": "bce90ffec6ecdebd24482a43c34bbcc483fa6497",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/PtpExpertPanel.qml",
+          "source_blob_sha": "69c652bee38807ae9128cc06b15e7ed801bbdff8",
+          "tip_blob_sha": "0003b85e46dc51ef8492fe72ef74dec28f7a008b",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeterministicSessionHarness.cpp",
+          "source_blob_sha": "9e9314a098a7e49cdc2a9bf648457a43171517eb",
+          "tip_blob_sha": "71056ebff315327cfa8d4fed3f7d125e74c652e4",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeviceController.cpp",
+          "source_blob_sha": "0ed40ce4e4c5bbcd0673473c32370e6dba947804",
+          "tip_blob_sha": "9f65485564b0dd1f0497fda6b49e593db70b9592",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeviceController.hpp",
+          "source_blob_sha": "37cdb7373a6ca5b3624ff42c4d537e5fa4833e7d",
+          "tip_blob_sha": "c0244f32b056c318552fc87c9fd3e1b7db614cf6",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/SmartSessionController.cpp",
+          "source_blob_sha": "bba2f51ed278699026a9baac63732855aa96a168",
+          "tip_blob_sha": "96c83c6866f7e6c80242be1aa9402219ab290379",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/tests/check_operator_workspace.py",
+          "source_blob_sha": "0f3c4ecb7900d812d41185e84a79b23d58486b1f",
+          "tip_blob_sha": "0ad7e54db0d1d575cff95ba7e0efe201f0bf2587",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/app_main.cpp",
+          "source_blob_sha": "c29087f45e206a27616adab2cf2bc243245b6779",
+          "tip_blob_sha": "89c7dbfab7df892e3187a2bbf5789a023e349cda",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/ethernet_port.c",
+          "source_blob_sha": "c9ae5bfcf8f88e5f86a4bd0bc29cf45eb4121f20",
+          "tip_blob_sha": "5c631ec5fd0c9776b5d306fbebbec51318c4ad42",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/ethernet_port.h",
+          "source_blob_sha": "6b6edd65c5b22210ed12cea96d1f716a2a5c23e7",
+          "tip_blob_sha": "74a456142f3d10a87c91fed47a38dda12797ee45",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp",
+          "source_blob_sha": "245400cb9030f2c888650eeec4d09ceb06843b8d",
+          "tip_blob_sha": "6f46be07099feba48c98dbdd374a8bf5be30fb25",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        }
+      ]
+    },
+    {
+      "number": 241,
+      "title": "P0 Studio UX: authoritative 4I+4V START, compact vertical layout and readable controls",
+      "source_sha": "679da6ccfd7aecabb01432a02888a9ecc5426fe3",
+      "base_sha": "fb4329e73c3b80f7d6806e25538e6ceeb06ffc13",
+      "source_changed_files_count": 10,
+      "exact_blob_count": 0,
+      "source_unique_paths": [],
+      "files": [
+        {
+          "path": "apps/arstack_studio/qml/CalmButton.qml",
+          "source_blob_sha": "a6169d67a8b491d44d4c66f2a0669dc96a1c085e",
+          "tip_blob_sha": "66d0dd2b26004da28afd15e96b00d7153db89135",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/ConfigurationHub.qml",
+          "source_blob_sha": "bfaf5e20f79a497d395b75222cdae95c45e02ff6",
+          "tip_blob_sha": "cc41ad14df4582637da0caac05563babbd303408",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/Main.qml",
+          "source_blob_sha": "3cca99ac23d8072cb08ebabd8c06c12171779a99",
+          "tip_blob_sha": "d4846724403275c0e553086bc8b55d2b6eb0193a",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/ModernRibbon.qml",
+          "source_blob_sha": "4b81b16eb5e16d95ff02e4a75755c05401c7407b",
+          "tip_blob_sha": "bce90ffec6ecdebd24482a43c34bbcc483fa6497",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/RibbonAction.qml",
+          "source_blob_sha": "57c6e83d2deb34527a998fb2507bfeff5018a170",
+          "tip_blob_sha": "2855e14365ad755cf4228c46d21807e81d79e673",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/StudioDarkCheckBox.qml",
+          "source_blob_sha": "23cd98581fa059d42c93a4d06ea70fac873468d7",
+          "tip_blob_sha": "c47b6d679477d10b1b6b00f06fd365a8795133a5",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/StudioDarkComboBox.qml",
+          "source_blob_sha": "bdc401044019c6c55906f77dbe228a0aa2ad5528",
+          "tip_blob_sha": "3e84add7cd720965904a32a5bf9abe0278f5571a",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/WorkflowBar.qml",
+          "source_blob_sha": "3f3a31505b08ab15065c6e3ed3a9bc1874690b3d",
+          "tip_blob_sha": "91eb993331ce7c94e2de0e6519997f7bad53535c",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/main.cpp",
+          "source_blob_sha": "7e3d54caec0cd50ff808e20a66e131d549bf35d1",
+          "tip_blob_sha": "1eb412506a25c376288c657d29d4ee4fe1087b20",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/tests/check_operator_workspace.py",
+          "source_blob_sha": "b49e8fbab68c2f85c1f518ee841585b47701fc13",
+          "tip_blob_sha": "0ad7e54db0d1d575cff95ba7e0efe201f0bf2587",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        }
+      ]
+    },
+    {
+      "number": 240,
+      "title": "Studio P0: preserve SV/PTP milestone; exact 4I+4V START snapshot and polished operator layout",
+      "source_sha": "c86bb64e24def5138caa234cc2eb7ee31c41d732",
+      "base_sha": "fb4329e73c3b80f7d6806e25538e6ceeb06ffc13",
+      "source_changed_files_count": 8,
+      "exact_blob_count": 0,
+      "source_unique_paths": [],
+      "files": [
+        {
+          "path": "apps/arstack_studio/qml/CalmButton.qml",
+          "source_blob_sha": "d580fd540e61a9f0ff7c34d79254aaa13aae366e",
+          "tip_blob_sha": "66d0dd2b26004da28afd15e96b00d7153db89135",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/Main.qml",
+          "source_blob_sha": "a74c56b2d706fdf63f1c6a283f688fa1d5643cbc",
+          "tip_blob_sha": "d4846724403275c0e553086bc8b55d2b6eb0193a",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/ModernRibbon.qml",
+          "source_blob_sha": "2dec9a196c44d6e913a891f91d11d40e7855fc16",
+          "tip_blob_sha": "bce90ffec6ecdebd24482a43c34bbcc483fa6497",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/RibbonAction.qml",
+          "source_blob_sha": "2983b49b608d4d818c896ed092931a4476568cb8",
+          "tip_blob_sha": "2855e14365ad755cf4228c46d21807e81d79e673",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/StudioDarkCheckBox.qml",
+          "source_blob_sha": "6f5e9b5b8c9fe3c0e54acccadc9152dc5e2f5346",
+          "tip_blob_sha": "c47b6d679477d10b1b6b00f06fd365a8795133a5",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/WorkflowBar.qml",
+          "source_blob_sha": "8dc2bc42020d9dcac1ff54e4a7498402b8300d77",
+          "tip_blob_sha": "91eb993331ce7c94e2de0e6519997f7bad53535c",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/main.cpp",
+          "source_blob_sha": "bab075f694ffb0964a28074a97e4d9e1b2454bfb",
+          "tip_blob_sha": "1eb412506a25c376288c657d29d4ee4fe1087b20",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/tests/check_operator_workspace.py",
+          "source_blob_sha": "5232ecaeac9f5f58e04f889eb42daee222b98460",
+          "tip_blob_sha": "0ad7e54db0d1d575cff95ba7e0efe201f0bf2587",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        }
+      ]
+    },
+    {
+      "number": 239,
+      "title": "P0 Studio operator UX: table-as-wire SSOT, visible injector title, stacked 4I+4V, centered controls",
+      "source_sha": "c35c73fe59ee45cc0d2149152c5969fb0b4a5807",
+      "base_sha": "fb4329e73c3b80f7d6806e25538e6ceeb06ffc13",
+      "source_changed_files_count": 10,
+      "exact_blob_count": 0,
+      "source_unique_paths": [],
+      "files": [
+        {
+          "path": "apps/arstack_studio/qml/CalmButton.qml",
+          "source_blob_sha": "6aee5e355187807be1dd49d9e74b149c6d15ade7",
+          "tip_blob_sha": "66d0dd2b26004da28afd15e96b00d7153db89135",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/ConfigurationHub.qml",
+          "source_blob_sha": "c53519d5214e0e053331e1e86ec33f78423e54c7",
+          "tip_blob_sha": "cc41ad14df4582637da0caac05563babbd303408",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/Main.qml",
+          "source_blob_sha": "831008ac1e0b879c0af44c21b5cc29d3134d333f",
+          "tip_blob_sha": "d4846724403275c0e553086bc8b55d2b6eb0193a",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/ModernRibbon.qml",
+          "source_blob_sha": "6ed95645b2d5cf8b9074b5b49e185633a0440a68",
+          "tip_blob_sha": "bce90ffec6ecdebd24482a43c34bbcc483fa6497",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/RibbonAction.qml",
+          "source_blob_sha": "93c3fbcd01c51d8e832041f36c5aed5c01b29658",
+          "tip_blob_sha": "2855e14365ad755cf4228c46d21807e81d79e673",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/SignalMatrix.qml",
+          "source_blob_sha": "aa739710b43f511ea8b40f12303c0ee7a344cddc",
+          "tip_blob_sha": "b7bc89a41a644149385774764a6f3a32de30a2fd",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/StudioDarkCheckBox.qml",
+          "source_blob_sha": "744df83b115eb94cf0f8ba9710b5d86620ab0063",
+          "tip_blob_sha": "c47b6d679477d10b1b6b00f06fd365a8795133a5",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/WorkflowBar.qml",
+          "source_blob_sha": "6f8568b1ca9f04438fb0a59ddaf401d473af818e",
+          "tip_blob_sha": "91eb993331ce7c94e2de0e6519997f7bad53535c",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/main.cpp",
+          "source_blob_sha": "711fc83b375aca3bb9fec4dbed445f7b513cb043",
+          "tip_blob_sha": "1eb412506a25c376288c657d29d4ee4fe1087b20",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/tests/check_operator_workspace.py",
+          "source_blob_sha": "babcaee5563e37806bb3c3f8b1cdaa70a61c80f3",
+          "tip_blob_sha": "0ad7e54db0d1d575cff95ba7e0efe201f0bf2587",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        }
+      ]
+    },
+    {
+      "number": 238,
+      "title": "Studio P0 UX: always send visible 4I+4V on START; stacked tables and control polish",
+      "source_sha": "98fae914c5a3df6725149d5c6a53e5dfad1b2690",
+      "base_sha": "fb4329e73c3b80f7d6806e25538e6ceeb06ffc13",
+      "source_changed_files_count": 10,
+      "exact_blob_count": 0,
+      "source_unique_paths": [],
+      "files": [
+        {
+          "path": "apps/arstack_studio/qml/CalmButton.qml",
+          "source_blob_sha": "dab85063d87c1626c6222db2379b2912e9bb6f9a",
+          "tip_blob_sha": "66d0dd2b26004da28afd15e96b00d7153db89135",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/ConfigurationHub.qml",
+          "source_blob_sha": "d45c7dd5cf724b04c88341e3f10d734713df3e80",
+          "tip_blob_sha": "cc41ad14df4582637da0caac05563babbd303408",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/Main.qml",
+          "source_blob_sha": "d13d63a246b3f9450f80bbe68d3b853beef64ac1",
+          "tip_blob_sha": "d4846724403275c0e553086bc8b55d2b6eb0193a",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/ModernRibbon.qml",
+          "source_blob_sha": "e78e1378289466875135900b9c4e0b47f3c785cc",
+          "tip_blob_sha": "bce90ffec6ecdebd24482a43c34bbcc483fa6497",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/PtpExpertPanel.qml",
+          "source_blob_sha": "35cbed9e0514509828ff5078de56f953664528ca",
+          "tip_blob_sha": "0003b85e46dc51ef8492fe72ef74dec28f7a008b",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/RibbonAction.qml",
+          "source_blob_sha": "e31de2cc78e7c6a61121b559003748d6c5b062ac",
+          "tip_blob_sha": "2855e14365ad755cf4228c46d21807e81d79e673",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/StudioDarkCheckBox.qml",
+          "source_blob_sha": "36330996abf33c81af65df53f8916c1c4a921308",
+          "tip_blob_sha": "c47b6d679477d10b1b6b00f06fd365a8795133a5",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/WorkflowBar.qml",
+          "source_blob_sha": "efe8f44b11dd24809ed0d81181a12801b6de1b10",
+          "tip_blob_sha": "91eb993331ce7c94e2de0e6519997f7bad53535c",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/main.cpp",
+          "source_blob_sha": "5e2ddcb8fd6ba08b158059d038b411f49e054dce",
+          "tip_blob_sha": "1eb412506a25c376288c657d29d4ee4fe1087b20",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/tests/check_operator_workspace.py",
+          "source_blob_sha": "e860f0a747872bc9e3b0fcf2635d5a54210bc992",
+          "tip_blob_sha": "0ad7e54db0d1d575cff95ba7e0efe201f0bf2587",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        }
+      ]
+    },
+    {
+      "number": 237,
+      "title": "P0 Studio UI polish: exact table-to-SV START, stacked 4V/4I, readable controls",
+      "source_sha": "2529638a758e7c0c6578a26a375c826b9c689184",
+      "base_sha": "fb4329e73c3b80f7d6806e25538e6ceeb06ffc13",
+      "source_changed_files_count": 12,
+      "exact_blob_count": 0,
+      "source_unique_paths": [],
+      "files": [
+        {
+          "path": "apps/arstack_studio/qml/CalmButton.qml",
+          "source_blob_sha": "79e188fb6872c18e390d3fce46b5150caf6c9179",
+          "tip_blob_sha": "66d0dd2b26004da28afd15e96b00d7153db89135",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/ConfigurationHub.qml",
+          "source_blob_sha": "a2c44dadfdfafb3af5addaafe7dba4d0e14dc99a",
+          "tip_blob_sha": "cc41ad14df4582637da0caac05563babbd303408",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/DarkToolButton.qml",
+          "source_blob_sha": "6b55269904dcfac8f81b77af17bba87e84679cea",
+          "tip_blob_sha": "0b00d1357c90595725393a4ffeda13541ef513ca",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/Main.qml",
+          "source_blob_sha": "7bf2dbec86581c4dd4dae289c65683f8d44ac9b3",
+          "tip_blob_sha": "d4846724403275c0e553086bc8b55d2b6eb0193a",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/ModernRibbon.qml",
+          "source_blob_sha": "b46d8ed9baae4c712952e844e8e75fa4651fa4e6",
+          "tip_blob_sha": "bce90ffec6ecdebd24482a43c34bbcc483fa6497",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/RibbonAction.qml",
+          "source_blob_sha": "93c3fbcd01c51d8e832041f36c5aed5c01b29658",
+          "tip_blob_sha": "2855e14365ad755cf4228c46d21807e81d79e673",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/SignalMatrix.qml",
+          "source_blob_sha": "0190dde105e663b27ee9509b24cabb94e8536ad2",
+          "tip_blob_sha": "b7bc89a41a644149385774764a6f3a32de30a2fd",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/StudioDarkCheckBox.qml",
+          "source_blob_sha": "b08f858b478bff7d7404f5986de3424e182f956b",
+          "tip_blob_sha": "c47b6d679477d10b1b6b00f06fd365a8795133a5",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/StudioDarkComboBox.qml",
+          "source_blob_sha": "8c9308758d6423f36158337ad1e7b180c63f0e06",
+          "tip_blob_sha": "3e84add7cd720965904a32a5bf9abe0278f5571a",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/WorkflowBar.qml",
+          "source_blob_sha": "52f427952917737520587e49c5fae8f442d7ae84",
+          "tip_blob_sha": "91eb993331ce7c94e2de0e6519997f7bad53535c",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/main.cpp",
+          "source_blob_sha": "4fc5d7cb5734c50e60e94692932825dc56b75bcd",
+          "tip_blob_sha": "1eb412506a25c376288c657d29d4ee4fe1087b20",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/tests/check_operator_workspace.py",
+          "source_blob_sha": "4c3fe556a19a6beccc9b2cef98babd6f134d7348",
+          "tip_blob_sha": "0ad7e54db0d1d575cff95ba7e0efe201f0bf2587",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        }
+      ]
+    },
+    {
+      "number": 236,
+      "title": "P0 Studio UX: exact 4I+4V START, vertical matrices, default PTP and centered controls",
+      "source_sha": "d02bb037790942dbe2215ae7ca10eb0c9f8ee6aa",
+      "base_sha": "fb4329e73c3b80f7d6806e25538e6ceeb06ffc13",
+      "source_changed_files_count": 14,
+      "exact_blob_count": 0,
+      "source_unique_paths": [
+        "docs/SMV_PTP_OPERATOR_BASELINE_NO_REGRESSION.md"
+      ],
+      "files": [
+        {
+          "path": "apps/arstack_studio/qml/CalmButton.qml",
+          "source_blob_sha": "98f74608faa8153e685dc2757757ef7b4dc87be5",
+          "tip_blob_sha": "66d0dd2b26004da28afd15e96b00d7153db89135",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/ConfigurationHub.qml",
+          "source_blob_sha": "708e23d28ab4a1eec84eee9e31d4190e1e138ec2",
+          "tip_blob_sha": "cc41ad14df4582637da0caac05563babbd303408",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/Main.qml",
+          "source_blob_sha": "098ad49d60dbd9bc376febfa6f6415a1dec86a30",
+          "tip_blob_sha": "d4846724403275c0e553086bc8b55d2b6eb0193a",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/ModernRibbon.qml",
+          "source_blob_sha": "8c218bf921b6019c46277a1bc2cfac463b62be71",
+          "tip_blob_sha": "bce90ffec6ecdebd24482a43c34bbcc483fa6497",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/PtpExpertPanel.qml",
+          "source_blob_sha": "8060e41760a8447f6b72ca8e69473d7faa73c6cc",
+          "tip_blob_sha": "0003b85e46dc51ef8492fe72ef74dec28f7a008b",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/RibbonAction.qml",
+          "source_blob_sha": "c55a83ea0a0ddc7bb8acbb190abd70fe97d8d725",
+          "tip_blob_sha": "2855e14365ad755cf4228c46d21807e81d79e673",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/SignalMatrix.qml",
+          "source_blob_sha": "7eb1f375f59cd3f922b01ba48fd8e02a7cf582e9",
+          "tip_blob_sha": "b7bc89a41a644149385774764a6f3a32de30a2fd",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/StudioDarkCheckBox.qml",
+          "source_blob_sha": "5d0730d1210f93d71ca0fc4891de6b4c9a57820a",
+          "tip_blob_sha": "c47b6d679477d10b1b6b00f06fd365a8795133a5",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/StudioDarkComboBox.qml",
+          "source_blob_sha": "6ce33ad212f7dcb3176a81fe49209d975cbe30bd",
+          "tip_blob_sha": "3e84add7cd720965904a32a5bf9abe0278f5571a",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/qml/WorkflowBar.qml",
+          "source_blob_sha": "64f990e71cb129b9171f1cf82408dfadd891de96",
+          "tip_blob_sha": "91eb993331ce7c94e2de0e6519997f7bad53535c",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/DeterministicSessionHarness.cpp",
+          "source_blob_sha": "299e770a95346be9180f0c8e6bdac3feda0cd0a8",
+          "tip_blob_sha": "71056ebff315327cfa8d4fed3f7d125e74c652e4",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/src/main.cpp",
+          "source_blob_sha": "a605c19cd4d661f62a9fe3775b526e257d5dfe26",
+          "tip_blob_sha": "1eb412506a25c376288c657d29d4ee4fe1087b20",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "apps/arstack_studio/tests/check_operator_workspace.py",
+          "source_blob_sha": "49e9d235ca0b7e77d3dda8a27a645fa68a6a39e6",
+          "tip_blob_sha": "0ad7e54db0d1d575cff95ba7e0efe201f0bf2587",
+          "status": "DIFFERENT_BLOB_REVIEW"
+        },
+        {
+          "path": "docs/SMV_PTP_OPERATOR_BASELINE_NO_REGRESSION.md",
+          "source_blob_sha": "19875fab6ca8b8deb37033a5ac4b7e5653f24edb",
+          "tip_blob_sha": null,
+          "status": "MISSING_IN_TIP_REVIEW"
+        }
+      ]
+    }
+  ]
+}

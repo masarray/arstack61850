@@ -29,6 +29,10 @@ Rectangle {
 
     readonly property var roleValues: ["SOURCE", "RECEIVER", "MONITOR"]
     readonly property bool busy: Boolean(device && device.ptpStarting)
+    readonly property bool stopping: tray.busy && (
+        device.ptpStatus.indexOf("Stopping PTP") === 0 ||
+        device.ptpStatus.indexOf("Checking that board") === 0 ||
+        device.ptpStatus.indexOf("PTP STOP unverified") === 0)
     readonly property bool ptpReady: Boolean(session && device && device.deviceVerified
                                                && device.ptpAvailable && !session.updatingFirmware)
     readonly property string stateText: !boardOnline
@@ -68,31 +72,38 @@ Rectangle {
         // This is an action strip, not a second diagnostic/status card.
         RowLayout {
             Layout.fillWidth: true
-            spacing: tray.compact ? 7 : 10
+            spacing: tray.compact ? 5 : 10
             StudioPtpSwitch {
                 id: powerSwitch
                 objectName: "studioPtpSwitch"
                 theme: tray.theme
                 uiFont: tray.uiFont
-                checked: tray.boardOnline ? Boolean(tray.device.ptpRunning) : offlineSettings.previewPtp
+                checked: tray.boardOnline
+                    ? Boolean(tray.device.ptpRunning || (tray.busy && !tray.stopping))
+                    : offlineSettings.previewPtp
+                busy: tray.boardOnline && tray.busy
                 enabled: !tray.busy && (!tray.boardOnline || tray.ptpReady)
 
                 onClicked: {
                     // Switch flips locally before asynchronous firmware evidence.
                     // Restore binding immediately, including on rejected requests.
                     const wantsRunning = checked
-                    checked = Qt.binding(function() {
-                        return tray.boardOnline ? Boolean(tray.device.ptpRunning) : offlineSettings.previewPtp
-                    })
                     if (!tray.boardOnline) {
                         offlineSettings.previewPtp = wantsRunning
                         if (tray.controller)
                             tray.controller.showMessage("PTP preview only. Connect ESP32-P4 to transmit.", false)
                     } else if (wantsRunning) {
                         if (tray.controller) tray.controller.startPtpRole(tray.roleValues[tray.selectedRoleIndex])
-                    } else if (tray.session && !tray.session.requestStopPtp() && tray.controller) {
+                    } else if (tray.controller && !tray.controller.requestStopPtp()) {
                         tray.controller.showMessage("PTP stop was not accepted; inspect diagnostics.", true)
                     }
+                    // Keep intent visible during the in-flight transaction.
+                    // A failed START returns OFF with its specific cause.
+                    checked = Qt.binding(function() {
+                        return tray.boardOnline
+                            ? Boolean(tray.device.ptpRunning || (tray.busy && !tray.stopping))
+                            : offlineSettings.previewPtp
+                    })
                 }
             }
             StudioDarkComboBox {
@@ -101,7 +112,7 @@ Rectangle {
                 theme: tray.theme
                 uiFont: tray.uiFont
                 Layout.fillWidth: true
-                Layout.minimumWidth: 118
+                Layout.minimumWidth: tray.compact ? 102 : 118
                 model: ["Source", "Follower", "Monitor"]
                 currentIndex: tray.device && tray.device.ptpRunning
                     ? tray.roleIndex(tray.device.ptpRole) : tray.selectedRoleIndex
@@ -129,7 +140,7 @@ Rectangle {
                 theme: tray.theme
                 uiFont: tray.uiFont
                 Layout.fillWidth: true
-                Layout.minimumWidth: 100
+                Layout.minimumWidth: tray.compact ? 84 : 100
                 model: ["AUTO", "0 · No sync", "1 · Local (sim)", "2 · Global (sim)"]
                 currentIndex: tray.boardOnline
                     ? tray.syncIndex(tray.device.smpSynchMode) : offlineSettings.lastSynch
@@ -158,10 +169,15 @@ Rectangle {
             CalmButton {
                 theme: tray.theme
                 uiFont: tray.uiFont
-                text: "Details"
+                text: ""
                 iconSource: Qt.resolvedUrl("../assets/material/settings.svg")
+                iconSize: 16
                 objectName: "studioTimingDetails"
-                implicitWidth: 66
+                implicitWidth: 34
+                implicitHeight: 32
+                toolTipText: "Time sync & SV lock details"
+                Accessible.name: "Time sync & SV lock details"
+                Accessible.description: "Open PTP and SV synchronization settings"
 
                 onClicked: if (tray.controller) tray.controller.openTimingSettings()
             }

@@ -32,11 +32,14 @@ Rectangle {
         if (session.state === "READY") return "Ready"
         if (session.state === "WAITING FOR DEVICE") return "Offline"
         if (session.state === "DEVICE FOUND" || session.state === "CONNECTING" || session.state === "CHECKING DEVICE") return "Connecting"
-        if (session.state === "FIRMWARE REQUIRED") return "Firmware required"
+        if (session.state === "FIRMWARE RECOVERY") return "Firmware status unknown"
         if (session.state === "UPDATING FIRMWARE") return "Updating"
         if (session.state === "UPDATE NEEDS BOOT") return "Bootloader"
         if (session.state === "PREPARING 4I+4V") return "Preparing"
-        if (session.state === "PROFILE BLOCKED" || session.state === "PROFILE SYNC ERROR" || session.state === "SETUP ERROR") return "Attention"
+        if (session.state === "RECOVERING PROFILE") return "Retrying"
+        if (session.state === "PROFILE SYNC ERROR") return "Profile failed"
+        if (session.state === "PROFILE BLOCKED") return "Bad profile"
+        if (session.state === "SETUP ERROR") return "Setup failed"
         return workflow.displayState
     }
 
@@ -47,24 +50,26 @@ Rectangle {
         spacing: 6
 
         RowLayout {
-            Layout.preferredWidth: bar.compact ? 105 : 124
+            Layout.preferredWidth: bar.compact ? 232 : 286
             Layout.alignment: Qt.AlignVCenter
             spacing: 8
 
             Rectangle {
-                width: 28
-                height: 28
-                radius: 7
+                Layout.preferredWidth: 64
+                Layout.preferredHeight: 64
+                width: 64
+                height: 64
+                radius: 10
                 color: "#0d151d"
                 border.width: 1
                 border.color: bar.theme.lineSoft
                 Image {
                     anchors.centerIn: parent
-                    width: 15
-                    height: 15
+                    width: 53
+                    height: 53
                     source: Qt.resolvedUrl("../assets/material/smv_injector.svg")
-                    sourceSize.width: 30
-                    sourceSize.height: 30
+                    sourceSize.width: 68
+                    sourceSize.height: 68
                 }
             }
 
@@ -73,8 +78,8 @@ Rectangle {
                 text: "SMV Injector"
                 color: bar.theme.text
                 font.family: bar.uiFont
-                font.pixelSize: 11
-                font.weight: Font.DemiBold
+                font.pixelSize: bar.compact ? 21 : 25
+                font.weight: Font.Bold
                 elide: Text.ElideRight
                 verticalAlignment: Text.AlignVCenter
             }
@@ -94,8 +99,12 @@ Rectangle {
             toolTipText: !enabled && bar.device.deviceVerified ? bar.workflow.startReason() : ""
             onClicked: {
                 if (!bar.device.deviceVerified) {
-                    // The footer already identifies preview-only operation.
-                    bar.controller.offlinePreviewRunning = true
+                    // Do not silently reinterpret a physical START click as
+                    // simulated injection during USB reconnect or firmware
+                    // verification. Make explicit offline preview opt-in via
+                    // the dedicated preview workflow instead.
+                    bar.controller.showMessage(
+                        "ESP32-P4 not verified. Wait for connection or open Advanced > Firmware.", true)
                 } else bar.workflow.requestStart()
             }
         }
@@ -106,7 +115,7 @@ Rectangle {
             text: "Stop"
             tone: bar.workflow.injectionRunning ? "danger" : "neutral"
             iconSource: Qt.resolvedUrl("../assets/material/stop.svg")
-            enabled: (bar.workflow.injectionRunning || bar.controller.offlinePreviewRunning)
+            enabled: (bar.workflow.injectionRunning || bar.workflow.startQueued || bar.controller.offlinePreviewRunning)
                 && !bar.session.updatingFirmware
             toolTipText: ""
             onClicked: {
@@ -143,10 +152,10 @@ Rectangle {
             theme: bar.theme
             uiFont: bar.uiFont
             tone: "warning"
-            text: bar.session.firmwareInstallRequired ? "Install firmware"
+            text: bar.session.firmwareInstallRequired ? "Firmware recovery"
                 : bar.session.firmwareUpdateRequired ? "Firmware required"
                 : "Retry profile"
-            toolTipText: bar.session.firmwareInstallRequired ? "Install the bundled ARStack firmware"
+            toolTipText: bar.session.firmwareInstallRequired ? "Firmware not verified · retry identification before optional ROM-verified recovery"
                 : bar.session.firmwareUpdateRequired ? "Firmware update is required before injection"
                 : "Retry the 4I + 4V profile synchronization"
             onClicked: {
@@ -192,6 +201,16 @@ Rectangle {
         RibbonAction {
             theme: bar.theme
             uiFont: bar.uiFont
+            text: "Capture"
+            iconSource: Qt.resolvedUrl("../assets/material/monitor_heart.svg")
+            tone: "accent"
+            toolTipText: "Record independent Ethernet SV + PTP and review evidence in Studio"
+            onClicked: bar.controller.openCapture()
+        }
+
+        RibbonAction {
+            theme: bar.theme
+            uiFont: bar.uiFont
             text: "Advanced"
             iconOnly: false
             iconSource: Qt.resolvedUrl("../assets/material/settings.svg")
@@ -201,36 +220,42 @@ Rectangle {
         }
 
         Rectangle {
-            Layout.preferredWidth: bar.compact ? 84 : 108
-            Layout.preferredHeight: 36
+            Layout.preferredWidth: bar.compact ? 84 : 102
+            Layout.preferredHeight: 40
             Layout.alignment: Qt.AlignVCenter
             radius: 15
             color: "#0a1016"
             border.width: 1
-            border.color: Qt.rgba(bar.workflow.smartStateColor.r,
-                                  bar.workflow.smartStateColor.g,
-                                  bar.workflow.smartStateColor.b, 0.48)
+            border.color: bar.device.deviceVerified && bar.device.running
+                ? bar.theme.green : "#663942"
 
+            readonly property bool physicalRunning: bar.device.deviceVerified &&
+                bar.device.running
+            readonly property color runColor: physicalRunning
+                ? bar.theme.green : "#b66069"
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 9
+                anchors.leftMargin: 10
                 anchors.rightMargin: 9
                 spacing: 6
-
-                Rectangle {
-                    width: 6
-                    height: 6
-                    radius: 3
-                    color: bar.workflow.smartStateColor
-                }
-
+                Image {
+                    Layout.preferredWidth: 19
+                    Layout.preferredHeight: 19
+                    source: Qt.resolvedUrl(parent.parent.physicalRunning
+                        ? "../assets/material/electric_bolt_run.svg"
+                        : "../assets/material/electric_bolt_stop.svg")
+                    sourceSize.width: 24
+                    sourceSize.height: 24
+                    opacity: parent.parent.physicalRunning ? 1.0 : 0.48
+                 }
                 Label {
                     Layout.fillWidth: true
-                    text: bar.conciseState()
-                    color: bar.workflow.smartStateColor
+                    text: bar.device.deviceVerified
+                        ? (bar.device.running ? "RUN" : "STOP") : "OFF"
+                    color: parent.parent.runColor
                     font.family: bar.uiFont
-                    font.pixelSize: 9
-                    font.weight: Font.DemiBold
+                    font.pixelSize: 11
+                    font.weight: Font.Bold
                     elide: Text.ElideRight
                     verticalAlignment: Text.AlignVCenter
                 }

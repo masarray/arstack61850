@@ -7,13 +7,21 @@ SurfacePanel {
     id: panel
     property var device
     property var session
+    property real signalFrequency: 50.0
     property string uiFont: "Inter"
     property string monoFont: "Inter"
 
-    ColumnLayout {
+    ScrollView {
+        id: deviceScroll
         anchors.fill: parent
-        anchors.margins: 16
-        spacing: 12
+        clip: true
+        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+        ColumnLayout {
+            x: 16
+            y: 16
+            width: Math.max(0, deviceScroll.availableWidth - 32)
+            spacing: 12
 
         Label { text: "Device protocol"; color: panel.theme.text; font.family: panel.uiFont; font.pixelSize: 18; font.weight: Font.DemiBold }
         Label {
@@ -93,6 +101,7 @@ SurfacePanel {
             font.pixelSize: 9
             wrapMode: Text.WordWrap
         }
-        Item { Layout.fillHeight: true }
+        Item { Layout.fillHeight: true; implicitHeight: 16 }
+        }
     }
 }

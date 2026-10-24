@@ -55,6 +55,88 @@ config AR_PTP_LAB_TX
         role 2 is passive monitor-only. This feature is not a GPS-backed or
         certified grandmaster claim.
 
+config AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL
+    bool "LAB ONLY: continuous bounded PTP-to-SV phase steering (experimental)"
+    default n
+    depends on AR_PTP_LAB_TX && AR_SMV_P2_REALTIME_50HZ
+    help
+        Opt-in experimental EMAC-PTP / GPTimer phase bridge. Reads hardware
+        clocks in a low-priority task once per SV second, then distributes
+        at most 400 +/-1us corrections across remaining SV deadlines.
+        Requires SOURCE active BEFORE SV START and exactly one transmitted
+        ASDU per sample with publisher fps matching smpCnt modulus.
+        AUTO smpSynch remains unsynchronized until independent wire/hardware
+        timestamp evidence is available. DO NOT use on a live substation.
+
+config AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL
+    bool "LAB ONLY: sparse canonical SV EMAC hardware TX timestamp evidence"
+    default n
+    depends on AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL && !AR_SMV_BROADCAST_MIRROR && !AR_SMV_DIAGNOSTIC_PROBES
+    help
+        Diagnostic only: once per 2 canonical smpCnt-zero epochs, use the
+        ESP32-P4 MAC extended TX API to request a descriptor timestamp on
+        the actual SV frame, while all other frames use the regular TX path.
+        The ESP-IDF 5.x driver busy-waits for the selected descriptor, which
+        can perturb realtime scheduling; never enable on a live process bus.
+        Disable the broadcast mirror and diagnostic probes to avoid extra
+        competing TX traffic. Missing/non-SV timestamps are recorded as
+        unavailable, never substituted with esp_timer time or claimed as
+        proof that a relay has synchronized. Defaults OFF.
+
+config AR_PTP_BOOT_SOURCE_AUTOSTART
+    bool "LAB ONLY: start local PTP SOURCE and SV dry sample grid on boot"
+    default n
+    depends on AR_PTP_LAB_TX && AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL
+    help
+        Explicit isolated-laboratory feature: after PHY link is verified,
+        start the configured PTP LAB SOURCE automatically once at boot.
+        Existing inactive-SV preflight then aligns its dry GPTimer without
+        requiring Studio START or a USB serial session. The boot supervisor
+        never starts SOURCE when role is RECEIVER/MONITOR, never restarts
+        after operator PTP START/STOP/CONFIG, and limits failed retries.
+        SV Ethernet transmission remains OFF until operator SV START.
+        Never enable while connected to an energized utility process bus.
+
+config AR_PTP_BOOT_SIMULATED_GLOBAL_GM
+    bool "ISOLATED FAT ONLY: boot as simulated Global PTP Grandmaster"
+    default n
+    depends on AR_PTP_BOOT_SOURCE_AUTOSTART
+    help
+        Explicit IEC 61850 laboratory TEST-SET simulation. On isolated
+        Ethernet, the ESP32-P4 PTP SOURCE emulates GNSS-quality Announce
+        metadata and a PTP/TAI epoch without a real GPS. Its own EMAC clock
+        drives both PTP and the PTP-aligned SV grid. A plausible RTC epoch is
+        used if available; otherwise a fixed synthetic UTC anchor is used
+        with monotonic uptime (NOT true UTC or certified 1-us accuracy).
+        smpSynch=2 is STILL gated on measured SV sample phase and canonical
+        MAC evidence. DO NOT enable on a live utility process bus.
+
+config AR_PTP_AUTO_PREFER_EXTERNAL
+    bool "LAB ONLY: prefer better qualified external GM using safe EMAC handover"
+    default n
+    depends on AR_PTP_BOOT_SOURCE_AUTOSTART && AR_PTP_RESPOND_PDELAY
+    help
+        In an isolated process-bus simulator, observe foreign PTP Announce
+        through the existing local SOURCE peer-delay RX callback. Prefer
+        an independently stable, strictly better foreign GM only while
+        the operator's SV injection is STOPPED. Drain local SOURCE fully,
+        then run the measured Pdelay/Sync TIME_RECEIVER and require actual
+        discipline LOCK before qualifying SV. Never run both roles on one
+        ESP32-P4 EMAC simultaneously, and do not switch during live SV TX.
+        Advanced runtime mode selection is a later M3.D task.
+
+config AR_PTP_AUTO_LOCAL_FALLBACK
+    bool "LAB ONLY: restore internal SOURCE after external GM is fully absent"
+    default n
+    depends on AR_PTP_AUTO_PREFER_EXTERNAL
+    help
+        Explicit isolated-bench authorization to restore local GM if the
+        external receiver has no selected Announce for at least 15 seconds,
+        the operator's SV output is STOPPED and cleanup completes. Never
+        promote a local GM in an energized utility network or while a
+        foreign GM is selected; a partially failed receiver is not proof
+        that the foreign network is absent.
+
 config AR_PTP_OPERATING_ROLE
     int "PTP operating role (0=lab source, 1=time receiver, 2=monitor)"
     range 0 2
@@ -64,6 +146,17 @@ config AR_PTP_OPERATING_ROLE
         LAB_SOURCE sends Announce/Sync and can answer Pdelay. TIME_RECEIVER
         listens to an external PTP source, performs hardware-timestamped peer
         delay, and disciplines the ESP32-P4 IEEE1588 clock. MONITOR is passive.
+
+config AR_PTP_ALLOW_NONSTANDARD_LAB_CADENCE
+    bool "LAB ONLY: allow non-IEC 61850-9-3 SOURCE cadence"
+    default n
+    depends on AR_PTP_LAB_TX
+    help
+        Default SOURCE admission enforces nominal 1-second Announce and Sync
+        and an enabled hardware peer-delay responder, as expected by the
+        IEC/IEEE 61850-9-3 power utility profile. Turn this on ONLY for
+        intentional isolated nonstandard packet tests; it does not make
+        the LAB_SOURCE a traceable certified PTP Grandmaster.
 
 config AR_PTP_DOMAIN
     int "PTP domain number"
@@ -95,14 +188,14 @@ config AR_PTP_PORT_NUMBER
     depends on AR_PTP_LAB_TX
 
 config AR_PTP_VLAN
-    bool "Tag PTP traffic with IEEE 802.1Q VLAN"
-    default n
+    bool "Tag PTP traffic with IEEE 802.1Q VLAN (Power Profile PCP4/VID0)"
+    default y
     depends on AR_PTP_LAB_TX
 
 config AR_PTP_VLAN_ID
-    int "PTP VLAN ID"
-    range 1 4094
-    default 100
+    int "PTP VLAN ID (0 means 802.1Q priority tag)"
+    range 0 4094
+    default 0
     depends on AR_PTP_LAB_TX && AR_PTP_VLAN
 
 config AR_PTP_VLAN_PRIORITY
@@ -120,7 +213,7 @@ config AR_PTP_ANNOUNCE_INTERVAL_MS
 config AR_PTP_SYNC_INTERVAL_MS
     int "PTP Sync interval (ms)"
     range 20 5000
-    default 250
+    default 1000
     depends on AR_PTP_LAB_TX
     help
         LAB_SOURCE uses two-step Sync/Follow_Up so Follow_Up can carry the exact
@@ -190,6 +283,21 @@ config AR_PTP_CURRENT_UTC_OFFSET
     default 37
     depends on AR_PTP_LAB_TX
 
+config AR_PTP_MANUAL_UTC_OFFSET_VALID
+    bool "UTC offset manually verified (Announce currentUtcOffsetValid)"
+    default n
+    depends on AR_PTP_LAB_TX
+    help
+        Enable only after the operator verifies the configured TAI-UTC offset
+        against an authoritative leap-second record AND verifies that the
+        RTC-derived UTC epoch is meaningfully correct. Without this, SOURCE
+        advertises neither the PTP-timescale nor offset-valid flag even if
+        the hardware clock could be seeded. This remains an INTERNAL
+        OSCILLATOR and does NOT imply UTC traceability, frequency lock,
+        microsecond-grade accuracy, or a certified Grandmaster.
+        The runtime also requires a plausible system UTC epoch before it
+        advertises currentUtcOffsetValid.
+
 config AR_PTP_MAX_PATH_DELAY_NS
     int "TIME_RECEIVER maximum accepted peer path delay (ns)"
     range 1000 100000000
@@ -229,7 +337,7 @@ config AR_PTP_LOCK_REQUIRED_SAMPLES
 config AR_PTP_SYNC_TIMEOUT_MS
     int "TIME_RECEIVER Sync timeout before HOLDOVER/UNLOCKED (ms)"
     range 100 10000
-    default 1000
+    default 3000
     depends on AR_PTP_LAB_TX
 
 config AR_PTP_HOLDOVER_TIMEOUT_MS

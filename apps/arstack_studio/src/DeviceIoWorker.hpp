@@ -25,9 +25,60 @@ public:
 
     [[nodiscard]] static constexpr int commandQueueCapacity() noexcept { return 64; }
     [[nodiscard]] static constexpr int presencePollIntervalMs() noexcept { return 750; }
-    [[nodiscard]] static constexpr int identityMaxAttempts() noexcept { return 3; }
-    [[nodiscard]] static constexpr int identityRetryIntervalMs() noexcept { return 650; }
+    // USB removal may not emit QSerialPort::ResourceError on every Windows
+    // driver. Use the EXISTING low-rate port inventory (no extra poll) and
+    // require two consecutive missing observations to ignore enumeration
+    // flicker. This releases only the stale GUI COM handle, never SV/PTP.
+    [[nodiscard]] static constexpr int missingPortConfirmationPolls() noexcept { return 2; }
+    [[nodiscard]] static constexpr bool verifiedPortPhysicallyGone(
+        const bool serialOpen, const bool identityConfirmed,
+        const int consecutiveMissingSnapshots) noexcept {
+        return serialOpen && identityConfirmed &&
+            consecutiveMissingSnapshots >= missingPortConfirmationPolls();
+    }
+    [[nodiscard]] static constexpr int identityMaxAttempts() noexcept { return 5; }
+    [[nodiscard]] static constexpr int identityRetryIntervalMs() noexcept { return 1100; }
+
+    // USB candidate ordering never certifies firmware; only semantic
+    // IDENTIFY verifies the device. A prior verified port is only a hint.
+    [[nodiscard]] static QStringList orderedDiscoveryPorts(
+        QStringList visible, const QString& verifiedPort, const QString& recommended) {
+        const auto prioritize = [&visible](const QString& candidate) {
+            const int index = visible.indexOf(candidate.trimmed());
+            if (index > 0) visible.move(index, 0);
+        };
+        prioritize(recommended);
+        prioritize(verifiedPort);
+        return visible;
+    }
+    // Once USB metadata identifies a physical ESP32/CH343 candidate (or
+    // a previous port answered semantic IDENTIFY), never spend five retries
+    // apiece on unrelated Bluetooth/legacy COM ports before returning to
+    // that device. When Windows exposes NO qualified physical metadata,
+    // keep the existing generic fallback so first-time/generic bridges work.
+    // This narrows *candidate selection* only; IDENTIFY remains mandatory.
+    [[nodiscard]] static QStringList focusedAutomaticPorts(
+        const QStringList& allVisible, const QStringList& physicalCandidates,
+        const QString& verifiedPort, const QString& recommended) {
+        QStringList focused;
+        for (const QString& port : physicalCandidates) {
+            if (allVisible.contains(port, Qt::CaseInsensitive) &&
+                !focused.contains(port, Qt::CaseInsensitive))
+                focused.push_back(port);
+        }
+        const auto previous = verifiedPort.trimmed();
+        if (!previous.isEmpty() &&
+            allVisible.contains(previous, Qt::CaseInsensitive) &&
+            !focused.contains(previous, Qt::CaseInsensitive))
+            focused.push_back(previous);
+        if (focused.isEmpty()) focused = allVisible;
+        return orderedDiscoveryPorts(focused, verifiedPort, recommended);
+    }
+
     [[nodiscard]] static constexpr int heartbeatIntervalMs() noexcept { return 700; }
+    // Allow the ESP32-P4 line-oriented console to drain a complete command
+    // before accepting the next command, even when the host USB buffer emptied.
+    [[nodiscard]] static constexpr int serialCommandGapMs() noexcept { return 15; }
 
     // Fast discovery policy: USB bridge metadata may prioritize a port, but it
     // never verifies device identity. The opened port must still answer the
@@ -105,6 +156,8 @@ public slots:
     void autoDetectAndConnect(quint64 generation);
     void connectPort(const QString& portName, quint64 generation);
     void disconnectPort(quint64 generation);
+    // Bounded no-reply recovery, different from manual DISCONNECT.
+    void retireUnresponsivePort(quint64 generation);
     void confirmIdentity(quint64 generation);
     void enqueueCommands(
         const QStringList& commands,
@@ -128,6 +181,9 @@ signals:
     void commandTransmitted(quint64 generation, const QString& command, bool quiet);
     void commandRejected(quint64 generation, const QString& message);
     void transportError(quint64 generation, const QString& message, bool fatal);
+    // Emitted only after the worker has CLOSED a failed verified COM port.
+    // Deliberate user disconnect must never emit an automatic recovery event.
+    void unexpectedPortLoss(quint64 generation, const QString& portName);
 
 private:
     friend class DeterministicSessionHarness;
@@ -152,6 +208,8 @@ private:
         bool exclusive,
         bool reportRejection);
     void queuePriorityPtpStop();
+    void queuePrioritySvStop();
+    void queuePriorityHeartbeat();
     void pumpWriteQueue();
     void completeActiveWrite();
     void processReadyRead();
@@ -161,18 +219,26 @@ private:
     QTimer* verificationTimer_{nullptr};
     QTimer* presenceTimer_{nullptr};
     QTimer* heartbeatTimer_{nullptr};
+    QTimer* writeGapTimer_{nullptr};
 
     QStringList ports_;
+    QStringList physicallyPlausiblePorts_;
     QString recommendedPort_;
     QStringList probeQueue_;
     QByteArray pendingRx_;
     QQueue<PendingCommand> commandQueue_;
+    bool svStopPending_{false};
+    // One coalesced safety-lease keepalive slot, outside normal 64-item FIFO.
+    // STOP priority remains higher. This is transport queue ownership, not
+    // a duplicate firmware RUNNING/LOCK state.
+    bool heartbeatPending_{false};
     PendingCommand activeCommand_;
     QString lastPort_;
 
     quint64 activeGeneration_{0};
     int highConfidenceCount_{0};
     int identifyAttempts_{0};
+    int consecutiveMissingPortPolls_{0};
     int exclusiveCommandsRemaining_{0};
     bool initialized_{false};
     bool shuttingDown_{false};
