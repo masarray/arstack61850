@@ -8,7 +8,7 @@ Maintained source of truth: [NORTH_STAR](../NORTH_STAR.md), [AGENTS.md](../AGENT
 
 ## Start here
 
-For a new engineer or AI development thread, read these before making architecture changes:
+For maintainers and contributors making architecture changes, start with these references:
 
 1. [`NORTH_STAR.md`](../NORTH_STAR.md) — product thesis, standards, hardware roadmap and definition of success.
 2. [`docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md`](../docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md) — latest public process-bus laboratory simulator evidence, setup and release boundary; [`v0.1.0 historical evidence`](../docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md).

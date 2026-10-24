@@ -1,46 +1,54 @@
 name: Bug report
-description: Report a reproducible ARStack application, protocol or device issue
+description: Report a problem with ARStack Studio, board connection, SCL import or an engineering tool
 title: "Bug: "
+labels: []
 body:
   - type: markdown
     attributes:
-      value: "Please avoid posting private station configurations, credentials, or customer packet captures. For security vulnerabilities, use the private reporting instructions in SECURITY.md."
-  - type: dropdown
-    id: area
+      value: |
+        Thanks for testing ARStack! Short reports are welcome. Remove confidential details from screenshots and files. For security vulnerabilities, follow the private reporting process in [SECURITY.md](../../SECURITY.md) rather than creating a public issue.
+  - type: textarea
+    id: problem
     attributes:
-      label: Component
-      options:
-        - ARStack Studio (Windows or Linux)
-        - ESP32-P4 SV / PTP
-        - IED Browser / Workbench
-        - IED Simulator
-        - Build / installation
-        - Other
+      label: What happened?
+      description: Tell us what you tried and what went wrong.
+      placeholder: "I opened a .scd file, but the selected SV stream was not shown."
     validations:
       required: true
   - type: textarea
-    id: repro
+    id: expected
     attributes:
-      label: How to reproduce
-      description: Steps and input settings sufficient to reproduce in a lab
-      placeholder: "1. Open Studio... 2. Connect... 3. Observe..."
+      label: What did you expect?
+      placeholder: "I expected to see the SV ID and multicast address."
     validations:
-      required: true
-  - type: textarea
-    id: observed
-    attributes:
-      label: Expected and actual behavior
-      placeholder: "Expected: ... Actual: ..."
-    validations:
-      required: true
+      required: false
   - type: input
     id: version
     attributes:
-      label: Version and environment
-      description: Release tag, Windows/Linux version and ESP32-P4 firmware Build ID, if relevant
-      placeholder: "M3.H; Windows 11; firmware a922e9bdba4e57a4"
+      label: ARStack version
+      description: See Help / About or the downloaded release.
+      placeholder: "M3.H"
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where did it happen?
+      options:
+        - ARStack Studio (Windows / Linux)
+        - ESP32-P4 firmware / device connection
+        - SCL or engineering file import
+        - IED Browser / Workbench
+        - IED Simulator
+        - SV / PTP traffic
+        - Build / installation
+        - Other
+    validations:
+      required: false
   - type: textarea
     id: evidence
     attributes:
-      label: Sanitized evidence (optional)
-      description: Logs, screenshots or short anonymized captures; never secrets or customer-identifying files
+      label: Screenshot, logs or sample file (optional)
+      description: You can drag a screenshot or sanitized sample here.
+    validations:
+      required: false

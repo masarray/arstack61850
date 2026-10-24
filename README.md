@@ -1,67 +1,65 @@
 # ARStack61850
 
-An open-source **IEC 61850 engineering lab** for exploring Sampled Values, PTP timing and process-bus behavior. Configure waveforms in a native desktop app, then generate real Ethernet traffic with an ESP32-P4 board.
+**Open-source IEC 61850 Process Bus engineering lab**
 
-[![Latest release](https://img.shields.io/github/v/release/masarray/arstack61850?label=Latest%20release)](https://github.com/masarray/arstack61850/releases/latest)
-[![C++ CI](https://github.com/masarray/arstack61850/actions/workflows/cpp-ci.yml/badge.svg)](https://github.com/masarray/arstack61850/actions/workflows/cpp-ci.yml)
-[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue)](LICENSE)
+Generate real Sampled Values (SV) traffic, explore PTP synchronization, and experiment with digital-substation signals using **ARStack Studio** and an **ESP32-P4 Ethernet board**.
 
-[**Download latest release**](https://github.com/masarray/arstack61850/releases/latest) · [Product website](https://masarray.github.io/arstack61850/) · [Installation guide](docs/INSTALL.md) · [Report an issue](https://github.com/masarray/arstack61850/issues)
+[**Download the latest stable release**](https://github.com/masarray/arstack61850/releases/latest) · [**Getting started**](docs/GETTING_STARTED.md) · [**Product website**](https://masarray.github.io/arstack61850/) · [**Get help**](SUPPORT.md)
 
-## What can you do with ARStack?
+## What you can do
 
-| Capability | Your workflow |
+| Explore | With ARStack |
 | --- | --- |
-| 4I + 4V Sampled Values | Set current, voltage, frequency and phase scenarios in ARStack Studio, then publish SV from an ESP32-P4 Ethernet board |
-| PTP laboratory timing | Explore a simulated grandmaster and observe Announce, Sync and Follow_Up frames |
-| Capture and inspect | Review traffic, counters, waveform/phasor behavior and timing evidence |
-| IEC 61850 engineering files | Explore SCL-based configurations and reference profiles in the desktop tooling |
-| Open protocol foundations | Build on C++20 MMS, GOOSE, Sampled Values, SCL and COMTRADE components |
+| **Generate Sampled Values** | Publish 4 current + 4 voltage channels over real Ethernet at 4,000 SV frames/s. |
+| **Experiment with PTP** | Run an internal laboratory grandmaster emulator with hardware-assisted phase synchronization. |
+| **Control waveforms** | Set current, voltage and phase values in the ARStack Studio desktop interface. |
+| **Inspect live traffic** | Capture SV and PTP using Studio, Wireshark, ARSAS or DigSubAnalyzer. |
+| **Learn with engineering files** | Open SCL files and deploy supported 4I+4V publisher profiles. |
 
-ARStack is made for hands-on experimentation, demonstrations and engineering validation. You can launch the desktop app and explore its controls before connecting hardware; Ethernet SV/PTP output uses the supported ESP32-P4 device.
+**M3.H stable lab release (24 October 2026):** an independent capture measured **163,048 consecutive SV frames at 3,999.884 frames/s**, with no missing, duplicate or malformed SV packets and `smpSynch=2` throughout the recorded interval. [View the full measurements](docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md).
 
-## Get started
+## Inside ARStack Studio
 
-1. **Install Studio.** Open the [latest stable release](https://github.com/masarray/arstack61850/releases/latest) and download the Windows x64 Setup EXE or Portable ZIP.
+![ARStack Studio Windows desktop running 4I+4V engineering workspace and live waveform preview](assets/screenshots/arstack-studio-windows.png)
 
-2. **Choose a scenario.** Open ARStack Studio and select the built-in **4I+4V** profile, or open a compatible SCL configuration.
+*Screenshot captured directly from the Windows Qt application by the native GUI test.*
 
-3. **Connect hardware for live output.** Attach your ESP32-P4 Ethernet board through USB and install the firmware shipped with the *same release* using Studio's Firmware panel.
+## Get started in minutes
 
-4. **Start your lab traffic.** Connect Ethernet to a dedicated test switch, set your signals and PTP mode, then use **Start / Stop** and inspect the resulting SV/PTP packets.
+1. **[Download ARStack Studio](https://github.com/masarray/arstack61850/releases/latest)** for Windows x64 (Setup EXE or Portable ZIP).
+2. Open Studio and try the built-in **4I+4V Quick Start** profile. You can explore the interface before connecting hardware.
+3. To transmit real Ethernet frames, connect a compatible **ESP32-P4 Ethernet** board over USB and Ethernet. Use **Configuration → Firmware** to install the firmware bundled with **the same release**.
+4. Choose **PTP SOURCE**, set **SMPSYNCH AUTO**, configure voltage/current waveforms, and press **Start**.
+5. View the output using Studio capture or Wireshark (`0x88BA` for SV, `0x88F7` for PTP).
 
-Prefer installing from a Windows terminal? The verified installer script follows GitHub's current public stable release:
+**[Full first-run guide →](docs/GETTING_STARTED.md)** · [Installation on Windows and Linux](docs/INSTALL.md)
 
-```powershell
-$script = Join-Path $env:TEMP 'arstack-install.ps1'
-Invoke-WebRequest 'https://raw.githubusercontent.com/masarray/arstack61850/main/scripts/install-windows.ps1' -OutFile $script
-& $script
-```
+For active SV/PTP transmission, use an **isolated laboratory Ethernet network**, not an operating substation process bus.
 
-For Linux x86_64, check [Downloads](https://github.com/masarray/arstack61850/releases/latest) for an AppImage when it is published; the [installation guide](docs/INSTALL.md) also covers Linux command-line setup and WinGet package status.
+## Downloads and platforms
 
-## See ARStack Studio
+| Package | Availability |
+| --- | --- |
+| Windows Setup EXE | **Available** in the [latest release](https://github.com/masarray/arstack61850/releases/latest) |
+| Windows Portable ZIP | **Available** in the [latest release](https://github.com/masarray/arstack61850/releases/latest) |
+| Matched ESP32-P4 firmware | **Available** with the same release |
+| Linux AppImage | Shown in the [latest release](https://github.com/masarray/arstack61850/releases/latest) when a tested package is published |
+| Windows package manager | [WinGet preparation and status](docs/INSTALL.md#windows-package-manager--winget) |
 
-![ARStack Studio native Windows engineering workspace — captured from the real Qt application](assets/screenshots/arstack-studio-windows.png)
+Every published Windows release includes the application dependencies and a matched firmware package; no C++ build environment is required for ordinary installation.
 
-*Real ARStack Studio Windows screenshot, captured by the application's built-in native-window acceptance test.*
+## Community
 
-## See it in action
+ARStack is built to make IEC 61850 experiments more accessible to engineers, students and automation enthusiasts around the world.
 
-The released **M3.H** laboratory milestone captured **163,048 SV frames** in 40.763 seconds at **3,999.884 frames/s**, with continuous `smpCnt` and no missing, duplicate or malformed SV frames in that captured interval. The same test recorded PTP Announce / Sync / Follow_Up traffic.
+- **[Ask a question or report a problem](SUPPORT.md)** — share what you tried and what happened.
+- **[Share an interoperability experiment](docs/COMMUNITY_TESTING.md)** — feedback from independent laboratory setups helps improve the project.
+- **[Contribute](CONTRIBUTING.md)** — improvements to documentation, software, tests and examples are welcome.
 
-[View the M3.H engineering results](docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md) · [Explore the product page](https://masarray.github.io/arstack61850/)
+ARStack uses the [GPL-3.0 license](LICENSE). It is a laboratory simulation and engineering tool, not a certified primary measurement or UTC reference device.
 
-## Developers & contributors
+## For developers
 
-ARStack includes a portable C++20 IEC 61850 engine, Qt desktop applications, embedded targets and automated protocol tests.
+Want to explore the protocol engine or build from source? Start with the [developer documentation index](docs/DEVELOPER_GUIDE.md).
 
-- [Contributing](CONTRIBUTING.md) — propose improvements with reproducible evidence and current-main PRs
-- [Security policy](SECURITY.md) — report vulnerabilities privately and handle lab evidence responsibly
-- [Technical & developer reference](docs/DEVELOPER_GUIDE.md) — architecture, build commands, implemented modules and lab validation
-- [Project direction](NORTH_STAR.md) — product goals and architecture
-- [Studio operator guide](apps/arstack_studio/README.md) — usage and firmware handling
-- [IEC 61850 simulator](apps/ied_simulator/README.md) — MMS server and model-based engineering workbench
-- [Issues and discussions](https://github.com/masarray/arstack61850/issues) — report a problem or share a reproducible test
-
-The application is free and open source under the [GPL-3.0 license](LICENSE). Keep active SV/PTP publishing on a dedicated lab network rather than a live substation LAN.
+The source tree includes a portable C++20 IEC 61850 protocol engine, SCL/COMTRADE tooling, MMS and GOOSE foundations, ESP32-P4 firmware and reproducible tests. Capabilities vary by application and release; the [feature matrix](docs/FEATURE_MATRIX.md) separates released tools from libraries and development features.
