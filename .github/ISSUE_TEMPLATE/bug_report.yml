@@ -1,0 +1,46 @@
+name: Bug report
+description: Report a reproducible ARStack application, protocol or device issue
+title: "Bug: "
+body:
+  - type: markdown
+    attributes:
+      value: "Please avoid posting private station configurations, credentials, or customer packet captures. For security vulnerabilities, use the private reporting instructions in SECURITY.md."
+  - type: dropdown
+    id: area
+    attributes:
+      label: Component
+      options:
+        - ARStack Studio (Windows or Linux)
+        - ESP32-P4 SV / PTP
+        - IED Browser / Workbench
+        - IED Simulator
+        - Build / installation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Steps and input settings sufficient to reproduce in a lab
+      placeholder: "1. Open Studio... 2. Connect... 3. Observe..."
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Expected and actual behavior
+      placeholder: "Expected: ... Actual: ..."
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version and environment
+      description: Release tag, Windows/Linux version and ESP32-P4 firmware Build ID, if relevant
+      placeholder: "M3.H; Windows 11; firmware a922e9bdba4e57a4"
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Sanitized evidence (optional)
+      description: Logs, screenshots or short anonymized captures; never secrets or customer-identifying files
