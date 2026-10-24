@@ -37,6 +37,8 @@ Nine remaining SMV/PTP-adjacent PRs are old divergent tracks with unique commits
 | [#239](https://github.com/masarray/arstack61850/pull/239) | 17 | Earlier GUI/wire SSOT variant |
 | [#166](https://github.com/masarray/arstack61850/pull/166) | 94 | Broad legacy M1/M2/M3 timing stack, not the accepted on-wire M3.H line |
 
+**Follow-up hygiene verified on 2026-10-24:** All nine divergent SMV/PTP-adjacent PRs above are now **OPEN / DRAFT**, including the eight previously non-Draft PRs #284, #272, #266, #263, #259, #256, #253 and #239. Each of the nine PRs received a canonical reconciliation comment referencing this ledger. These branches retain unique work and are not included in the M3.H shipped firmware baseline; therefore they are deliberately not marked merged or closed without a reviewed feature-by-feature disposition. New contributions must branch from the current `main` and pass targeted gates.
+
 The other eight open PRs concern Workbench, Browser, and IED Simulator lanes; do not close or merge them as part of SMV M3.H source consolidation.
 
 ## Issues kept OPEN on purpose — different acceptance targets
