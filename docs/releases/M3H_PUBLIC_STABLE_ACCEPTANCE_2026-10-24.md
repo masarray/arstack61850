@@ -38,7 +38,7 @@
 ## Remaining release-closure boundaries — do not conflate with Stable package
 
 - **Portfolio live URL/deployment: NOT VERIFIED.** `masarray/portfolio` has `has_pages=false`, no GitHub Pages publication and no verifiable deployment URL in its GitHub homepage metadata. This does **not** prove an external Lovable deployment is absent; it means no deployed portfolio page was actually confirmed. Source sync/build pass are not equivalent to live deployment.
-- **Rendered mobile/desktop browser check:** see [browser acceptance workflow](https://github.com/masarray/arstack61850/actions/workflows/m3h-landing-browser-acceptance.yml) for most recent run and screenshots. Do not count this as PASS unless its latest run is green.
+- **Rendered browser acceptance: DONE.** [Playwright live acceptance run 40072896355](https://github.com/masarray/arstack61850/actions/runs/40072896355) **SUCCESS** at 1440, 768, 390 and 360 px widths; all detected Public Stable copy, tested Build ID, CTA and OpenGraph, with no horizontal overflow. [Screenshot artifact](https://github.com/masarray/arstack61850/actions/runs/40072896355/artifacts/12552515189) contains four actual rendered screenshots.
 - Source stack integration remains a separate development track requiring branch reconciliation and targeted CI/engineering tests; NOT a requirement to distribute the already pinned simulator.
 
-**Completion rule:** The GitHub release, package identity, live product + portal, and all five real downloads have passed. Do **not** report 100% of the original all-surfaces mandate until the externally deployed portfolio is identified/verified and the browser-responsive gate is closed.
+**Completion rule:** The GitHub release, package identity, live product + portal, and all five real downloads have passed. Do **not** report 100% of the original all-surfaces mandate until the externally deployed portfolio is identified/verified and the browser-responsive gate has been closed.
