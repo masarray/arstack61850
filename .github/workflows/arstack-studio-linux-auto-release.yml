@@ -45,7 +45,7 @@ jobs:
           frozen_tag='processbus-sim-m3h-20261024'
           if tag==frozen_tag:
               print('SKIP: immutable historical M3.H stays unchanged; Linux ships with a future stable tag')
-              with open(os.environ['GITHUB_OUTPUT'],'a') as out: out.write('dispatch=false\\n')
+              with open(os.environ['GITHUB_OUTPUT'],'a') as out: out.write('dispatch=false\n')
               sys.exit(0)
           assets={a['name']:a for a in r['assets']}
           required={'firmware-manifest.json','SHA256SUMS.txt'}
@@ -61,7 +61,7 @@ jobs:
           assert (linux in assets)==(checksum in assets), 'Linux AppImage/checksum incomplete pair'
           available=linux in assets
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:
-              out.write(f"dispatch={'false' if available else 'true'}\\n")
+              out.write(f"dispatch={'false' if available else 'true'}\n")
           if available:
               print('PASS: latest stable release already contains Linux AppImage and checksum')
           else:
@@ -72,7 +72,7 @@ jobs:
         if: ${{ steps.eligibility.outputs.dispatch == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
         run: |
           gh workflow run arstack-studio-linux-appimage.yml \
             --repo "$GITHUB_REPOSITORY" --ref main \
