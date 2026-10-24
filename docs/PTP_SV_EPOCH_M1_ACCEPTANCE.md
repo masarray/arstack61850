@@ -9,7 +9,7 @@ IEC 61850-9-2 Amendment 1:2020 specifies the meaning of SV synchronization decla
 Authoritative references:
 - https://webstore.iec.ch/en/publication/24998
 - https://standards.ieee.org/ieee/61850-9-3/6167/
-- https://www.omicron-lab.com/fileadmin/assets/Precision-Timing/Knowledge_Applications/Article_IEC_61850-9-3/IEC_61850-9-3_-_Will_simplicity_supersede_complexity_.pdf
+- IEC/IEEE 61850-9-3 power-utility timing profile (normative protocol reference)
 - https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32p4/api-reference/peripherals/gptimer.html
 
 ## M1 implemented
