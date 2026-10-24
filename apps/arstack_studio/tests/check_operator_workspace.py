@@ -810,6 +810,26 @@ def main() -> None:
             and "hasNewlyEnumeratedPort(" in session_header,
             "USB reappearance must trigger safe semantic autodiscovery with owner gates")
 
+    # M3.G physical FAT found two independent disconnect owners. The
+    # worker must be the only one that declares serial transport loss;
+    # recovery must wake the supervisor AFTER closing the stale handle.
+    studio_controller = (STUDIO / "src/StudioDeviceController.hpp").read_text(encoding="utf-8")
+    device_cpp = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
+    device_header = (STUDIO / "src/DeviceController.hpp").read_text(encoding="utf-8")
+    require("DeviceController::portsChanged" not in studio_controller
+            and "recoverUnresponsivePort();" in studio_controller
+            and "DeviceIoWorker::retireUnresponsivePort(" in io_worker
+            and "emit unexpectedPortLoss(lostGeneration, lostPort)" in io_worker
+            and "closePortInternal(true);\n    if (hadVerifiedIdentity" in io_worker
+            and "void unexpectedPortLoss(" in io_header
+            and "DeviceIoWorker::unexpectedPortLoss" in device_cpp
+            and "DeviceController::recoverUnresponsivePort()" in device_cpp
+            and "void unexpectedTransportLoss(" in device_header
+            and "DeviceController::unexpectedTransportLoss" in session_cpp
+            and "generationIsCurrent(sessionGeneration_, generation)" in session_cpp
+            and "startDeviceDiscovery()" in session_cpp,
+            "hotplug must use one worker loss authority and queued generation-safe supervisor reconnect")
+
     print("Studio operator workspace contract: PASS")
 
 
