@@ -1673,7 +1673,8 @@ void publisher_task(void* argument) {
                 last_canonical_tx_error = canonical_result;
                 ++consecutive_canonical_tx_failures;
                 const bool first_tx_failure = g_sv_tx_faults.failure(
-                    static_cast<std::int32_t>(canonical_result), true);
+                    static_cast<std::int32_t>(canonical_result),
+                    (xEventGroupGetBits(g_link_events) & kLinkUpBit) != 0U);
 #if AR_SV_PTP_PHASE_SUPPORTED
                 if (first_tx_failure) {
                     g_sample_clock_context.publisher_fault_generation.fetch_add(
