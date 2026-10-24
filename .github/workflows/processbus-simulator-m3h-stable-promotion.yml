@@ -44,7 +44,7 @@ jobs:
           original = release['body']
           old = '**Public experimental engineering release:**'
           assert old in original or '**Public stable engineering lab simulator release:**' in original
-          body = original.replace(old, '**Public stable engineering lab simulator release:**')
+          body = original.replace(old, '**Public stable engineering lab simulator release:**').replace('# ARStack Process Bus Simulator — M3.H Lab Edition (24 October 2026)', '# ARStack Process Bus Simulator M3.H — Stable Lab Simulator Edition (24 October 2026)')
           payload = {
               'name': 'ARStack Process Bus Simulator M3.H — Stable Lab Simulator Edition',
               'body': body,
