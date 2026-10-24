@@ -1,6 +1,9 @@
 # HANDOFF — ARStack61850 M3.H → PUBLIC STABLE + WEBSITE/README SYNC
 **Tanggal:** 24 Oktober 2026 (Asia/Jakarta)  
 **Status handoff:** **BELUM 100% / ACTION REQUIRED**  
+
+> **Update pelaksanaan 24 Oct 2026:** Existing release **ID 422544367** sudah dipromosikan ke **latest Public Stable** (`prerelease=false`) tanpa perubahan kelima aset; [bukti promotion](https://github.com/masarray/arstack61850/actions/runs/40071700074). Product URL `https://masarray.github.io/arstack61850/` dan portal sama-sama **HTTP 200**; lima download real, checksum, Build ID, dan firmware di Portable ZIP lulus [HTTP smoke](https://github.com/masarray/masarray.github.io/actions/runs/40072546814). Bug 404 produk diselesaikan dengan [GitHub Pages project deployment](https://github.com/masarray/arstack61850/actions/runs/40072480932). [Browser mobile/desktop acceptance](https://github.com/masarray/arstack61850/actions/runs/40072896355) PASS di 1440/768/390/360 px. README/dokumentasi/product/portal/portfolio source telah sinkron; [audit source PR #295–#298](../integration/M3H_SOURCE_STACK_AUDIT_2026-10-24.md) terdokumentasi tanpa merge. **Masih belum memenuhi 100% ALL-SURFACES** karena URL deployment publik dari repo `masarray/portfolio` tidak tersedia untuk verifikasi (source dan build CI PASS, deployment eksternal tidak diketahui). Seluruh checklist P0/P1 berikut adalah **snapshot saat handoff dibuat**, baca [acceptance evidence terkini](../releases/M3H_PUBLIC_STABLE_ACCEPTANCE_2026-10-24.md) untuk status aktual.
+
 **Repository inti:** https://github.com/masarray/arstack61850  
 **Prioritas:** Finalisasi produk *engineering process-bus simulator* sebagai **PUBLIC STABLE**, bukan sertifikasi GPS/relay; sinkronisasi dan pembuktian deployment README/landing pages.  
 **Jangan lakukan:** memperbarui firmware PTP/SV, mengganti BIN yang berhasil diuji, mengklaim IED/relay sudah menerima trafik, atau me-merge 600+ commit secara membabi buta.
