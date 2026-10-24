@@ -758,6 +758,8 @@ def main() -> None:
     # A serial STOP flips RUNNING before PARKED; both GUI/ISR flags may be
     # false briefly while the real hardware timebase is still continuous.
     require("SvAutoPreflightPolicy::can_steer_owned_grid" in firmware_source
+            and "SvAutoPreflightPolicy::live_publisher_active" in firmware_source
+            and "publisher_notifications_enabled.load(" in firmware_source
             and "clock_timer_owned_and_enabled" in firmware_source
             and "if (preflight_active)" not in firmware_source
             and "(!live_tx_running() &&" not in firmware_source,
