@@ -37,6 +37,11 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$(git rev-parse "$TAG^{commit}")"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$TAG^{commit}" origin/main || {
+            echo "Release source is not integrated into main; refusing Linux package" >&2
+            exit 1
+          }
           gh release view "$TAG" --json isDraft,isPrerelease -q 'select(.isDraft==false and .isPrerelease==false)' > release-check.json
           test -s release-check.json
 
@@ -133,6 +138,12 @@ jobs:
           chmod +x ARStack-Studio-linux-x86_64.AppImage
           APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen \
             xvfb-run -a ./ARStack-Studio-linux-x86_64.AppImage --check-reference-template
+          APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen \
+            xvfb-run -a ./ARStack-Studio-linux-x86_64.AppImage --check-p0-policy
+          if [ -n "${{ inputs.release_tag }}" ]; then
+            APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen \
+              xvfb-run -a ./ARStack-Studio-linux-x86_64.AppImage --check-firmware-contract
+          fi
           sha256sum ARStack-Studio-linux-x86_64.AppImage > ARStack-Studio-linux-x86_64.sha256
 
       - name: Upload reviewed Linux artifacts
@@ -168,6 +179,11 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$(git rev-parse "$TAG^{commit}")"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$TAG^{commit}" origin/main || {
+            echo "Release source is not integrated into main; refusing Linux package" >&2
+            exit 1
+          }
           gh release view "$TAG" --json isDraft,isPrerelease -q 'select(.isDraft==false and .isPrerelease==false)' > release-check.json
           test -s release-check.json
           sha256sum -c ARStack-Studio-linux-x86_64.sha256
