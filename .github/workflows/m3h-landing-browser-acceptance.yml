@@ -3,9 +3,9 @@ name: ARStack Latest Stable Landing Browser and Mobile Acceptance
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/m3h-landing-browser-acceptance.yml']
+    paths: ['index.html', '.github/workflows/m3h-landing-browser-acceptance.yml']
   pull_request:
-    paths: ['.github/workflows/m3h-landing-browser-acceptance.yml']
+    paths: ['index.html', '.github/workflows/m3h-landing-browser-acceptance.yml']
   workflow_dispatch:
 
 permissions:
@@ -26,7 +26,7 @@ jobs:
           npm install --no-save --no-package-lock playwright@1.57.0 >/dev/null
           npx playwright install chromium
 
-      - name: Render live desktop and mobile layouts
+      - name: Render current candidate desktop and mobile layouts
         shell: bash
         run: |
           set -euo pipefail
@@ -37,7 +37,7 @@ jobs:
             const browser=await chromium.launch({headless:true});
             for(const width of [1440,768,390,360]){
               const page=await browser.newPage({viewport:{width,height:900},deviceScaleFactor:1});
-              const response=await page.goto('https://masarray.github.io/arstack61850/',{waitUntil:'domcontentloaded',timeout:30000});
+              const response=await page.goto('http://127.0.0.1:4173/',{waitUntil:'domcontentloaded',timeout:30000});
               if(response.status()!==200)throw new Error('LIVE_HTTP_'+response.status());
               const data=await page.evaluate(()=>{
                 const buttons=[...document.querySelectorAll('a[data-asset="windows"],a[data-asset="portable"],a[data-asset="firmware"]')];
@@ -58,6 +58,13 @@ jobs:
             console.log('PASS: latest-release UI links and desktop/tablet/mobile layouts');
           })().catch(e=>{console.error(e);process.exit(1)});
           JS
+          python3 -m http.server 4173 --bind 127.0.0.1 > /tmp/arstack-pages-preview.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..20}; do
+            if curl --silent --fail http://127.0.0.1:4173/ >/dev/null; then break; fi
+            sleep 0.25
+          done
           node /tmp/m3h-browser/check.cjs
 
       - name: Archive actual rendered screenshots
