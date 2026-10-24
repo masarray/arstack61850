@@ -42,7 +42,7 @@ jobs:
           git merge-base --is-ancestor "$TAG_COMMIT" HEAD
           echo "PASS: immutable source and official tag are ancestors of this mainline candidate."
 
-      - name: Confirm release-closure mainline has no silent firmware or Studio implementation drift
+      - name: Confirm immutable release tag contains exact accepted firmware/Studio implementation
         shell: bash
         run: |
           set -euo pipefail
@@ -52,13 +52,14 @@ jobs:
           protected = ('CMakeLists.txt','apps/arstack_studio/','embedded/esp32p4_smv_injector/',
                        'include/','src/','tests/','scripts/','tools/')
           readme_exceptions = {'apps/arstack_studio/README.md','embedded/esp32p4_smv_injector/README.md'}
-          changed = subprocess.check_output(['git','diff','--name-only',source,'HEAD'],text=True).splitlines()
+          tag = 'a4b6e53d0dbbcababc55ba8a4ff97ade6f2a6200'
+          changed = subprocess.check_output(['git','diff','--name-only',source,tag],text=True).splitlines()
           drift = [p for p in changed if (p == 'CMakeLists.txt' or
                    any(p.startswith(prefix) for prefix in protected if prefix.endswith('/')))
                    and p not in readme_exceptions]
           if drift:
-              raise SystemExit('M3.H closure rejected: changes to tested runtime source: '+repr(drift))
-          print('PASS: firmware, Studio, runtime, tests and build code match shipped tested source.')
+              raise SystemExit('M3.H tagged release rejected: changes to tested runtime source: '+repr(drift))
+          print('PASS: tagged release firmware, Studio, runtime, tests and build code match shipped tested source. Future mainline development remains allowed.')
           PY
 
       - name: Query GitHub release metadata and immutable asset identities (read only)
