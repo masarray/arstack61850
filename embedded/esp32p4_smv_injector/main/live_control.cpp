@@ -591,6 +591,28 @@ void print_state() noexcept {
                  g_max_heartbeat_gap_ms.load(std::memory_order_acquire)),
              static_cast<unsigned long>(
                  g_slow_heartbeat_events.load(std::memory_order_acquire)));
+    // This is sticky historical TRANSPORT evidence, not the current STOP
+    // condition. A restarted publisher may be RUNNING while last_stop_seq>0.
+    const auto tx = live_tx_fault_snapshot();
+    ESP_LOGI(kTag,
+             "SVTXFAULT state=%s burst_now=%lu failed_total=%lu bursts=%lu "
+             "recovered=%lu first_error=%ld last_error=%ld link_now_at_failure=%u "
+             "last_stop_seq=%lu last_stop_uptime_ms=%lu last_stop_burst=%lu "
+             "last_stop_first_error=%ld last_stop_last_error=%ld last_stop_link_up=%u",
+             g_running.load(std::memory_order_acquire) ? "RUNNING" : "STOPPED",
+             static_cast<unsigned long>(tx.current_streak),
+             static_cast<unsigned long>(tx.failed_frames),
+             static_cast<unsigned long>(tx.failure_bursts),
+             static_cast<unsigned long>(tx.recovered_bursts),
+             static_cast<long>(tx.first_error),
+             static_cast<long>(tx.last_error),
+             tx.last_link_up ? 1U : 0U,
+             static_cast<unsigned long>(tx.stop_sequence),
+             static_cast<unsigned long>(tx.stop_uptime_ms),
+             static_cast<unsigned long>(tx.stop_streak),
+             static_cast<long>(tx.stop_first_error),
+             static_cast<long>(tx.stop_last_error),
+             tx.stop_link_up ? 1U : 0U);
     for (std::size_t index = 0U; index < state.channels.size(); ++index) {
         const auto& channel = state.channels[index];
         ESP_LOGI(kTag,
