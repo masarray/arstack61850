@@ -98,7 +98,8 @@ def main() -> None:
     session_cpp = (STUDIO / "src/SmartSessionController.cpp").read_text(encoding="utf-8")
     ribbon_qml = source("ModernRibbon.qml")
     require('device-discovery/lastVerifiedPort' in io_worker
-            and "orderedDiscoveryPorts(" in io_worker
+            and "focusedAutomaticPorts(" in io_worker
+            and "orderedDiscoveryPorts(" in io_header
             and "identityMaxAttempts() noexcept { return 5; }" in io_header
             and "manualRecoveryArmed_" in session_cpp
             and "FIRMWARE RECOVERY" in session_cpp
