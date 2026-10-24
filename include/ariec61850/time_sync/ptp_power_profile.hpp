@@ -67,6 +67,27 @@ struct PtpSourceEvidenceFreshness final {
     }
 };
 
+// The PTP timebase/GM generation is NOT a per-packet transport-success bit.
+// An isolated failed Pdelay reply or HW TX timestamp can invalidate cold
+// readiness, but it cannot step a still-running EMAC clock or erase the last
+// independently successful 1-Hz Announce + Sync/Follow_Up pair. Retain an
+// ESTABLISHED lease only while *both* real TX timestamps are still inside
+// the strict evidence freshness timeout. Any real SOURCE STOP, clock reset,
+// dead link, or expiration must revoke immediately. Cold START still
+// requires a complete newly validated pair.
+struct PtpSourceEvidenceContinuity final {
+    [[nodiscard]] static constexpr bool ready(
+        const bool cold_complete_pair,
+        const bool previously_ready,
+        const bool both_positive_timestamps_fresh,
+        const bool physical_source_active,
+        const bool stop_or_clock_fault) noexcept {
+        return physical_source_active && !stop_or_clock_fault &&
+            both_positive_timestamps_fresh &&
+            (cold_complete_pair || previously_ready);
+    }
+};
+
 // A plausible RTC and a configurable UTC offset do not by themselves prove
 // the TAI/PTP timescale. Only set the timescale AND offset-valid flags when
 // the EMAC was actually seeded and the offset was explicitly verified.
