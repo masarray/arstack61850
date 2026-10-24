@@ -1,0 +1,176 @@
+name: ARStack Studio Linux AppImage
+
+on:
+  pull_request:
+    paths:
+      - 'apps/arstack_studio/**'
+      - '.github/workflows/arstack-studio-linux-appimage.yml'
+      - 'scripts/install-linux.sh'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing GitHub release tag to build, test and attach Linux AppImage; blank = build artifact only'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  appimage:
+    name: Build and test Linux x86_64 package
+    runs-on: ubuntu-22.04
+    timeout-minutes: 55
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag != '' && inputs.release_tag || github.sha }}
+          fetch-depth: 0
+
+      - name: Confirm release identity before packaging
+        if: ${{ inputs.release_tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "$TAG^{commit}")"
+          gh release view "$TAG" --json isDraft,isPrerelease -q 'select(.isDraft==false and .isPrerelease==false)' > release-check.json
+          test -s release-check.json
+
+      - name: Install Linux native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build build-essential \
+            libgl1-mesa-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-xinerama0 \
+            libxcb-xkb1 libxcb-randr0 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 \
+            libfuse2 unzip xvfb libdbus-1-3
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.10.3'
+          arch: linux_gcc_64
+          modules: 'qtserialport'
+          cache: true
+
+      - name: Compile native Linux Studio and smoke test
+        run: |
+          set -euo pipefail
+          cmake -S apps/arstack_studio -B build-studio-linux -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DARIEC61850_WARNINGS_AS_ERRORS=ON
+          cmake --build build-studio-linux --target arstack_studio --parallel 2
+          test -x build-studio-linux/arstack_studio
+          QT_QPA_PLATFORM=offscreen xvfb-run -a build-studio-linux/arstack_studio --check-reference-template
+          QT_QPA_PLATFORM=offscreen xvfb-run -a build-studio-linux/arstack_studio --check-p0-policy
+
+      - name: Stage Linux app and matched optional release firmware
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p AppDir/usr/bin AppDir/usr/share/icons/hicolor/512x512/apps
+          cp build-studio-linux/arstack_studio AppDir/usr/bin/ARStackStudio
+          cp assets/studio_icon/android-chrome-512x512.png AppDir/usr/share/icons/hicolor/512x512/apps/arstack-studio.png
+          cat > arstack-studio.desktop <<'DESKTOP'
+          [Desktop Entry]
+          Type=Application
+          Name=ARStack Studio
+          Exec=ARStackStudio
+          Icon=arstack-studio
+          Categories=Education;Science;Electronics;
+          Terminal=false
+          DESKTOP
+          cp LICENSE NOTICE COPYRIGHT.md THIRD_PARTY_NOTICES.md AppDir/usr/bin/
+          if [ -n "$TAG" ]; then
+            mkdir -p release-firmware AppDir/usr/bin/firmware AppDir/usr/bin/tools
+            gh release download "$TAG" --dir release-firmware --pattern 'firmware-manifest.json' --pattern '*.bin'
+            python3 - <<'PY'
+          import hashlib,json,pathlib,shutil
+          root=pathlib.Path('release-firmware')
+          manifest=json.loads((root/'firmware-manifest.json').read_text())
+          binfiles=list(root.glob('*.bin'))
+          assert len(binfiles)==1 and manifest['chip']=='esp32p4', 'Release firmware ambiguity'
+          src=binfiles[0]
+          assert hashlib.sha256(src.read_bytes()).hexdigest()==manifest['sha256'], 'Firmware hash mismatch'
+          output=pathlib.Path('AppDir/usr/bin/firmware')
+          shutil.copy2(src,output/manifest['image'])
+          shutil.copy2(root/'firmware-manifest.json',output/'firmware-manifest.json')
+          (output/'SHA256SUMS.txt').write_text(f"{manifest['sha256']}  {manifest['image']}\n")
+          PY
+            curl -fLsS https://github.com/esp-rs/espflash/releases/download/v4.5.0/espflash-x86_64-unknown-linux-gnu.zip -o espflash.zip
+            echo 'dcd7fd822f247df18966935bbb10c7cb4b700c87172349633e9e323ee2542717  espflash.zip' | sha256sum -c -
+            unzip -j espflash.zip 'espflash' -d AppDir/usr/bin/tools
+            chmod +x AppDir/usr/bin/tools/espflash
+          fi
+
+      - name: Bundle Qt and create single-file AppImage
+        uses: miurahr/install-linuxdeploy-action@v1.8.0
+        id: linuxdeploy
+        with:
+          plugins: qt appimage
+
+      - name: Generate AppImage and release checksum
+        env:
+          QML_SOURCES_PATHS: ${{ github.workspace }}/apps/arstack_studio/qml
+          VERSION: ${{ inputs.release_tag || 'preview' }}
+        run: |
+          set -euo pipefail
+          export QMAKE="$(command -v qmake6 || command -v qmake)"
+          ${{ steps.linuxdeploy.outputs.linuxdeploy }} \
+            --appdir AppDir \
+            --executable AppDir/usr/bin/ARStackStudio \
+            --desktop-file arstack-studio.desktop \
+            --icon-file AppDir/usr/share/icons/hicolor/512x512/apps/arstack-studio.png \
+            --plugin qt --output appimage
+          shopt -s nullglob
+          images=( ./*.AppImage )
+          test "${#images[@]}" -eq 1
+          mv "${images[0]}" ARStack-Studio-linux-x86_64.AppImage
+          chmod +x ARStack-Studio-linux-x86_64.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen \
+            xvfb-run -a ./ARStack-Studio-linux-x86_64.AppImage --check-reference-template
+          sha256sum ARStack-Studio-linux-x86_64.AppImage > ARStack-Studio-linux-x86_64.sha256
+
+      - name: Upload reviewed Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: arstack-studio-linux-x86_64
+          path: |
+            ARStack-Studio-linux-x86_64.AppImage
+            ARStack-Studio-linux-x86_64.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  attach-verified-release:
+    name: Attach tested Linux package to exact release tag
+    needs: appimage
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
+          fetch-depth: 0
+      - name: Download Linux build that passed the AppImage checks
+        uses: actions/download-artifact@v4
+        with:
+          name: arstack-studio-linux-x86_64
+      - name: Verify tag and release before publishing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "$TAG^{commit}")"
+          gh release view "$TAG" --json isDraft,isPrerelease -q 'select(.isDraft==false and .isPrerelease==false)' > release-check.json
+          test -s release-check.json
+          sha256sum -c ARStack-Studio-linux-x86_64.sha256
+          gh release upload "$TAG" \
+            ARStack-Studio-linux-x86_64.AppImage \
+            ARStack-Studio-linux-x86_64.sha256
