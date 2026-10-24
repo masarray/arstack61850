@@ -153,6 +153,33 @@ void check_m3a_stop_start_keeps_qualified_sample_grid() {
         true, true, true, 4000U, 4800U));
 }
 
+void check_m3e_transition_flags_cannot_revoke_owned_sample_clock() {
+    using Policy = SvAutoPreflightPolicy;
+    // Old implementation required RUNNING || PREFLIGHT. Both may be false
+    // after a legitimate serial SV STOP and before publisher PARK.
+    CHECK(!Policy::can_steer(true, true, true, true, false, false));
+    CHECK(Policy::can_steer_owned_grid(true, true, true, true, true, true));
+    // 100 STOP/START cycles; all four flag orderings share one GPTimer.
+    for (std::uint32_t cycle = 0U; cycle < 100U; ++cycle) {
+        for (bool sv_running : {true, false}) {
+            for (bool preflight_flag : {true, false}) {
+                (void)sv_running; (void)preflight_flag;
+                CHECK(Policy::can_steer_owned_grid(
+                    true, true, true, true, true, true));
+            }
+        }
+    }
+    // No promotion for a missing timer, stale/changed PTP lease, skipped
+    // phase epoch, TX fault, invalid session or operator override.
+    for (int i = 0; i < 6; ++i) {
+        std::array<bool, 6> valid{true, true, true, true, true, true};
+        valid[static_cast<std::size_t>(i)] = false;
+        CHECK(!Policy::can_steer_owned_grid(
+            valid[0], valid[1], valid[2],
+            valid[3], valid[4], valid[5]));
+    }
+}
+
 void check_m3e_parked_certified_ptp_authority_survives_100_restarts() {
     // IEC 61850-9-2: SmpSynch describes the sampled TIMEBASE, not whether
     // the publisher is presently transmitting SV frames.
@@ -731,6 +758,7 @@ int main() {
     try {
         check_auto_preflight_does_not_invent_sync_or_start();
         check_m3a_stop_start_keeps_qualified_sample_grid();
+        check_m3e_transition_flags_cannot_revoke_owned_sample_clock();
         check_m3e_parked_certified_ptp_authority_survives_100_restarts();
         check_m3b_boot_ptp_is_safe_and_operator_owned();
         check_m3c_foreign_announce_and_exclusive_emac_handover();
