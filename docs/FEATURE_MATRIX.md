@@ -1,4 +1,6 @@
-# arstack61850 Feature Matrix
+# ARStack61850 — Feature and verification matrix
+
+**Latest public Process Bus release: [M3.H stable laboratory edition](https://github.com/masarray/arstack61850/releases/latest) (24 October 2026).** For the quickest overview of what you can use today, start with [Getting Started](GETTING_STARTED.md). The detailed table below also covers lower-level libraries and developer features.
 
 Status terms are intentionally conservative:
 
@@ -52,8 +54,8 @@ Status terms are intentionally conservative:
 | GOOSE | Publisher/subscriber runtime foundations | Offline-tested | Physical process-bus acceptance remains pending. |
 | Sampled Values | PDU / Ethernet encode-decode | Offline-tested | Process-bus work remains separate from MMS control evidence. |
 | Sampled Values | Caller-owned bounded encode path | Offline-tested | `encode_into(span)` avoids fresh frame-buffer allocation in steady-state publisher design. |
-| Sampled Values | Live MCU publisher | Public release / physical accepted | ESP32-P4 ARStack Studio v0.1.0 completed 10/10 Start/Stop cycles and an uninterrupted 3600-second 4000 fps retained run with zero missed slots, TX failures, health reconnects or automatic starts; `smpSynch=0` remains the truthful timing boundary. |
-| Desktop product | ARStack Studio / SMV Injector v0.1.0 | Public release | Stable Windows installer + portable package + ESP32-P4 firmware published under tag `v0.1.0`; independent SV spot-check confirmed the bounded 4I+4V / 4000 fps / 1 ASDU / 64-byte profile. |
+| Sampled Values | Live MCU publisher | Public release / measured Ethernet | M3.H ESP32-P4 published 4I+4V at 3,999.884 frames/s (163,048 consecutive frames in 40.763 s), no missing/duplicate/malformed frames. Internal laboratory PTP grandmaster and qualified `smpSynch=2` operate together in the accepted capture. Historical v0.1.0 measured 3,600 s SV at `smpSynch=0`. |
+| Desktop product | ARStack Studio / Process Bus Simulator M3.H | Public stable lab release | Windows Setup and Portable, matched ESP32-P4 firmware, guided device verification and firmware recovery, 4I+4V controls, PTP SOURCE and SMPSYNCH AUTO. [Release record](releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md). |
 | SCL | Read-only parser / engineering support | Offline-tested | Host engineering surface; mutable standards-aware export remains later work. |
 | COMTRADE | CFG/DAT read support | Offline-tested | ASCII/BINARY/BINARY32/FLOAT32 and mapping foundations are implemented. |
 | PCAP | Read/write/evidence support | Live-proven for C5 evidence | Npcap loopback captures were reconciled with JSON Write lists and retained SHA-256 hashes. |
@@ -92,4 +94,4 @@ C1-C5 provide a guarded production control path plus a live evidence harness. Th
 
 ## Next parity direction
 
-The next gaps are association-loss and contention evidence for control, remaining MMS file-service parity and fault-record workflows, mutable SCL export/reconstruction, deterministic IED simulator/server integration, and broader application/UI parity. The SMV/ESP32-P4 P0 track is now released as stable `v0.1.0`; future process-bus timing/profile expansion remains a separate follow-on tranche rather than an open blocker for that release.
+The next gaps are association-loss and contention evidence for control, remaining MMS file-service parity and fault-record workflows, mutable SCL export/reconstruction, deterministic IED simulator/server integration, and broader application/UI parity. The current SV/PTP public lab release is **M3.H**. Historical v0.1.0 evidence remains documented independently; future profile expansion and external interoperability observations are tracked as separate engineering efforts.
