@@ -1,0 +1,38 @@
+name: Community interoperability experiment
+description: Share what you observed in an isolated IEC 61850 Process Bus test
+title: "Community test: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sharing an experiment! This form is intentionally short. Results can be successful, partial or unexpected. Never upload private substation configurations.
+  - type: textarea
+    id: setup
+    attributes:
+      label: Your lab setup
+      description: Which ARStack release, firmware, analyzer or IEC 61850 subscriber did you use?
+      placeholder: "M3.H Studio + ESP32-P4 → lab switch → Wireshark / subscriber"
+    validations:
+      required: true
+  - type: textarea
+    id: configuration
+    attributes:
+      label: SV and PTP configuration
+      placeholder: "4I+4V / 4 kHz, APPID, svID, PTP source mode and relevant settings"
+    validations:
+      required: false
+  - type: textarea
+    id: observation
+    attributes:
+      label: What did you observe?
+      description: What worked? What was unexpected?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Optional capture or screenshot
+      description: Attach sanitized PCAP, logs or images only if you have permission to share them.
+    validations:
+      required: false
