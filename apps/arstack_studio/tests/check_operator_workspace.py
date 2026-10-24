@@ -773,6 +773,14 @@ def main() -> None:
                 ptp_source_task.find("std::uint32_t consecutive_failures = 0U"),
             "PTP source generation must never advance on TX readiness recovery")
 
+    # Compiled external-GM support is optional capability, never an
+    # implicit AUTO handover while the lab ESP32 is supposed to remain GM.
+    facade = (project_root / "embedded/esp32p4_smv_injector/main/ptp_mode_facade.cpp").read_text(encoding="utf-8")
+    default_mode = facade.split("g_advanced_ptp_mode{", 1)[1].split("};", 1)[0]
+    require("AR_PTP_POLICY_INTERNAL_GM_ONLY" in default_mode
+            and "AR_PTP_POLICY_AUTO_PREFER_EXTERNAL" not in default_mode,
+            "PTP SOURCE must default to INTERNAL_GM_ONLY, AUTO only operator opt-in")
+
     print("Studio operator workspace contract: PASS")
 
 
