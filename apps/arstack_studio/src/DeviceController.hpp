@@ -242,6 +242,8 @@ public:
     bool autoDetectAndConnect();
     bool connectPort(const QString& portName);
     void disconnectPort();
+    // Only after independent bounded control-health failure.
+    void recoverUnresponsivePort();
     bool sendShow();
     virtual bool start();
     // Single validated, bounded FIFO transaction. START is always last.
@@ -330,6 +332,9 @@ signals:
     void scenarioApplicationFinished();
     void liveScenarioApplied();
     void portReleased(quint64 generation, const QString& portName);
+    // Worker has closed a verified COM unexpectedly; the supervisor can
+    // re-identify without mistaking this for a manual disconnect.
+    void unexpectedTransportLoss(quint64 generation, const QString& portName);
 
 protected:
     bool sendQuietCommand(const QString& command);
