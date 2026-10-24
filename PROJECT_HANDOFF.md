@@ -1,24 +1,29 @@
 # ARStack61850 Project Handoff
 
+> **Latest public simulator milestone — 2026-10-24:** [ARStack Process Bus Simulator M3.H Lab Edition](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h-20261024) is PUBLIC as an experimental engineer tool. The verified release firmware/Studio source is `a922e9bdba4e57a4e88406eb83344455dd8ff142` (10/10 CI PASS), with `main` carrying documentation synchronization rather than unreviewed integration of the large 636-commit active implementation chain. For source work use [PR #298](https://github.com/masarray/arstack61850/pull/298) (Draft) and the [public M3.H evidence/quick start](docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md). Real PCAP: 163,048 SV over 40.763 s, all `smpSynch=2`, zero missing/duplicate/malformed; 44 Announce + 43 each Sync/Follow_Up. Capture truncated by SV STOP before requested 120 s. **No relay/GPS is needed to run the lab simulator; no physical relay lock test was performed.**
+>
+> **Do not confuse product tracks:** the Workbench/Browser SSOT handoff below and historical SMV `v0.1.0` results are separate from the latest published M3.H SV + simulated PTP Grandmaster instrument. The realtime M3.H firmware remains pinned; do not merge all experimental branches just to update web pages.
+
 > **Native Workbench P0, 2026-10-17:** [Whole-application SSOT Live Data Model master handoff](docs/WORKBENCH_SSOT_LIVE_DATA_MODEL_MASTER_HANDOFF.md) is the up-to-date mandatory entry point. It records unresolved canonical data convergence, PR #230's failing exact-head gate, ownership, and a concrete implementation/acceptance sequence. Older Browser GUI progress below is **not** proof of completed Workbench SSOT or field UX acceptance.
 
 This file is the **current-state handoff** for a new engineer or AI thread. Read [`NORTH_STAR.md`](NORTH_STAR.md) first for the long-term direction, then use this file to continue active development without reconstructing the bench history from chat.
 
 > **Current native IEC 61850 Workbench / Browser engineering track (M2A–M2J merged; M2K PR #176 active as of 2026-10-15):** read [docs/WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md](docs/WORKBENCH_ARSAS_GUI_SSOT_STRATEGY.md) for the shared ARSAS-inspired GUI/SSOT execution plan, cross-thread ownership and CI/merge gates; then read [docs/WORKBENCH_CURRENT_HANDOFF.md](docs/WORKBENCH_CURRENT_HANDOFF.md) for the latest checkpoint and active blockers. **Always refresh GitHub refs**. The SMV/ESP32-P4 release history below is a separate product track.
 
-Last major product milestone update: **2026-09-15 — stable public SMV Injector v0.1.0 released**.
+Last public simulator milestone: **2026-10-24 — experimental Process Bus M3.H released**; earlier **2026-09-15 — stable SMV-only v0.1.0** remains historical.
 
 ## 1. Active repository work
 
 - Repository: `masarray/arstack61850`
 - Production branch: `main`
 - SMV production merge: `9c7fc7300220db4643e5643081240b955cfe12df` — PR #79
-- Stable public SMV release: [`v0.1.0`](https://github.com/masarray/arstack61850/releases/tag/v0.1.0)
+- Latest public experimental SV/PTP simulator: [`processbus-sim-m3h-20261024`](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h-20261024); tested source `a922e9bd...` on active Draft PR #298
+- Historical stable SMV-only release: [`v0.1.0`](https://github.com/masarray/arstack61850/releases/tag/v0.1.0)
 - P0.5 supervisor/physical release issue: #83 — closed
 - Legacy first-trial SV PR #15 — archived/superseded, not merged
 - IED Simulator PRs #75/#82 remain separate tracks and must not be conflated with the SMV release baseline
 
-For current SMV product truth, start with [`docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md`](docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md). Sections below retain useful historical bench/toolchain context; where they conflict with the versioned release record, the release record and current `main` take precedence.
+For the current SV/PTP *simulator* release, start with [`docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md`](docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md); for the older v0.1.0 SV-only record use [`docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md`](docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md). Sections below retain useful historical bench/toolchain context; where they conflict with the versioned release record, the release record and current `main` take precedence.
 ## 2. Tested hardware/toolchain
 
 ### Device
