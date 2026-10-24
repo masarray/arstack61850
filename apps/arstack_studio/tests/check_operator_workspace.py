@@ -830,6 +830,26 @@ def main() -> None:
             and "startDeviceDiscovery()" in session_cpp,
             "hotplug must use one worker loss authority and queued generation-safe supervisor reconnect")
 
+    # M3.H on-wire 54,979-SV regression: four sync losses occur within
+    # 22–49us after a 1-Hz PTP Follow_Up although all PTP messages remain
+    # consecutive. One TX-status fault must not erase last *positive* core
+    # Announce + complete Sync/Follow_Up timestamps and tear down an
+    # unchanged EMAC PTP clock. Finite freshness and physical-stop fail
+    # gates remain mandatory.
+    ptp_policy = (STUDIO.parents[1] / "include/ariec61850/time_sync/ptp_power_profile.hpp").read_text(encoding="utf-8")
+    ptp_task = (STUDIO.parents[1] / "embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp").read_text(encoding="utf-8")
+    failure_segment = ptp_task.split("// A failed TX batch invalidates *cold* readiness:", 1)[1].split(
+        "const bool was_ready =", 1)[0]
+    require("PtpSourceEvidenceContinuity" in ptp_policy
+            and "PtpSourceEvidenceContinuity::ready(" in ptp_task
+            and "source_readiness.invalidate();" in failure_segment
+            and "g_ptp_last_announce_us.store(0LL" not in failure_segment
+            and "g_ptp_last_sync_pair_us.store(0LL" not in failure_segment
+            and "g_stop_requested.load(std::memory_order_acquire)" in ptp_task
+            and "check_ptp_positive_evidence_retains_clock_across_isolated_tx_faults();" in
+                (STUDIO.parents[1] / "tests/test_ptp_power_profile.cpp").read_text(encoding="utf-8"),
+            "PTP TX failure must never erase fresh positive wire evidence or force a 1Hz SV loss")
+
     print("Studio operator workspace contract: PASS")
 
 
