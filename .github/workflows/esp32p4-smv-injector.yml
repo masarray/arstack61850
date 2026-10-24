@@ -266,6 +266,12 @@ jobs:
           gm_boot = 'CONFIG_AR_PTP_BOOT_SIMULATED_GLOBAL_GM=y' in cfg
           source_boot = 'CONFIG_AR_PTP_BOOT_SOURCE_AUTOSTART=y' in cfg
           candidate = servo and mac_evidence and no_mirror and gm_boot and source_boot
+          # External GM arbitration is compiled for Advanced operator use.
+          # It must NEVER silently become the power-on time source.
+          facade = Path('main/ptp_mode_facade.cpp').read_text(encoding='utf-8')
+          default_mode = facade.split('g_advanced_ptp_mode{', 1)[1].split('};', 1)[0]
+          if 'AR_PTP_POLICY_INTERNAL_GM_ONLY' not in default_mode or 'AR_PTP_POLICY_AUTO_PREFER_EXTERNAL' in default_mode:
+              raise SystemExit('Unsafe implicit AUTO GM handover: FAT SOURCE must default INTERNAL_GM_ONLY')
           if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
               raise SystemExit("Firmware source SHA unavailable/invalid; refusing a zero-provenance package")
           manifest = {
@@ -285,6 +291,7 @@ jobs:
               "phaseSyncPreview": candidate,
               "bootSimulatedGlobalGmEnabled": gm_boot,
               "bootSourceAutostartEnabled": source_boot,
+              "defaultPtpPolicy": "INTERNAL_GM_ONLY",
               "globalGmTraceabilityPhysicallyProven": False,
               "phaseServoEnabled": servo,
               "canonicalMacTxEvidenceEnabled": mac_evidence,
