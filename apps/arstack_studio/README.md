@@ -2,7 +2,9 @@
 
 ARStack Studio is the **canonical native desktop operator surface** for the first ARStack61850 public Sampled Values release. It is a Qt 6 / C++ / QML application; the ESP32-P4 remains the deterministic real-time publisher.
 
-> **v0.1.1 is the latest public ARStack Studio release.** Download: https://github.com/masarray/arstack61850/releases/tag/v0.1.1
+> **Engineering Process Bus Simulator (M3.H, 24 October 2026):** [public laboratory edition](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h-20261024). Intended to emulate IEC 61850-9-2 sampled values and an internally simulated Global PTP grandmaster on ESP32-P4, with measured Ethernet HW timestamp/phase evidence. Does not require GPS or a relay to run; interoperability with real relay subscribers is not yet field-tested. Read [on-wire FAT evidence and getting started](../../docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md).
+>
+> **v0.1.1 is the earlier general ARStack Studio release.** Download: https://github.com/masarray/arstack61850/releases/tag/v0.1.1
 >
 > Public v0.1.1 tag source: `2bcf28dd948161bb70fdc6d5b338e9a600670bc1`. The earlier `9c7fc730...` / `d9b5b684...` pair remains the historical v0.1.0 P0 acceptance anchor, not the current development baseline.
 
