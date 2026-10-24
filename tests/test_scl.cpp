@@ -1221,6 +1221,24 @@ void arstack_untagged_lab_reference_compiles_without_vlan_tag() {
     CHECK(stream.sample_rate == 4000U);
     CHECK(stream.no_asdu == 1U);
 
+    // A/B lab isolation must change only the outer Ethernet VLAN tag.
+    // Preserve the shipped reference stream's application identity and data layout.
+    const auto reference_path = std::filesystem::path{ARIEC61850_SOURCE_DIR} /
+        "apps" / "arstack_studio" / "templates" /
+        "arstack_4i4v_9-2le_reference.scd";
+    const auto reference_document = SclParser{}.load(reference_path);
+    CHECK(reference_document.sampled_values_streams.size() == 1U);
+    const auto& reference = reference_document.sampled_values_streams.front();
+    CHECK(reference.address.vlan_id == std::optional<std::uint16_t>{0U});
+    CHECK(reference.address.vlan_priority == std::optional<std::uint8_t>{4U});
+    CHECK(stream.address.destination_mac == reference.address.destination_mac);
+    CHECK(stream.address.app_id == reference.address.app_id);
+    CHECK(stream.sv_id == reference.sv_id);
+    CHECK(stream.configuration_revision == reference.configuration_revision);
+    CHECK(stream.sample_rate == reference.sample_rate);
+    CHECK(stream.no_asdu == reference.no_asdu);
+    CHECK(stream.entries.size() == reference.entries.size());
+
     SvPublisherProfileCompileContext context;
     context.profile_family = SvProfileFamily::legacy_9_2le;
     context.sample_counter_modulus = static_cast<std::uint16_t>(4000U);
