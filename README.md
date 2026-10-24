@@ -1,30 +1,46 @@
-# ARStack61850 — Real-Time IEC 61850 Instrumentation Stack
+# ARStack61850 — Open-source IEC 61850 Engineering Lab
 
-ARStack61850 is the real-time, hardware-aware evolution of ARIEC61850.
+Explore, simulate and test IEC 61850 in your own engineering lab. ARStack61850 combines a portable C++ protocol engine, desktop tools and real-time ESP32-P4 Sampled Values (SV) generation with PTP clock simulation.
 
-> **ARIEC61850 understands IEC 61850. ARStack61850 measures and executes IEC 61850 in real time.**
+**[Download the latest release](https://github.com/masarray/arstack61850/releases/latest)** · **[Open the product website](https://masarray.github.io/arstack61850/)** · **[Installation guide](docs/INSTALL.md)** · **[Source code](https://github.com/masarray/arstack61850)**
 
-The portable C++20 stack remains rooted in the ARIEC61850 behavioral model, but the project north star is now broader: build an open, deterministic IEC 61850 instrumentation platform for hardware-timestamped Sampled Values/GOOSE/PTP injection, analysis, commissioning and real-time closed-loop testing.
+### Get started
 
-## Public release — Process Bus Simulator M3.H (2026-10-24)
+1. Open **Latest release** and download the **Windows Setup** file; the portable package is also available.
+2. Install **ARStack Studio** and follow the built-in first-run flow.
+3. For real Ethernet SV/PTP experiments, connect a compatible ESP32-P4 Ethernet board and use the **firmware supplied with that same release**. You can explore the desktop interface before connecting hardware.
+4. Use a dedicated lab Ethernet connection for SV and PTP experiments.
 
-**Current public laboratory edition: [M3.H Public Stable](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h-20261024).** This is an open-source engineering simulator, **not** a certified merging unit or UTC time reference. No GPS, Omicron, or protection relay is required for an isolated-lab experiment.
+**Windows command-line install** (downloads the current stable installer and verifies its SHA-256):
 
-**[Download Setup EXE](https://github.com/masarray/arstack61850/releases/download/processbus-sim-m3h-20261024/ARStack-ProcessBus-M3H-win-x64-setup.exe)** · **[Portable ZIP](https://github.com/masarray/arstack61850/releases/download/processbus-sim-m3h-20261024/ARStack-ProcessBus-M3H-win-x64-portable.zip)** · **[ESP32-P4 firmware](https://github.com/masarray/arstack61850/releases/download/processbus-sim-m3h-20261024/ARStack-ESP32P4-ProcessBus-M3H-firmware.bin)** · [Release notes and engineer quick start](docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md)
+```powershell
+$installer = Join-Path $env:TEMP 'arstack-install.ps1'
+Invoke-WebRequest 'https://raw.githubusercontent.com/masarray/arstack61850/main/scripts/install-windows.ps1' -OutFile $installer
+& $installer
+```
 
-* **ESP32-P4 Ethernet:** 4I+4V IEC 61850 SV publisher, one ASDU, 64-byte samples, 4,000 frames/s, continuous `smpCnt 0–3999` with explicit START/STOP.
-* **IEEE 1588 / IEC/IEEE 61850-9-3-style PTP emulation:** isolated-bench **internal simulated Global GM**, Layer-2 Announce/Sync/Follow_Up at approximately 1 Hz, ESP32-P4 EMAC hardware transmit timestamp, phase servo and MAC egress evidence. `smpSynch AUTO` supports `smpSynch=2` after local measured evidence; not an assertion of GPS/UTC traceability.
-* **ARStack Studio on Windows:** 4I+4V waveform/phasor controls, capture/reporting, SCL input within supported profile, supervised firmware flashing, verified COM identity and USB hotplug recovery.
-* **Actual independent M3.H capture:** **163,048 SV in 40.763 seconds**, 100% `smpSynch=2`, **zero missing, duplicate, counter-reset or malformed SV**, measured **3999.884 fps**, plus 44 PTP Announce and 43 each Sync/Follow_Up. A STOP truncated the requested 120-second capture; 120-second endurance and physical relay locking were **not** tested.
-* **Source pinned:** `a922e9bdba4e57a4e88406eb83344455dd8ff142`; **10/10 CI workflows PASS** for the shipped Studio/firmware pairing. The public tag includes only documentation/packaging deltas from that tested build.
-* **Release = main:** [PR #299](https://github.com/masarray/arstack61850/pull/299) merged the exact tested source and the public release-tag ancestry into `main` with **14/14 integration CI PASS**; no SV/PTP source drift, no binary re-upload, no loss of newer main docs. Original source Build ID remains `a922e9bdba4e57a4`. See [source-in-main audit](docs/integration/M3H_SOURCE_STACK_AUDIT_2026-10-24.md).
+**Linux:** An AppImage packaging workflow is available; the [latest release](https://github.com/masarray/arstack61850/releases/latest) lists a Linux download once its build and checks pass. See [Linux install instructions](docs/INSTALL.md). Windows remains the verified desktop installer for the M3.H release.
 
+### What you can explore
 
-For electrical safety, transmit PTP and SV only on an isolated lab switch/VLAN: never introduce an unsolicited PTP grandmaster or SV publisher onto an operating substation LAN.
+- **Sampled Values:** 4 currents + 4 voltages, simulated waveforms and real-time Ethernet output from supported ESP32-P4 hardware.
+- **PTP timing:** an internal simulated grandmaster, time-sync controls and on-wire timing evidence.
+- **Engineering tools:** SCL, COMTRADE, MMS, GOOSE and other IEC 61850 foundations in the source tree. Features depend on the chosen application and release.
+- **Reproducible experimentation:** open-source code, tests, example configurations and release notes.
 
-### Earlier general-purpose Studio releases
+No external GPS receiver or protection relay is needed to begin exploring the simulator. Network traffic generation is intended for a separate test bench, not an energized operational substation network.
 
-[v0.1.1](https://github.com/masarray/arstack61850/releases/tag/v0.1.1) remains an earlier Studio release; [v0.1.0](https://github.com/masarray/arstack61850/releases/tag/v0.1.0) retains historical 4I+4V / 4000 fps **`smpSynch=0`** evidence, 10/10 START/STOP and a 3600-second retained run. These older results are not the M3.H measured PTP/SV evidence.
+### Verified M3.H milestone
+
+The [24 October 2026 M3.H release](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h-20261024) recorded 163,048 consecutive SV packets over 40.76 seconds, at 3,999.884 frames/s, with `smpSynch=2` across the captured interval and no missing or malformed SV frames. That result is a measured laboratory milestone, not a claim about later builds or external device acceptance. See the [test record](docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md).
+
+**Release downloads always resolve through [GitHub's latest stable release](https://github.com/masarray/arstack61850/releases/latest)** rather than a hard-coded version. Release notes identify the firmware/software pairing and validated features for each build.
+
+---
+
+## Developer and technical documentation
+
+The portable C++20 stack originated from the ARIEC61850 behavioral model. The engineering north star is deterministic IEC 61850 process-bus instrumentation with bounded runtime behavior, protocol evidence and platform-specific hardware timing.
 
 ## Start here
 

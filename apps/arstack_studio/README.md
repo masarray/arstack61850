@@ -1,14 +1,14 @@
-# ARStack Studio — 4I + 4V SMV Injector / Generator
+# ARStack Studio — Desktop IEC 61850 Lab Tool
 
-ARStack Studio is the **canonical native desktop operator surface** for the first ARStack61850 public Sampled Values release. It is a Qt 6 / C++ / QML application; the ESP32-P4 remains the deterministic real-time publisher.
+ARStack Studio is the native desktop interface for IEC 61850 Sampled Values experiments and ESP32-P4 process-bus simulation.
 
-> **Newest public process-bus simulator:** [M3.H Lab Edition · 2026-10-24](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h-20261024) (Public Stable · engineering lab simulator). Earlier standalone Studio release: [v0.1.1](https://github.com/masarray/arstack61850/releases/tag/v0.1.1); historical P0 v0.1.0 is unchanged.
->
-> **Source mainline:** Released M3.H firmware/Studio source and GitHub Release tag are both ancestors of `main` through [merged PR #299](https://github.com/masarray/arstack61850/pull/299), with 14/14 candidate CI SUCCESS and original `a922e9bdba4e57a4` hardware Build ID preserved in the published firmware.
->
-> Install M3.H Setup **and flash its matched ESP32-P4 firmware** (build `a922e9bdba4e57a4`) to use the new PTP SOURCE continuity and simulated Global GM. The older firmware does not gain those features by updating Windows Studio alone.
->
-> [Windows Setup EXE](https://github.com/masarray/arstack61850/releases/download/processbus-sim-m3h-20261024/ARStack-ProcessBus-M3H-win-x64-setup.exe) · [Portable](https://github.com/masarray/arstack61850/releases/download/processbus-sim-m3h-20261024/ARStack-ProcessBus-M3H-win-x64-portable.zip) · [firmware BIN](https://github.com/masarray/arstack61850/releases/download/processbus-sim-m3h-20261024/ARStack-ESP32P4-ProcessBus-M3H-firmware.bin)
+**[Get the latest release](https://github.com/masarray/arstack61850/releases/latest)** · **[How to install](../../docs/INSTALL.md)** · **[Product website](https://masarray.github.io/arstack61850/)**
+
+On Windows, choose **Setup EXE** or **Portable ZIP** from the release page. For Linux, use an **AppImage** when it appears among the verified assets. For Ethernet output, connect the ESP32-P4 board and load its firmware from the **same release**.
+
+Start with a 4I+4V example, choose the timing mode, adjust voltage/current signals, and press **Start**. This software is made for engineers, students and lab experimenters; a GPS reference or protection relay is not needed just to try it.
+
+The M3.H release recorded verified 4 kHz SV and local simulated PTP traffic. These measurements belong to that specific release; newer builds have their own release notes and evidence.
 
 ## M3.H laboratory SV + PTP mode
 
