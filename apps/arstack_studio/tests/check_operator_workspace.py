@@ -754,6 +754,15 @@ def main() -> None:
             and "g_preflight_phase_clock_active" in firmware_source
             and "g_warm_resume_first_epoch" in firmware_source,
             "SV STOP/START must preserve measured PTP clock authority")
+    # The 1-Hz phase servo must follow actual GPTimer/PTP ownership.
+    # A serial STOP flips RUNNING before PARKED; both GUI/ISR flags may be
+    # false briefly while the real hardware timebase is still continuous.
+    require("SvAutoPreflightPolicy::can_steer_owned_grid" in firmware_source
+            and "clock_timer_owned_and_enabled" in firmware_source
+            and "if (preflight_active)" not in firmware_source
+            and "(!live_tx_running() &&" not in firmware_source,
+            "transition flags must not tear down an owned PTP sample clock")
+
     # PTP SOURCE readiness recovery cannot fabricate a NEW timebase lease.
     # A source generation bump belongs to hardware initialization only.
     source_generation_bump = "g_ptp_source_generation.fetch_add(1U"
