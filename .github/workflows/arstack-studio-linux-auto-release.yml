@@ -1,0 +1,54 @@
+name: Attach Linux AppImage On Stable Release
+
+on:
+  release:
+    types: [published]
+  pull_request:
+    paths:
+      - '.github/workflows/arstack-studio-linux-auto-release.yml'
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  dispatch-matched-linux-package:
+    name: Build tested AppImage for newly published stable tag
+    if: ${{ github.event_name == 'release' && !github.event.release.draft && !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check published release assets before dispatch
+        id: eligibility
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > release.json
+          python3 - <<'PY'
+          import json, os
+          r=json.load(open('release.json'))
+          assert not r['draft'] and not r['prerelease'], 'Only stable release builds are eligible'
+          assets={a['name'] for a in r['assets']}
+          assert 'firmware-manifest.json' in assets, 'Matched firmware manifest not published yet'
+          assert any(n.lower().endswith('.bin') for n in assets), 'Matched board firmware not published yet'
+          available=any(n.endswith('.AppImage') for n in assets)
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+              out.write(f"dispatch={'false' if available else 'true'}\n")
+          if available:
+              print('SKIP: release already contains a Linux AppImage')
+          else:
+              print('PASS: matching firmware assets published; ready to package Linux Studio')
+          PY
+
+      - name: Dispatch exact-tag Linux AppImage build, smoke and attach workflow
+        if: ${{ steps.eligibility.outputs.dispatch == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh workflow run arstack-studio-linux-appimage.yml \
+            --repo "$GITHUB_REPOSITORY" --ref main \
+            --field release_tag="$TAG"
+          echo "Dispatched Linux build for release tag: $TAG"
