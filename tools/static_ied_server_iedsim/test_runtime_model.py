@@ -26,7 +26,7 @@ def creation_flags() -> int:
 def manifest(revision: int, value: bool) -> str:
     """Build a vendor-style model with configured whole-DO DataSet members.
 
-    The 36/22 cardinalities mirror the SIPROTEC acceptance case that exposed the
+    The 36/22 cardinalities mirror the reference IED acceptance case that exposed the
     regression.  Each configured member owns multiple leaves, so flattening the
     Digital DataSet would exceed the 64-member static DataSet limit while the
     correct configured membership remains safely at 36.
