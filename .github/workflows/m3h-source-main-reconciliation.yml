@@ -1,0 +1,97 @@
+name: M3.H Reconcile Tested Source into Main (Safe Staging)
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/m3h-source-main-reconciliation.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile-exact-source:
+    if: github.repository == 'masarray/arstack61850'
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    env:
+      VERIFIED_SOURCE_SHA: a922e9bdba4e57a4e88406eb83344455dd8ff142
+      INTEGRATION_BRANCH: integration/m3h-verified-source-to-main-20261024
+    steps:
+      - name: Checkout complete history of current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Reconcile, preserve main updates, and stage a traceable two-parent merge
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin "$VERIFIED_SOURCE_SHA"
+          MAIN_SHA="$(git rev-parse HEAD)"
+          BASE_SHA="$(git merge-base "$MAIN_SHA" "$VERIFIED_SOURCE_SHA")"
+          echo "MAIN_BASE=$MAIN_SHA" >> "$GITHUB_ENV"
+          echo "Common ancestor: $BASE_SHA"
+          echo "Current main: $MAIN_SHA"
+          echo "Verified M3.H source: $VERIFIED_SOURCE_SHA"
+          git merge-base --is-ancestor "$BASE_SHA" "$MAIN_SHA"
+          git merge-base --is-ancestor "$BASE_SHA" "$VERIFIED_SOURCE_SHA"
+          echo 'Main updates since common ancestor:'
+          git diff --name-status "$BASE_SHA" "$MAIN_SHA"
+          echo 'Main/source overlapping changed paths:'
+          comm -12 <(git diff --name-only "$BASE_SHA" "$MAIN_SHA" | sort) <(git diff --name-only "$BASE_SHA" "$VERIFIED_SOURCE_SHA" | sort) || true
+          git switch -c "$INTEGRATION_BRANCH"
+          if ! git merge --no-ff --no-edit -m 'Merge verified M3.H Process Bus SV/PTP source into main history' "$VERIFIED_SOURCE_SHA"; then
+            echo 'STOP: merge conflicts require manual triage, never discard conflicts automatically' >&2
+            git status --short
+            exit 1
+          fi
+          test "$(git rev-list --parents -n 1 HEAD | wc -w)" -eq 3
+          git merge-base --is-ancestor "$VERIFIED_SOURCE_SHA" HEAD
+          git merge-base --is-ancestor "$MAIN_SHA" HEAD
+
+          # EXACT verified firmware, Studio and core source: no implementation drift.
+          python3 - <<'PY'
+          import subprocess
+          source = 'a922e9bdba4e57a4e88406eb83344455dd8ff142'
+          paths = ['CMakeLists.txt','apps/arstack_studio/','embedded/esp32p4_smv_injector/','include/','src/','tests/','scripts/','tools/']
+          changed=subprocess.check_output(['git','diff','--name-only',source,'HEAD','--',*paths],text=True).splitlines()
+          exceptions={'apps/arstack_studio/README.md','embedded/esp32p4_smv_injector/README.md'}
+          code=[p for p in changed if p not in exceptions]
+          if code:
+              raise SystemExit('ABORT: integrated implementation differs from tested source:\\n'+'\\n'.join(code))
+          print('PASS: firmware/Studio/core implementation byte-identical to verified M3.H source.')
+          PY
+
+          # Preserve ALL existing main contributions, not just markdown.
+          git diff --name-only "$BASE_SHA" "$MAIN_SHA" > /tmp/main-changed.txt
+          while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            main_blob="$(git rev-parse "$MAIN_SHA:$path" 2>/dev/null || true)"
+            integrated_blob="$(git rev-parse "HEAD:$path" 2>/dev/null || true)"
+            if [ "$main_blob" != "$integrated_blob" ]; then
+              echo "ABORT: current main contribution overwritten: $path" >&2
+              exit 1
+            fi
+          done < /tmp/main-changed.txt
+          echo 'PASS: every file modified on main after fork retains identical Git blob.'
+
+          # CI logic modified by M3.H remains exactly identical.
+          while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            src_blob="$(git rev-parse "$VERIFIED_SOURCE_SHA:$path" 2>/dev/null || true)"
+            merged_blob="$(git rev-parse "HEAD:$path" 2>/dev/null || true)"
+            if [ "$src_blob" != "$merged_blob" ]; then
+              echo "ABORT: source-related CI workflow drift: $path" >&2
+              exit 1
+            fi
+          done < <(git diff --name-only "$BASE_SHA" "$VERIFIED_SOURCE_SHA" -- .github/workflows)
+          echo 'PASS: tested-source CI workflow definitions preserved.'
+          echo "Candidate integration SHA: $(git rev-parse HEAD)"
+          git show --no-patch --format='parents=%P%nsubject=%s' HEAD
+          # Never update main here. Only push a separate immutable-review candidate.
+          git push origin "HEAD:refs/heads/$INTEGRATION_BRANCH"
+          echo "Branch candidate pushed: $INTEGRATION_BRANCH"
