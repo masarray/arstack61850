@@ -3,6 +3,7 @@
 #pragma once
 
 #include "ariec61850/sampled_values/live_signal_state.hpp"
+#include "ariec61850/sampled_values/sv_tx_fault_burst.hpp"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -16,6 +17,9 @@ void live_control_initialize(
 
 void live_control_bind_publisher_task(TaskHandle_t task) noexcept;
 void live_control_force_stop() noexcept;
+
+[[nodiscard]] ar::iec61850::sampled_values::SvTxFaultSnapshot
+live_tx_fault_snapshot() noexcept;
 
 [[nodiscard]] ar::iec61850::sampled_values::SvLiveSignalState
 live_signal_snapshot() noexcept;

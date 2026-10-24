@@ -2261,6 +2261,37 @@ void DeviceController::processLine(const QString& rawLine) {
         }
     }
 
+    // Board-owned sticky Ethernet fault survives an SV START after fail-closed
+    // STOP. Never show an old burst as today's fault: bind to SVLIFE stop_seq
+    // and the verified board boot, while keeping the normal RUNNING state clear.
+    static const QRegularExpression kSvTxFault(
+        QStringLiteral("SVTXFAULT state=(RUNNING|STOPPED) svlife_stop_seq=(\\d+)"
+                       ".*last_stop_first_error=(-?\\d+) last_stop_last_error=(-?\\d+)"
+                       " last_stop_link_up=([01])"));
+    const auto txFault = kSvTxFault.match(line);
+    if (txFault.hasMatch()) {
+        bool seqOk = false;
+        bool errorOk = false;
+        const quint64 seq = txFault.captured(2).toULongLong(&seqOk);
+        const int lastError = txFault.captured(4).toInt(&errorOk);
+        if (seqOk && errorOk && seq > 0U && seq == lastSvStopSeq_) {
+            const QString errorName = lastError == 0x107
+                ? QStringLiteral("TIMEOUT")
+                : lastError == 0x103
+                    ? QStringLiteral("INVALID_STATE")
+                    : QStringLiteral("0x") +
+                      QString::number(static_cast<quint32>(lastError), 16).toUpper();
+            const QString detail = QStringLiteral("Ethernet TX %1 · link %2")
+                .arg(errorName, txFault.captured(5) == QStringLiteral("1")
+                    ? QStringLiteral("UP") : QStringLiteral("DOWN"));
+            if (svTxFaultSeq_ != seq || svTxFaultDetail_ != detail) {
+                svTxFaultSeq_ = seq;
+                svTxFaultDetail_ = detail;
+                emit svStopReasonChanged();
+            }
+        }
+    }
+
     auto match = kStateExpression.match(line);
     if (match.hasMatch()) {
         const bool observedRunning = match.captured(1).compare(QStringLiteral("RUNNING"), Qt::CaseInsensitive) == 0;
@@ -2513,11 +2544,13 @@ void DeviceController::processLine(const QString& rawLine) {
 void DeviceController::resetTelemetry() {
     operatorStopPending_ = false;
     lastSvStopSeq_ = 0;
+    const bool hadStopDetails = !svLastStopCause_.isEmpty() ||
+        !svTxFaultDetail_.isEmpty() || !svStopReason_.isEmpty();
     svLastStopCause_.clear();
-    if (!svStopReason_.isEmpty()) {
-        svStopReason_.clear();
-        emit svStopReasonChanged();
-    }
+    svStopReason_.clear();
+    svTxFaultDetail_.clear();
+    svTxFaultSeq_ = 0;
+    if (hadStopDetails) emit svStopReasonChanged();
     fps_ = QStringLiteral("—");
     missed_ = QStringLiteral("—");
     txFailures_ = QStringLiteral("—");

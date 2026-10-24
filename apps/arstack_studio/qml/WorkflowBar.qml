@@ -282,7 +282,10 @@ SurfacePanel {
             return "SV still running · Studio session warning"
         if (ribbon.unexpectedSvStop) {
             if (ribbon.device.svStopReason === "LEASE_EXPIRED") return "SV stopped · USB control lease expired"
-            if (ribbon.device.svStopReason === "RUNTIME_FAULT") return "SV stopped · board runtime fault"
+            if (ribbon.device.svStopReason === "RUNTIME_FAULT")
+                return ribbon.device.svTxFaultDetail.length > 0
+                    ? "SV stopped · " + ribbon.device.svTxFaultDetail
+                    : "SV stopped · board runtime fault"
             return "SV stopped · checking board cause"
         }
         if (smartSession.state === "WAITING FOR DEVICE") return "Connect device"

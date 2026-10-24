@@ -128,6 +128,9 @@ constexpr std::uint16_t kSampleModeSamplesPerSecond = 1U;
 constexpr std::uint16_t kDiagnosticEtherType = 0x88B5U;
 constexpr std::uint32_t kStatsMergeEvery = 400U;
 constexpr std::uint32_t kTransportFailureStopThreshold = 400U; // 100 ms at 4 kHz
+// Only one publisher task writes this recorder. Status/serial may read it on CPU0.
+// Capture real first/last ESP-IDF TX errors before a fail-closed STOP.
+ar::iec61850::sampled_values::SvTxFaultBurst g_sv_tx_faults{};
 constexpr std::uint32_t kTimerResolutionHz = 1000000U;
 #if AR_SV_PTP_PHASE_SUPPORTED
 // Separate clock authority from SV TX session state. During SV STOP the
@@ -1223,6 +1226,7 @@ void publisher_task(void* argument) {
             schedule_anchored = false;
             consecutive_canonical_tx_failures = 0U;
             last_canonical_tx_error = ESP_OK;
+            g_sv_tx_faults.new_session();
             expected_schedule.reset(active_profile.publisher_rate_hz);
 #if AR_SV_TX_EGRESS_SUPPORTED
             zero_epoch_frames_seen = 0U;
@@ -1461,12 +1465,21 @@ void publisher_task(void* argument) {
             ++local.canonical_fail;
             last_canonical_tx_error = ESP_ERR_INVALID_STATE;
             ++consecutive_canonical_tx_failures;
+            const bool first_link_failure = g_sv_tx_faults.failure(
+                static_cast<std::int32_t>(ESP_ERR_INVALID_STATE), false);
 #if AR_SV_PTP_PHASE_SUPPORTED
-            g_sample_clock_context.publisher_fault_generation.fetch_add(
-                1U, std::memory_order_release);
-            g_sample_clock_context.phase_authority_valid.store(
-                false, std::memory_order_release);
-            revoke_sv_auto_claims(SvSyncLossReason::ethernet_link);
+            // The first failure revokes stale evidence immediately. Repeating
+            // the same invalidation 400 times in the 4-kHz hot path cannot
+            // improve safety and adds work while the MAC is already failing.
+            if (first_link_failure) {
+                g_sample_clock_context.publisher_fault_generation.fetch_add(
+                    1U, std::memory_order_release);
+                g_sample_clock_context.phase_authority_valid.store(
+                    false, std::memory_order_release);
+                revoke_sv_auto_claims(SvSyncLossReason::ethernet_link);
+            }
+#else
+            (void)first_link_failure;
 #endif
 #if CONFIG_AR_SMV_BROADCAST_MIRROR
             ++local.mirror_fail;
@@ -1651,18 +1664,27 @@ void publisher_task(void* argument) {
 #endif
             if (canonical_result == ESP_OK) {
                 ++local.canonical_ok;
+                if (consecutive_canonical_tx_failures != 0U)
+                    g_sv_tx_faults.recovered();
                 consecutive_canonical_tx_failures = 0U;
                 last_canonical_tx_error = ESP_OK;
             } else {
                 ++local.canonical_fail;
                 last_canonical_tx_error = canonical_result;
                 ++consecutive_canonical_tx_failures;
+                const bool first_tx_failure = g_sv_tx_faults.failure(
+                    static_cast<std::int32_t>(canonical_result),
+                    (xEventGroupGetBits(g_link_events) & kLinkUpBit) != 0U);
 #if AR_SV_PTP_PHASE_SUPPORTED
-                g_sample_clock_context.publisher_fault_generation.fetch_add(
-                    1U, std::memory_order_release);
-                g_sample_clock_context.phase_authority_valid.store(
-                    false, std::memory_order_release);
-                revoke_sv_auto_claims(SvSyncLossReason::canonical_tx);
+                if (first_tx_failure) {
+                    g_sample_clock_context.publisher_fault_generation.fetch_add(
+                        1U, std::memory_order_release);
+                    g_sample_clock_context.phase_authority_valid.store(
+                        false, std::memory_order_release);
+                    revoke_sv_auto_claims(SvSyncLossReason::canonical_tx);
+                }
+#else
+                (void)first_tx_failure;
 #endif
             }
 
@@ -1689,10 +1711,20 @@ void publisher_task(void* argument) {
             local, lateness_us, missed_slots, canonical_sample_count, signal_state.generation);
         g_sample_tick_total.fetch_add(1U, std::memory_order_relaxed);
         if (consecutive_canonical_tx_failures >= kTransportFailureStopThreshold) {
+            g_sv_tx_faults.stopped(
+                static_cast<std::uint32_t>(esp_timer_get_time() / 1000LL));
+            const auto fault = g_sv_tx_faults.snapshot();
             ESP_LOGE(kTag,
-                     "SV transport fault: %lu consecutive canonical TX failures; last=%s; forcing STOP",
+                     "SV transport fault: %lu consecutive TX failures; first=%s "
+                     "last=%s link_at_failure=%u burst=%lu total=%lu "
+                     "stop_seq=%lu; forcing STOP (fail closed)",
                      static_cast<unsigned long>(consecutive_canonical_tx_failures),
-                     esp_err_to_name(last_canonical_tx_error));
+                     esp_err_to_name(static_cast<esp_err_t>(fault.stop_first_error)),
+                     esp_err_to_name(last_canonical_tx_error),
+                     fault.stop_link_up ? 1U : 0U,
+                     static_cast<unsigned long>(fault.stop_streak),
+                     static_cast<unsigned long>(fault.failed_frames),
+                     static_cast<unsigned long>(fault.stop_sequence));
             merge_stats(local);
             live_control_force_stop();
             stop_sample_clock(sample_clock);
@@ -2268,6 +2300,13 @@ void telemetry_task(void*) {
 }
 
 } // namespace
+
+namespace ar::esp32p4::smv {
+ar::iec61850::sampled_values::SvTxFaultSnapshot
+live_tx_fault_snapshot() noexcept {
+    return g_sv_tx_faults.snapshot();
+}
+} // namespace ar::esp32p4::smv
 
 extern "C" void app_main(void) {
     g_link_events = xEventGroupCreate();
