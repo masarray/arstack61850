@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 55
     permissions:
-      contents: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag != '' && 'write' || 'read' }}
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -145,13 +145,32 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Add Linux artifacts to matching existing stable release
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag != '' }}
+  attach-verified-release:
+    name: Attach tested Linux package to exact release tag
+    needs: appimage
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
+          fetch-depth: 0
+      - name: Download Linux build that passed the AppImage checks
+        uses: actions/download-artifact@v4
+        with:
+          name: arstack-studio-linux-x86_64
+      - name: Verify tag and release before publishing
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "$TAG^{commit}")"
+          gh release view "$TAG" --json isDraft,isPrerelease -q 'select(.isDraft==false and .isPrerelease==false)' > release-check.json
+          test -s release-check.json
+          sha256sum -c ARStack-Studio-linux-x86_64.sha256
           gh release upload "$TAG" \
             ARStack-Studio-linux-x86_64.AppImage \
             ARStack-Studio-linux-x86_64.sha256
