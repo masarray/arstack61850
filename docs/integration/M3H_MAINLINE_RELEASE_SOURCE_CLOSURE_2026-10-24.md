@@ -21,25 +21,27 @@
 
 **Do not delete frozen historical branches or alter the published release/tag.** A closed PR does not imply it was independently merged via its button; Git ancestry and GitHub merge metadata are explicitly distinguished.
 
-## Separate OPEN / divergent source PRs — not shipped as M3.H
+## Divergent SMV/PTP PR cleanup — CLOSED as historical, not merged (DONE)
 
-Nine remaining SMV/PTP-adjacent PRs are old divergent tracks with unique commits not in verified release HEAD. **Do not auto-merge or label them equivalent.** Unique-commit counts are from head-of-PR vs shipped `a922e9bd...` before integration; refresh before any future targeted port.
+All nine legacy source branches were previously **OPEN/DRAFT**. They have now been **CLOSED / NOT MERGED** after exact-head review, branch-vs-main comparison and a per-PR archival comment explaining residual requirements. All original commits and discussions remain accessible. **No experimental firmware code was imported into the accepted M3.H binary or main.** This is transparent archive hygiene, not a claim that untested features work.
 
-| PR | Unique branch commits (relative to shipped M3.H head) | Classification |
+| Historical PR | Prior unique commits vs released source | Final disposition / canonical unresolved acceptance |
 | --- | ---: | --- |
-| [#284](https://github.com/masarray/arstack61850/pull/284) | 17 | Alternate PTP SOURCE fast acquisition / external GM AUTO_FAILOVER; external receiver/relay FAT still unverified |
-| [#272](https://github.com/masarray/arstack61850/pull/272) | 7 | Alternative Studio operator fault toast / UX |
-| [#266](https://github.com/masarray/arstack61850/pull/266) | 16 | Earlier PTP stale role / clipboard variant |
-| [#263](https://github.com/masarray/arstack61850/pull/263) | 23 | Earlier firmware identity / PTP START UX |
-| [#259](https://github.com/masarray/arstack61850/pull/259) | 13 | Earlier USB identity / packet capture UX |
-| [#256](https://github.com/masarray/arstack61850/pull/256) | 2 | External-GM RECEIVER phase/MAC candidate |
-| [#253](https://github.com/masarray/arstack61850/pull/253) | 25 | Earlier running 4I+4V atomic changes; targeted verification required |
-| [#239](https://github.com/masarray/arstack61850/pull/239) | 17 | Earlier GUI/wire SSOT variant |
-| [#166](https://github.com/masarray/arstack61850/pull/166) | 94 | Broad legacy M1/M2/M3 timing stack, not the accepted on-wire M3.H line |
+| [#284](https://github.com/masarray/arstack61850/pull/284) | 17 | Archived SOURCE-fast acquisition / AUTO_FAILOVER candidate; physical external-GM/RECEIVER and IED evidence remain #162/#154 |
+| [#272](https://github.com/masarray/arstack61850/pull/272) | 7 | Archived alternative operator alerts; missing center-screen PHY/PTP feedback retained in [#300](https://github.com/masarray/arstack61850/issues/300) |
+| [#266](https://github.com/masarray/arstack61850/pull/266) | 16 | Archived stale-role recovery/clipboard variant; guarded real board STOP/readback and UX retained #300/#287 |
+| [#263](https://github.com/masarray/arstack61850/pull/263) | 23 | Archived earlier firmware identity/PTP START behavior; only genuinely missing current-main behavior retained #300 |
+| [#259](https://github.com/masarray/arstack61850/pull/259) | 13 | Archived old USB-flash/capture recovery variant (older firmware); targeted missing identity/telemetry UX retained #300 |
+| [#256](https://github.com/masarray/arstack61850/pull/256) | 2 | Archived unverified external-GM RECEIVER MAC/phase qualification; acceptance retained #162/#154 |
+| [#253](https://github.com/masarray/arstack61850/pull/253) | 25 | Archived atomic live 4I+4V transaction implementation; acceptance retained [#42](https://github.com/masarray/arstack61850/issues/42) |
+| [#239](https://github.com/masarray/arstack61850/pull/239) | 17 | Archived old Studio GUI/wire SSOT alternative; missing UX and partial-update concerns retained #300/#42 |
+| [#166](https://github.com/masarray/arstack61850/pull/166) | 94 | Archived broad earlier M1/M2/M3 experimental tree; physical RECEIVER/PTP scope retained #162/#154 and extended timing #21 |
 
-**Follow-up hygiene verified on 2026-10-24:** All nine divergent SMV/PTP-adjacent PRs above are now **OPEN / DRAFT**, including the eight previously non-Draft PRs #284, #272, #266, #263, #259, #256, #253 and #239. Each of the nine PRs received a canonical reconciliation comment referencing this ledger. These branches retain unique work and are not included in the M3.H shipped firmware baseline; therefore they are deliberately not marked merged or closed without a reviewed feature-by-feature disposition. New contributions must branch from the current `main` and pass targeted gates.
+Comparison counts are historical (against shipped `a922e9bd...`), not a current merge suitability statement. Each branch also diverges from current `main`; do not resurrect a whole stacked patchset. Source modifications should be separately re-implemented or selectively ported from fresh main with explicit negative/positive regression tests.
 
-The other eight open PRs concern Workbench, Browser, and IED Simulator lanes; do not close or merge them as part of SMV M3.H source consolidation.
+**Current PR queue:** exactly **8 unrelated Workbench, Browser, IED Simulator PRs** remain open. They belong to different product tracks and were not altered by M3.H SMV cleanup.
+
+**Safety CI:** the old automatic write-capable M3.H source-reconciliation workflow must be retired after merge. A read-only provenance guard checks source/tag ancestry, runtime parity and all five immutable release asset digests; it must never create a merge branch or publish binaries.
 
 ## Issues kept OPEN on purpose — different acceptance targets
 
