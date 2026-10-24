@@ -133,6 +133,12 @@ jobs:
           chmod +x ARStack-Studio-linux-x86_64.AppImage
           APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen \
             xvfb-run -a ./ARStack-Studio-linux-x86_64.AppImage --check-reference-template
+          APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen \
+            xvfb-run -a ./ARStack-Studio-linux-x86_64.AppImage --check-p0-policy
+          if [ -n "${{ inputs.release_tag }}" ]; then
+            APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen \
+              xvfb-run -a ./ARStack-Studio-linux-x86_64.AppImage --check-firmware-contract
+          fi
           sha256sum ARStack-Studio-linux-x86_64.AppImage > ARStack-Studio-linux-x86_64.sha256
 
       - name: Upload reviewed Linux artifacts
