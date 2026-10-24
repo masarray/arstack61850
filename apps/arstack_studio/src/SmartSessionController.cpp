@@ -275,6 +275,7 @@ void SmartSessionController::setDevice(QObject* object) {
     if (device_ == next) return;
     if (device_ != nullptr) disconnect(device_, nullptr, this, nullptr);
     device_ = next;
+    lastEnumeratedPorts_ = device_ != nullptr ? device_->ports() : QStringList{};
     deviceFirmwareVersion_.clear();
     profileSyncBootId_.clear();
     resetProfileSync(true);
@@ -741,8 +742,29 @@ void SmartSessionController::reconnectDeviceSignals() {
         reconcile();
     });
     connect(device_, &DeviceController::portsChanged, this, [this] {
+        if (device_ == nullptr) return;
+        const QStringList nowVisible = device_->ports();
+        const bool arrival = hasNewlyEnumeratedPort(lastEnumeratedPorts_, nowVisible);
+        lastEnumeratedPorts_ = nowVisible;
         refreshRecoveryOfferFromIdentity();
         reconcile();
+        if (!arrival) return;
+        // Wake once on USB arrival instead of waiting for periodic discovery.
+        // No serial I/O on the UI thread and no USB polling beyond the
+        // existing 750-ms DeviceIoWorker inventory. A removed port never
+        // triggers a probe; manual disconnect alone never triggers a probe.
+        // All identity/port ownership validation remains in the supervisor.
+        QTimer::singleShot(0, this, [this] {
+            if (!started_ || shuttingDown_ || device_ == nullptr ||
+                updateRequested_ || setupError_ || blankBoardDetected_ ||
+                manualRecoveryArmed_ || portOwner_ == PortOwner::firmwareTool ||
+                (firmware_ != nullptr && firmware_->busy()) ||
+                device_->connected() || device_->discovering() ||
+                device_->ports().isEmpty())
+                return;
+            static_cast<void>(startDeviceDiscovery());
+            reconcile();
+        });
     });
     connect(device_, &DeviceController::runningChanged, this, [this] {
         if (updateRequested_ && updateStage_ == UpdateStage::stopping &&
