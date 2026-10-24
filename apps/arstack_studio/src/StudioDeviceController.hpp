@@ -76,18 +76,9 @@ public:
             // so it naturally suppresses unnecessary health retries while RUNNING.
             confirmControlHealth();
         });
-        connect(this, &DeviceController::portsChanged, this, [this] {
-            // QSerialPort errors are still authoritative, but the worker's
-            // 750 ms enumeration snapshot closes the gap where Windows removes
-            // a COM device before Qt surfaces ResourceError/DeviceNotFoundError.
-            const QString activePort = portName().trimmed();
-            if (connected() && !activePort.isEmpty() && !ports().contains(activePort)) {
-                emit deviceMessage(QStringLiteral(
-                    "%1 disappeared from USB/COM enumeration. Releasing the stale session for automatic recovery.")
-                    .arg(activePort));
-                disconnectPort();
-            }
-        });
+        // M3.G: The serial worker owns confirmed USB disappearance and its
+        // two-snapshot hysteresis. Never disconnect here on a single UI
+        // portsChanged event: duplicate owners caused spurious teardown.
 
     }
 
@@ -268,7 +259,10 @@ private:
                 emit deviceMessage(QStringLiteral(
                     "Device control health timed out after bounded probes. Reconnecting without restarting SMV automatically."));
                 emit controlHealthFailed();
-                disconnectPort();
+                // A no-reply serial handle is a transport fault, NOT an
+                // operator DISCONNECT. Retire it through the worker's sole
+                // ownership path; notify the supervisor for prompt reconnect.
+                recoverUnresponsivePort();
                 return;
             }
         }
