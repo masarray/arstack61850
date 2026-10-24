@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exact OMICRON reference IEC 61850 client CSWI1 TypeSpecification golden regression."""
+"""Exact independent IEC 61850 test client CSWI1 TypeSpecification golden regression."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def manifest() -> str:
         "ARSTACK_IED_MODEL\t2\t1",
         f"LN\t{d}\tCSWI1",
 
-        # ST — exact leaf order/type shape captured from OMICRON reference IEC 61850 client.
+        # ST — exact leaf order/type shape captured from independent IEC 61850 test client.
         f"OBJ\t{d}\tCSWI1$ST$Mod$stVal\tENUM\tEnumeration\t1",
         f"OBJ\t{d}\tCSWI1$ST$Mod$q\tQUALITY\tQuality\tgood",
         f"OBJ\t{d}\tCSWI1$ST$Mod$t\tTimestamp\tTimestamp\tunix-ms:1720000000000",
