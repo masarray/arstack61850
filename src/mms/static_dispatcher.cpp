@@ -636,7 +636,7 @@ struct SyntheticChildRank final {
     if (prefix.find("$BR$") != std::string_view::npos) {
         return {kBrcbAttributeOrder};
     }
-    // OMICRON reference IEC 61850 client exposes control-service alternatives in this exact
+    // independent IEC 61850 test client exposes control-service alternatives in this exact
     // order at LN$CO$DO. Deeper service structures remain positional.
     if (prefix.find("$CO$") != std::string_view::npos &&
         static_cast<std::size_t>(std::count(

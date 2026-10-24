@@ -197,7 +197,7 @@ void invalid_shape_and_values_are_rejected() {
     CHECK(!result.success);
     CHECK(result.failure_code == 7U);
 
-    // ctlNum=0 is valid on the incoming server wire. OMICRON reference IEC 61850 client uses it.
+    // ctlNum=0 is valid on the incoming server wire. independent IEC 61850 test client uses it.
     result = mms_static_direct_boolean_write_oper(&binding, make_oper(true, 0U, false));
     CHECK(result.success);
     CHECK(state.last_control_number == 0U);
@@ -329,7 +329,7 @@ void reference_iec61850_sbo_enhanced_accepts_ctl_num_zero_and_fresh_oper_timesta
     binding.policy.allow_synchro_check = true;
     binding.policy.allow_interlock_check = true;
 
-    // Captured OMICRON reference IEC 61850 client behavior:
+    // Captured independent IEC 61850 test client behavior:
     // SBOw uses ctlNum=0 and T1; Oper keeps the selected identity but sends T2.
     const auto selected = mms_static_boolean_write_sbow_contextual(
         &binding,

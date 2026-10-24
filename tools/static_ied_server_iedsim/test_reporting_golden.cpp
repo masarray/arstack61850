@@ -300,7 +300,7 @@ int main() {
         return 14;
     }
 
-    // The accepted OMICRON command capture produced a selective BRCB report
+    // The accepted independent test-client capture produced a selective BRCB report
     // after process feedback. Its 36-bit inclusion field selects member 33 and
     // ReasonForInclusion is data-change. Lock SqNum/EntryID progression too.
     constexpr std::size_t changed_member = 33U;

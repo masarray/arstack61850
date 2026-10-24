@@ -235,7 +235,7 @@ void release_selection(MmsStaticDirectBooleanControlBinding& binding) noexcept {
     const MmsStaticDirectBooleanOperate& right,
     const bool compare_check) noexcept {
     // IEC 61850 enhanced SBO correlation is based on the selected command
-    // identity. OMICRON reference IEC 61850 client emits a fresh T for Oper (and may do so for
+    // identity. independent IEC 61850 test client emits a fresh T for Oper (and may do so for
     // Cancel) rather than replaying the SBOw timestamp, so T is intentionally
     // not part of selection identity. The accepted Oper itself is still kept
     // intact for CommandTermination correlation.
@@ -261,7 +261,7 @@ void release_selection(MmsStaticDirectBooleanControlBinding& binding) noexcept {
     const MmsStaticDirectBooleanControlBinding& binding,
     const MmsStaticDirectBooleanOperate& command) noexcept {
     // ctlNum is an IEC 61850 wire value supplied by the remote client. Keep
-    // zero valid on the server path: OMICRON reference IEC 61850 client uses ctlNum=0 in real
+    // zero valid on the server path: independent IEC 61850 test client uses ctlNum=0 in real
     // SBOw/Oper traffic. ARStack's client-side auto-allocation policy (1..255)
     // is separate and remains unchanged.
     return command.origin_category <= 8U &&
