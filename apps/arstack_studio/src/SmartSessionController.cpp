@@ -741,6 +741,28 @@ void SmartSessionController::reconnectDeviceSignals() {
         refreshRecoveryOfferFromIdentity();
         reconcile();
     });
+    // A verified COM was retired by the worker AFTER QSerialPort::close().
+    // Unlike portsChanged, this also covers rapid USB unplug/replug where
+    // Windows reuses COM15 between two 750-ms scans and no list edge exists.
+    // Queue the re-identification on the supervisor thread; never restart
+    // SV/PTP, bypass semantic identity, or seize COM from the flasher.
+    connect(device_, &DeviceController::unexpectedTransportLoss, this,
+            [this](const quint64 generation, const QString&) {
+        if (!generationIsCurrent(sessionGeneration_, generation)) return;
+        QTimer::singleShot(0, this, [this, generation] {
+            if (!generationIsCurrent(sessionGeneration_, generation) ||
+                !started_ || shuttingDown_ || device_ == nullptr ||
+                updateRequested_ || setupError_ || blankBoardDetected_ ||
+                manualRecoveryArmed_ || portOwner_ == PortOwner::firmwareTool ||
+                (firmware_ != nullptr && firmware_->busy()) ||
+                device_->connected() || device_->discovering() ||
+                device_->ports().isEmpty()) return;
+            // This is physical transport loss, not the operator selecting
+            // Disconnect. A fresh session generation retires late ACKs.
+            static_cast<void>(startDeviceDiscovery());
+            reconcile();
+        });
+    });
     connect(device_, &DeviceController::portsChanged, this, [this] {
         if (device_ == nullptr) return;
         const QStringList nowVisible = device_->ports();
