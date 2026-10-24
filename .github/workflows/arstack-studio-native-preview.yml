@@ -113,6 +113,7 @@ jobs:
           if ($manifest.phaseSyncPreview -ne $true -or
               $manifest.bootSimulatedGlobalGmEnabled -ne $true -or
               $manifest.bootSourceAutostartEnabled -ne $true -or
+              $manifest.defaultPtpPolicy -ne 'INTERNAL_GM_ONLY' -or
               $manifest.globalGmTraceabilityPhysicallyProven -ne $false -or
               $manifest.phaseServoEnabled -ne $true -or
               $manifest.canonicalMacTxEvidenceEnabled -ne $true -or
