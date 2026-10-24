@@ -1,0 +1,131 @@
+name: Public Stable Installer & Download Smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/public-stable-installer-smoke.yml'
+      - 'scripts/install-windows.ps1'
+      - 'scripts/install-linux.sh'
+      - 'docs/INSTALL.md'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/public-stable-installer-smoke.yml'
+      - 'scripts/install-windows.ps1'
+      - 'scripts/install-linux.sh'
+      - 'docs/INSTALL.md'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-release-metadata:
+    name: Public release asset identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Require the latest public Stable Windows artifacts and known digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 3 \
+            -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/repos/masarray/arstack61850/releases/latest -o release.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('release.json').read_text())
+          assert not r['draft'] and not r['prerelease'], 'Latest release is not public stable'
+          a={x['name']:x for x in r['assets']}
+          setup=[x for x in a if x.lower().endswith('setup.exe') and ('win' in x.lower() or 'windows' in x.lower())]
+          assert len(setup)==1, 'Need a single unambiguous Windows installer'
+          assert any(x.lower().endswith('portable.zip') for x in a), 'Portable ZIP missing'
+          assert 'firmware-manifest.json' in a, 'Matched firmware manifest missing'
+          assert 'SHA256SUMS.txt' in a, 'Checksums missing'
+          for name in setup:
+              assert a[name]['digest'].startswith('sha256:') and len(a[name]['digest'])==71, 'Setup SHA-256 unavailable'
+          linux='ARStack-Studio-linux-x86_64.AppImage'
+          checksum='ARStack-Studio-linux-x86_64.sha256'
+          assert (linux in a)==(checksum in a), 'Linux package and checksum must be published together'
+          if r['tag_name']=='processbus-sim-m3h-20261024':
+              expected={
+               'ARStack-ProcessBus-M3H-win-x64-setup.exe':'4902e8bf44e78fc55a139ce84a1273f0768ef6fe10000f5d0f85d75d2f6c736e',
+               'ARStack-ProcessBus-M3H-win-x64-portable.zip':'ca01424e4102aa65e353737024ebf3258b4d2f614fa60d932c95c353ee228d8f',
+               'ARStack-ESP32P4-ProcessBus-M3H-firmware.bin':'61c508e9bf1357eb964d2b817b260b6a0e985446ddd68de1d45d9467e25c4607',
+               'firmware-manifest.json':'b2878148a1cda30f11a4c93a200bcba07bb63548aa571de8d05260c2ef630f9a',
+               'SHA256SUMS.txt':'c7674d1a97b77b66adda12216f7d5e460f86da5cb07fd1d1f02bf3011b99c876'
+              }
+              for name,digest in expected.items():
+                  assert name in a and a[name]['digest']=='sha256:'+digest, f'M3.H frozen asset changed: {name}'
+          print('PASS: latest',r['tag_name'],'Stable; setup, portable, firmware and digests verified; Linux pair policy met.')
+          PY
+
+  test-windows-installer:
+    name: Download actual Setup via Windows user script
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Exercise supported DownloadOnly path, compare real downloaded bytes to release SHA-256
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headers = @{ 'User-Agent' = 'ARStack-Stable-Installer-Smoke'; 'Accept' = 'application/vnd.github+json' }
+          $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/masarray/arstack61850/releases/latest' -Headers $headers
+          if ($release.draft -or $release.prerelease) { throw 'Latest is not public Stable' }
+          $testDir = Join-Path $env:RUNNER_TEMP 'arstack-install-download-smoke'
+          New-Item -Path $testDir -ItemType Directory -Force | Out-Null
+          Push-Location $testDir
+          try {
+            & "$env:GITHUB_WORKSPACE/scripts/install-windows.ps1" -DownloadOnly
+            $setups = @(Get-ChildItem -File -Filter '*setup.exe')
+            if ($setups.Count -ne 1) { throw 'Expected exactly one downloaded Setup EXE' }
+            $asset = @($release.assets | Where-Object { $_.name -eq $setups[0].Name }) | Select-Object -First 1
+            if (-not $asset) { throw 'Wrong Setup EXE selected from release' }
+            if ($asset.digest -notmatch '^sha256:([0-9a-fA-F]{64})$') { throw 'Missing release SHA256 digest' }
+            $expected = $Matches[1].ToLowerInvariant()
+            $actual = (Get-FileHash $setups[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) { throw 'Downloaded installer did not match release digest' }
+            if ($setups[0].Length -ne $asset.size) { throw 'Downloaded Setup EXE size mismatch' }
+            Write-Host "PASS: Windows DownloadOnly installed nothing; verified actual Setup bytes: $($setups[0].Name)"
+          }
+          finally { Pop-Location }
+
+  test-linux-installer:
+    name: Linux published-package / unavailable handling
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run real installer in temporary HOME, assert verified download or helpful unavailable message
+        shell: bash
+        run: |
+          set -euo pipefail
+          temp="$(mktemp -d)"
+          trap 'rm -rf "$temp"' EXIT
+          mkdir -p "$temp/home"
+          curl -fsSL -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/repos/masarray/arstack61850/releases/latest -o "$temp/release.json"
+          if python3 - "$temp/release.json" <<'PY'
+          import json,sys
+          a={x['name'] for x in json.load(open(sys.argv[1]))['assets']}
+          sys.exit(0 if {'ARStack-Studio-linux-x86_64.AppImage','ARStack-Studio-linux-x86_64.sha256'} <= a else 1)
+          PY
+          then
+            HOME="$temp/home" bash ./scripts/install-linux.sh
+            test -x "$temp/home/.local/opt/arstack-studio/ARStackStudio.AppImage"
+            test -L "$temp/home/.local/bin/arstack-studio"
+            echo 'PASS: Linux installation downloaded and verified the publicly released AppImage'
+          else
+            if HOME="$temp/home" bash ./scripts/install-linux.sh >"$temp/linux.log" 2>&1; then
+              echo 'FAIL: Linux script pretended an unavailable AppImage was installed' >&2
+              exit 1
+            fi
+            grep -Fq 'Linux AppImage is not published for the latest release yet.' "$temp/linux.log"
+            test ! -d "$temp/home/.local/opt/arstack-studio"
+            echo 'PASS: No published AppImage: installer fails clearly without creating a fake installation'
+          fi
