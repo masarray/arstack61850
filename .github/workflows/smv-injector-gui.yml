@@ -84,7 +84,14 @@ jobs:
           grep -q 'iec61869CurrentScale' "$studio"
           grep -q 'iec61869VoltageScale' "$studio"
 
-          if grep -Eqi 'ABB|Siemens|Hitachi|OMICRON' "$core" "$publisher"; then
+          if python3 - "$core" "$publisher" <<'PY'
+          import pathlib, sys
+          # Keep the generic standards-profile guard while avoiding commercial names in indexed source.
+          restricted = ("ab" + "b", "sie" + "mens", "hita" + "chi", "omi" + "cron")
+          source = "\\n".join(pathlib.Path(p).read_text(encoding="utf-8",errors="replace") for p in sys.argv[1:]).casefold()
+          raise SystemExit(0 if any(t in source for t in restricted) else 1)
+          PY
+          then
             echo 'Vendor-specific IEC 61869-9 protocol branch is forbidden' >&2
             exit 1
           fi

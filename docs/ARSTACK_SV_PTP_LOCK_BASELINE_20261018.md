@@ -17,4 +17,4 @@ This is strong wire-level evidence for stable local-epoch alignment, **not** a c
 ## Follow-up acceptance
 With GUI Ia=-30°, Ib=-150°, Ic=+90°, capture a new immediately adjacent SV waveform *after* starting with that exact table. Verify the board's per-channel phase_mdeg (e.g. IA=-30000), then compare LS-fitted raw SV instantaneous waveform phase to the requested values. Repeat after STOP/START and reconnect. Verify PTP AUTO local acquisition and smpCnt continuity remain intact.
 
-This baseline intentionally does not claim SIPROTEC 5 lock or IED compatibility without actual subscriber evidence.
+This baseline intentionally does not claim external IED timing lock or IED compatibility without actual subscriber evidence.

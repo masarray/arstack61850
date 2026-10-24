@@ -41,10 +41,10 @@ demotion after one degraded bracket. Hardware bench acceptance is still absent.
 No new operator prompts; source PTP On → SMV Start still operates directly.
 The IEC 61850-9-2 local sync declaration (`smpSynch=1`) is not the same
 as merely sending PTP frames. IEC/IEEE 61850-9-3 defines the applicable
-power-utility PTP profile. The SIPROTEC 5 process-bus manual confirms
+power-utility PTP profile. The reference IED process-bus engineering guide confirms
 `Accepted SmpSynch=1` is an intentional local-source interoperability mode
 when merging unit and relay share a time reference; ARStack contains no
-Siemens-specific wire quirk.
+publisher-specific wire-format workaround.
 
 A **SOURCE-only, explicit hardware-evidence build** can now promote AUTO to
 local `1` only when ALL gates pass: stable PTP SOURCE generation, coherent
@@ -69,7 +69,6 @@ phase accuracy or guarantee zero relay sync alarms.
 
 External specifications:
 - https://standards.ieee.org/ieee/61850-9-3/6167/
-- https://cache.industry.siemens.com/dl/files/460/109742460/att_1135746/v1/SIP5_Processbus_V09.50_Manual_C054-D_en.pdf?download=true
 
 ## M3C.6 — Correct the AUTO local-sync measurement boundary (2026-10-17)
 
@@ -112,8 +111,7 @@ ready; OFF cancels intent and no intent persists across Studio restart.
 Serial log notifications to QML are coalesced at <=10Hz to avoid
 repainting large log documents on every received line.
 
-Reference: Siemens SIPROTEC 5 Process Bus Manual V09.90, client
+Engineering context: reference IED process-bus profile, client
 `Accepted SmpSynch=1` accepts correctly locally synchronized SV when
 the relay and MU share a known reference. This is a **relay setting**,
 not a vendor-specific SV wire variant.
-https://support.industry.siemens.com/cs/attachments/109742460/SIP5_Processbus_V09.90_Manual_C054-H_en.pdf

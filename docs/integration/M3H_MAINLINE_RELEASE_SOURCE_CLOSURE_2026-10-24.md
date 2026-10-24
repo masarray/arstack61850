@@ -65,6 +65,6 @@ Comparison counts are historical (against shipped `a922e9bd...`), not a current 
 - [#287](https://github.com/masarray/arstack61850/issues/287): original v0.1.1 **external** PTP FOLLOW unlock / switch offset troubleshooting, not proven solved by isolated INTERNAL_GM_ONLY M3.H simulation.
 - Existing issue comments on #162, #154, #21, #24, #287 record the exact achieved/not-achieved boundaries.
 
-**Release acceptance:** Valid 40.762934-second local capture: 163,048 4I+4V SV frames, 3999.884 fps, 100% `smpSynch=2`, no missing/duplicate/reorder/malformed in live segment, 44 PTP Announce and 43 each Sync and Follow_Up. Simulator's advertised simulated Global GM metadata is not real GPS/UTC certification. External relay/Omicron/GPS not mandatory for isolated-lab simulator distribution.
+**Release acceptance:** Valid 40.762934-second local capture: 163,048 4I+4V SV frames, 3999.884 fps, 100% `smpSynch=2`, no missing/duplicate/reorder/malformed in live segment, 44 PTP Announce and 43 each Sync and Follow_Up. Simulator's advertised simulated Global GM metadata is not real GPS/UTC certification. External relay/commercial test instrument/GPS not mandatory for isolated-lab simulator distribution.
 
 **Final source mainline status: DONE**. Subsequent application/embedded work must begin from `main` and create a new tested milestone/tag, never silently mutate the immutable M3.H release binary. Public external portfolio deployment was not independently verified, a separate website-surface follow-up rather than a firmware/mainline integration blocker.
