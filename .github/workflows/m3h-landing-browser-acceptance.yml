@@ -1,8 +1,10 @@
-name: M3.H Stable Landing Browser and Mobile Acceptance
+name: ARStack Latest Stable Landing Browser and Mobile Acceptance
 
 on:
   push:
     branches: [main]
+    paths: ['.github/workflows/m3h-landing-browser-acceptance.yml']
+  pull_request:
     paths: ['.github/workflows/m3h-landing-browser-acceptance.yml']
   workflow_dispatch:
 
@@ -38,20 +40,22 @@ jobs:
               const response=await page.goto('https://masarray.github.io/arstack61850/',{waitUntil:'domcontentloaded',timeout:30000});
               if(response.status()!==200)throw new Error('LIVE_HTTP_'+response.status());
               const data=await page.evaluate(()=>{
-                const buttons=[...document.querySelectorAll('a[href*="setup.exe"],a[href*="portable.zip"],a[href*="firmware.bin"]')];
+                const buttons=[...document.querySelectorAll('a[data-asset="windows"],a[data-asset="portable"],a[data-asset="firmware"]')];
+                const releaseLink=/^https:\/\/github\.com\/masarray\/arstack61850\/releases\/(latest|download\/[^/]+\/[^/]+)$/;
                 return {title:document.title, width:document.documentElement.clientWidth,scroll:document.documentElement.scrollWidth,
-                  stable:document.body.textContent.includes('Public Stable'),build:document.body.textContent.includes('a922e9bdba4e57a4'), bodyPreview:document.body.textContent.slice(0,170),
-                  buttons:buttons.length, anyVisible:buttons.some(el=>{const r=el.getBoundingClientRect();return r.width>0&&r.height>0}),
+                  latest:document.body.textContent.includes('Latest'),benchmark:document.body.textContent.includes('163,048') && document.body.textContent.includes('M3.H'), bodyPreview:document.body.textContent.slice(0,170),
+                  buttons:buttons.length, linksValid:buttons.every(el=>releaseLink.test(el.href)), anyVisible:buttons.some(el=>{const r=el.getBoundingClientRect();return r.width>0&&r.height>0}),
+                  linuxReady:!!document.querySelector('[data-asset="linux"]'),
                   og:!!document.querySelector('meta[property="og:title"]')};
               });
               console.log(width,JSON.stringify(data));
               await page.screenshot({path:'evidence/m3h-'+width+'.png',fullPage:true});
-              if(!data.stable||!data.build||!data.og||data.buttons<3||!data.anyVisible)throw new Error('MISSING_LANDING_CONTENT_'+width);
+              if(!data.latest||!data.benchmark||!data.og||data.buttons!==4||!data.anyVisible||!data.linksValid||!data.linuxReady)throw new Error('MISSING_LATEST_RELEASE_LINKS_'+width);
               if(data.scroll>data.width+2)throw new Error('HORIZONTAL_OVERFLOW_'+width+':'+data.scroll+'>'+data.width);
               await page.close();
             }
             await browser.close();
-            console.log('PASS: LIVE desktop/tablet/mobile browsers without horizontal overflow');
+            console.log('PASS: latest-release UI links and desktop/tablet/mobile layouts');
           })().catch(e=>{console.error(e);process.exit(1)});
           JS
           node /tmp/m3h-browser/check.cjs
@@ -60,6 +64,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: m3h-public-stable-responsive-screenshots
+          name: arstack-latest-responsive-screenshots
           path: evidence/
           if-no-files-found: ignore
