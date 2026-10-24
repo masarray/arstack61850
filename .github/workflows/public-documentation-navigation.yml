@@ -1,0 +1,40 @@
+name: Public Documentation Navigation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'README.md'
+      - 'CONTRIBUTING.md'
+      - 'SECURITY.md'
+      - 'SUPPORT.md'
+      - 'docs/**'
+      - 'apps/arstack_studio/README.md'
+      - 'index.html'
+      - 'scripts/check_public_navigation.py'
+      - '.github/workflows/public-documentation-navigation.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'README.md'
+      - 'CONTRIBUTING.md'
+      - 'SECURITY.md'
+      - 'SUPPORT.md'
+      - 'docs/**'
+      - 'apps/arstack_studio/README.md'
+      - 'index.html'
+      - 'scripts/check_public_navigation.py'
+      - '.github/workflows/public-documentation-navigation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-public-navigation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate public Markdown links and product page anchors
+        run: python3 scripts/check_public_navigation.py
