@@ -193,8 +193,30 @@ void DeviceIoWorker::refreshPortsInternal(const bool forceSignal) {
     ports_ = std::move(discovered);
     recommendedPort_ = recommended;
     highConfidenceCount_ = highConfidence.size();
-    if (forceSignal || changed) {
+    if (forceSignal || changed)
         emit portsObserved(activeGeneration_, ports_, recommendedPort_, highConfidenceCount_);
+
+    // Windows USB bridges can keep QSerialPort::isOpen() true after removal.
+    // Reuse the existing 750-ms enumeration; do not poll the board or PTP.
+    // Confirm two consecutive missing OS snapshots before retiring COM.
+    if (serial_ == nullptr || !serial_->isOpen() || !identityConfirmed_) {
+        consecutiveMissingPortPolls_ = 0;
+        return;
+    }
+    const QString ownedPort = serial_->portName().trimmed();
+    if (!ownedPort.isEmpty() && ports_.contains(ownedPort, Qt::CaseInsensitive)) {
+        consecutiveMissingPortPolls_ = 0;
+        return;
+    }
+    if (consecutiveMissingPortPolls_ < missingPortConfirmationPolls())
+        ++consecutiveMissingPortPolls_;
+    if (verifiedPortPhysicallyGone(
+            serial_->isOpen(), identityConfirmed_, consecutiveMissingPortPolls_)) {
+        // Only release the stale serial transport. NEVER issue SV/PTP STOP,
+        // firmware reset, or START based on USB enumeration.
+        handleSerialFailure(QStringLiteral(
+            "Verified USB serial port %1 vanished; releasing stale COM handle for rediscovery.")
+            .arg(ownedPort));
     }
 }
 
@@ -248,6 +270,7 @@ bool DeviceIoWorker::openPortInternal(const QString& portName, const bool automa
     automaticConnection_ = automatic;
     identityConfirmed_ = false;
     identifyAttempts_ = 0;
+    consecutiveMissingPortPolls_ = 0;
     pendingRx_.clear();
     if (writeGapTimer_ != nullptr) writeGapTimer_->stop();
     commandQueue_.clear();
@@ -300,6 +323,7 @@ void DeviceIoWorker::closePortInternal(const bool emitRelease) {
     heartbeatPending_ = false;
     identityConfirmed_ = false;
     identifyAttempts_ = 0;
+    consecutiveMissingPortPolls_ = 0;
     pendingRx_.clear();
     commandQueue_.clear();
     ptpStopPending_ = false;
@@ -353,6 +377,7 @@ void DeviceIoWorker::finishIdentificationTimeout() {
 void DeviceIoWorker::confirmIdentity(const quint64 generation) {
     if (serial_ == nullptr || !serial_->isOpen() || generation != activeGeneration_) return;
     identityConfirmed_ = true;
+    consecutiveMissingPortPolls_ = 0;
     automaticConnection_ = false;
     genericProbeActive_ = false;
     probeQueue_.clear();
