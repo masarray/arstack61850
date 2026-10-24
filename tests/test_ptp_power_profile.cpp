@@ -87,6 +87,49 @@ void check_source_readiness_requires_fresh_wire_proof() {
     REQUIRE(!gate.ready());
 }
 
+void check_ptp_positive_evidence_retains_clock_across_isolated_tx_faults() {
+    using Continuity = PtpSourceEvidenceContinuity;
+    using Fresh = PtpSourceEvidenceFreshness;
+    PtpSourceReadinessGate cold;
+    cold.observe_announce(true);
+    REQUIRE(!Continuity::ready(cold.ready(), false, true, true, false));
+    cold.observe_sync_pair(true);
+    REQUIRE(Continuity::ready(cold.ready(), false, true, true, false));
+
+    // Physical PCAP regression: an internal SOURCE continues sending 1-Hz
+    // Announce/Sync/Follow_Up, but a failed peripheral TX status briefly
+    // invalidates the cold gate. The actual GM timebase has NOT changed.
+    constexpr std::int64_t kLastAnnounceUs = 6000000;
+    constexpr std::int64_t kLastSyncPairUs = 6000050;
+    constexpr std::int64_t kFreshnessUs = 3000000;
+    cold.observe_peer_delay(false);
+    REQUIRE(!cold.ready());
+    for (std::int64_t now = 6000100; now < 8000000; now += 250000) {
+        const bool recent = Fresh::fresh(
+            now, kLastAnnounceUs, kLastSyncPairUs, kFreshnessUs);
+        REQUIRE(recent);
+        REQUIRE(Continuity::ready(cold.ready(), true, recent, true, false));
+    }
+    // Never give an unqualified COLD board credit for previous TX.
+    REQUIRE(!Continuity::ready(false, false, true, true, false));
+    // The finite freshness budget must eventually expire.
+    REQUIRE(!Continuity::ready(
+        false, true, Fresh::fresh(9000100, kLastAnnounceUs,
+                                  kLastSyncPairUs, kFreshnessUs), true, false));
+    // Real physical termination, GM reset, link loss or STOP fail closed
+    // instantly, even while the last successful frames remain fresh.
+    REQUIRE(!Continuity::ready(true, true, true, false, false));
+    REQUIRE(!Continuity::ready(true, true, true, true, true));
+    REQUIRE(!Continuity::ready(true, true, false, true, false));
+    // Requalification after actual source outage requires both fresh packets.
+    cold.invalidate();
+    REQUIRE(!Continuity::ready(cold.ready(), false, true, true, false));
+    cold.observe_announce(true);
+    REQUIRE(!Continuity::ready(cold.ready(), false, true, true, false));
+    cold.observe_sync_pair(true);
+    REQUIRE(Continuity::ready(cold.ready(), false, true, true, false));
+}
+
 void check_source_heartbeat_freshness_and_time_provenance() {
     // A late task or absent Announce must revoke READY without waiting for
     // another SOURCE loop. A clock going backward is never healthy.
@@ -353,6 +396,7 @@ int main() {
     try {
         check_defaults_and_reject_nonstandard_cadence();
         check_source_readiness_requires_fresh_wire_proof();
+        check_ptp_positive_evidence_retains_clock_across_isolated_tx_faults();
         check_source_heartbeat_freshness_and_time_provenance();
         check_ptp_wire_sequence_and_identity();
         check_simulated_global_gm_ptp_wire_properties();
