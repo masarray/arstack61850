@@ -158,12 +158,16 @@ jobs:
           # M3.B must really be linked into the exact shipped ESP32-P4 binary.
           # A disabled dependency would otherwise silently negate sdkconfig.defaults.
           grep -qx 'CONFIG_AR_PTP_BOOT_SOURCE_AUTOSTART=y' sdkconfig
+          # A LOCAL default can pass phase/MAC gates but the relay requires
+          # globally synchronized samples. Never ship a preview where the
+          # isolated lab Global GM boot option silently compiled out.
+          grep -qx 'CONFIG_AR_PTP_BOOT_SIMULATED_GLOBAL_GM=y' sdkconfig
           grep -qx 'CONFIG_AR_PTP_AUTO_PREFER_EXTERNAL=y' sdkconfig
           grep -qx 'CONFIG_AR_PTP_AUTO_LOCAL_FALLBACK=y' sdkconfig
           grep -qx 'CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL=y' sdkconfig
           grep -qx '# CONFIG_AR_SMV_BROADCAST_MIRROR is not set' sdkconfig
           grep -qx 'CONFIG_AR_PTP_OPERATING_ROLE=0' sdkconfig
-          echo 'SOURCE local AUTO preview: servo ON; canonical MAC TX evidence ON; mirror OFF'
+          echo 'SOURCE simulated Global GM preview: PTP autostart ON; servo ON; canonical MAC TX evidence ON; mirror OFF'
 
       - name: Verify P0 pre-v3 silicon policy
         run: |
@@ -259,7 +263,9 @@ jobs:
           servo = 'CONFIG_AR_SMV_PTP_PHASE_SERVO_EXPERIMENTAL=y' in cfg
           mac_evidence = 'CONFIG_AR_SMV_HW_TX_EVIDENCE_EXPERIMENTAL=y' in cfg
           no_mirror = '# CONFIG_AR_SMV_BROADCAST_MIRROR is not set' in cfg
-          candidate = servo and mac_evidence and no_mirror
+          gm_boot = 'CONFIG_AR_PTP_BOOT_SIMULATED_GLOBAL_GM=y' in cfg
+          source_boot = 'CONFIG_AR_PTP_BOOT_SOURCE_AUTOSTART=y' in cfg
+          candidate = servo and mac_evidence and no_mirror and gm_boot and source_boot
           if not re.fullmatch(r"[0-9a-f]{40}", source_commit):
               raise SystemExit("Firmware source SHA unavailable/invalid; refusing a zero-provenance package")
           manifest = {
@@ -277,6 +283,9 @@ jobs:
               "sourceCommit": source_commit,
               "buildId": source_commit[:16],
               "phaseSyncPreview": candidate,
+              "bootSimulatedGlobalGmEnabled": gm_boot,
+              "bootSourceAutostartEnabled": source_boot,
+              "globalGmTraceabilityPhysicallyProven": False,
               "phaseServoEnabled": servo,
               "canonicalMacTxEvidenceEnabled": mac_evidence,
               "broadcastMirrorEnabled": not no_mirror,
