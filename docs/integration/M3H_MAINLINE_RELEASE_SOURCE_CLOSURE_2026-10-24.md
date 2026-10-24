@@ -41,7 +41,7 @@ Comparison counts are historical (against shipped `a922e9bd...`), not a current 
 
 **Current PR queue:** exactly **8 unrelated Workbench, Browser, IED Simulator PRs** remain open. They belong to different product tracks and were not altered by M3.H SMV cleanup.
 
-**Safety CI:** the old automatic write-capable M3.H source-reconciliation workflow must be retired after merge. A read-only provenance guard checks source/tag ancestry, runtime parity and all five immutable release asset digests; it must never create a merge branch or publish binaries.
+**Safety CI:** [PR #302](https://github.com/masarray/arstack61850/pull/302) merged a strictly read-only source/tag provenance guard after 3/3 PR checks PASS; its [main run](https://github.com/masarray/arstack61850/actions/runs/40079885038) is also SUCCESS. The guard verifies that the tested source and official release tag are ancestors of main, that the **immutable tag** contains the accepted runtime implementation, and that all five asset IDs/sizes/SHA-256 still match. This gate intentionally does **not** freeze future mainline source development. The former write-capable *one-time* release-promotion workflow is retired after Stable publication, so it cannot silently change latest-release metadata or re-promote M3.H when a newer release exists.
 
 ## Issues kept OPEN on purpose — different acceptance targets
 
