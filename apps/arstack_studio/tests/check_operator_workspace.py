@@ -797,8 +797,9 @@ def main() -> None:
             and "consecutiveMissingPortPolls_" in scan
             and "presencePollIntervalMs() noexcept { return 750; }" in io_header
             and "missingPortConfirmationPolls() noexcept { return 2; }" in io_header
-            and "PTP STOP" not in scan
-            and "SV STOP" not in scan.replace("// NEVER issue SV/PTP STOP,", "")
+            and "queuePriorityPtpStop(" not in scan
+            and "queuePrioritySvStop(" not in scan
+            and "enqueueCommandsInternal(" not in scan
             and "setHeartbeatEnabled(" not in scan,
             "USB disappearance must retire only stale COM with bounded presence hysteresis")
     require("hasNewlyEnumeratedPort(lastEnumeratedPorts_, nowVisible)" in session_cpp
