@@ -111,10 +111,13 @@ jobs:
           }
           $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
           if ($manifest.phaseSyncPreview -ne $true -or
+              $manifest.bootSimulatedGlobalGmEnabled -ne $true -or
+              $manifest.bootSourceAutostartEnabled -ne $true -or
+              $manifest.globalGmTraceabilityPhysicallyProven -ne $false -or
               $manifest.phaseServoEnabled -ne $true -or
               $manifest.canonicalMacTxEvidenceEnabled -ne $true -or
               $manifest.broadcastMirrorEnabled -ne $false) {
-            throw 'Studio preview refuses old/default SMV firmware without measured PTP-SV phase and MAC TX evidence'
+            throw 'FAT preview requires simulated Global GM BOOT + PTP-source autostart + measured SV phase/MAC evidence, never LOCAL-only firmware'
           }
           $expectedCapabilities = @('SMV-4I4V', 'PROFILE', 'PROFILE-BINARY-V1', 'LIVE-SETPOINTS', 'SESSION-LEASE', 'PTP-P2', 'SMPSYNCH-AUTO')
           foreach ($capability in $expectedCapabilities) {
