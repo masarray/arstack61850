@@ -5,7 +5,7 @@
 ## 1. Do not destroy the current working progress
 
 - **Latest untouched user-test baseline:** [PR #285](https://github.com/masarray/arstack61850/pull/285), branch \`feat/sv-ed21-rate-metadata-20261022\`, exact HEAD \`88575b874f35827afa54c86f294e11a798f6b8ae\`. The user was testing this code on real ESP32-P4 hardware while preservation audit was performed. Never rewrite/force-push this branch, confuse an old release with this build, or switch their currently installed firmware without matching SHA.
-- **Consolidation working branch:** [PR #286](https://github.com/masarray/arstack61850/pull/286), \`feat/ptp-source-policy-fsm-20261022\` stacked on #285. It is intentionally **DRAFT**. First two code commits \`78d0368753a7f88f076526ce9b2d67723caaa1f3\` and \`fecefbd21f6a8ebb9085ec72dff05fd5a1fc3a2b\` contain a pure portable \`PtpSourcePolicyMachine\` with deterministic unit tests. **No actual ESP32 failover actuator, no Studio mode control, no external source pinning, no proven SIPROTEC FAT**. Later commits on #286 are audit documentation/tooling only.
+- **Consolidation working branch:** [PR #286](https://github.com/masarray/arstack61850/pull/286), \`feat/ptp-source-policy-fsm-20261022\` stacked on #285. It is intentionally **DRAFT**. First two code commits \`78d0368753a7f88f076526ce9b2d67723caaa1f3\` and \`fecefbd21f6a8ebb9085ec72dff05fd5a1fc3a2b\` contain a pure portable \`PtpSourcePolicyMachine\` with deterministic unit tests. **No actual ESP32 failover actuator, no Studio mode control, no external source pinning, no proven external IED factory acceptance**. Later commits on #286 are audit documentation/tooling only.
 - **Main frozen for this task:** at audit start \`7f6b946cab8565f37c31b460463576a0bb1e3fc5\`. Branch API showed \`protected=false\`, no repository rulesets; the connector could not read branch protection detail (403). **No merges into main; do not assume main is protected.**
 - **No original PR has been closed, merged or deleted by this audit.** The source SHAs remain linked in the preserved manifest. A GitHub branch may be moved by another actor, which is why the exact 40-character SHA matters.
 
@@ -58,7 +58,7 @@ Special attention:
 
 **PTP source intent:** \`INTERNAL_GM\`, \`EXTERNAL_FOLLOWER\`, guarded opt-in \`AUTO_FAILOVER\`; #286 has portable policy logic only. Must connect to ESP32 PTP mode facade/receiver, exclusive EMAC role ownership and SV pause/re-arm at measured second boundary, exact selected external clock identity, guarded failure and restoration; then wire truthful Studio control. Do not imply that AUTO_FAILOVER currently works physically.
 
-**Hardware gate:** physical ESP32-P4 ↔ SIPROTEC isolation, Pdelay request/response, actual relay lock status, no false GNSS traceability claim, 4I4V subscription and measurements, 50/60Hz \`smpRate/smpMod\`, loss and return of external GM, 20 START/STOP cycles, continuous 4kHz capture, stop/recovery causes, matching tested firmware EXE hash.
+**Hardware gate:** physical ESP32-P4 ↔ reference IED isolation, Pdelay request/response, actual relay lock status, no false GNSS traceability claim, 4I4V subscription and measurements, 50/60Hz \`smpRate/smpMod\`, loss and return of external GM, 20 START/STOP cycles, continuous 4kHz capture, stop/recovery causes, matching tested firmware EXE hash.
 
 ## 6. Exact operating procedure in the next thread
 
