@@ -40,14 +40,14 @@ jobs:
               const data=await page.evaluate(()=>{
                 const buttons=[...document.querySelectorAll('a[href*="setup.exe"],a[href*="portable.zip"],a[href*="firmware.bin"]')];
                 return {title:document.title, width:document.documentElement.clientWidth,scroll:document.documentElement.scrollWidth,
-                  stable:document.body.innerText.includes('Public Stable'),build:document.body.innerText.includes('a922e9bdba4e57a4'),
+                  stable:document.body.textContent.includes('Public Stable'),build:document.body.textContent.includes('a922e9bdba4e57a4'), bodyPreview:document.body.textContent.slice(0,170),
                   buttons:buttons.length, anyVisible:buttons.some(el=>{const r=el.getBoundingClientRect();return r.width>0&&r.height>0}),
                   og:!!document.querySelector('meta[property="og:title"]')};
               });
               console.log(width,JSON.stringify(data));
+              await page.screenshot({path:'evidence/m3h-'+width+'.png',fullPage:true});
               if(!data.stable||!data.build||!data.og||data.buttons<3||!data.anyVisible)throw new Error('MISSING_LANDING_CONTENT_'+width);
               if(data.scroll>data.width+2)throw new Error('HORIZONTAL_OVERFLOW_'+width+':'+data.scroll+'>'+data.width);
-              await page.screenshot({path:'evidence/m3h-'+width+'.png',fullPage:true});
               await page.close();
             }
             await browser.close();
