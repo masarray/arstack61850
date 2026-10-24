@@ -49,8 +49,13 @@ jobs:
           Remove-Item Env:QT_QUICK_BACKEND -ErrorAction SilentlyContinue
           $exe = Join-Path $PWD 'build-arstack-studio/Release/arstack_studio.exe'
           if (-not (Test-Path $exe)) { throw 'Actual compiled Qt desktop executable missing' }
-          & $exe --check-operator-ui
-          if ($LASTEXITCODE -ne 0) { throw "Native Qt screenshot acceptance failed ($LASTEXITCODE)" }
+          $stdout = Join-Path $env:ARSTACK_STUDIO_QA_DIR 'native-stdout.txt'
+          $stderr = Join-Path $env:ARSTACK_STUDIO_QA_DIR 'native-stderr.txt'
+          $probe = Start-Process -FilePath $exe -ArgumentList '--check-operator-ui' -Wait -PassThru `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          Get-Content $stdout -ErrorAction SilentlyContinue
+          Get-Content $stderr -ErrorAction SilentlyContinue
+          if ($probe.ExitCode -ne 0) { throw "Native Qt screenshot acceptance failed ($($probe.ExitCode))" }
           $png = Join-Path $env:ARSTACK_STUDIO_QA_DIR 'studio-960x680.png'
           if (-not (Test-Path $png) -or (Get-Item $png).Length -lt 15000) { throw 'Native screenshot missing or implausibly small' }
           Add-Type -AssemblyName System.Drawing
