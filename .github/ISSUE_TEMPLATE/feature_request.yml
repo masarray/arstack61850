@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest an IEC 61850 engineering workflow or improvement
+title: "Feature: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Engineering problem
+      description: What task cannot be done reliably or simply today?
+      placeholder: "In my IEC 61850 lab, I need to..."
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Proposed user experience
+      description: Describe the desired workflow without specifying a vendor-specific implementation
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: How can it be tested?
+      description: Suggested pass/fail criteria, reproducible fixtures and whether physical hardware is required
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context (optional)
+      description: Standards, constraints, sketches or sanitized example files
