@@ -305,6 +305,17 @@ struct SvAutoPreflightPolicy final {
             faults_unchanged && (injecting || preflight);
     }
 
+    // Servo authority is the owned GPTimer + PTP clock lease, NOT a
+    // transient publisher RUNNING/preflight flag. They can both be false
+    // during a legitimate STOP->PARK handoff with a continuous 1-Hz clock.
+    [[nodiscard]] static constexpr bool can_steer_owned_grid(
+        const bool session_valid, const bool phase_accepted,
+        const bool lease_valid, const bool faults_unchanged,
+        const bool owned_timer_phase_enabled, const bool auto_sync_mode) noexcept {
+        return session_valid && phase_accepted && lease_valid &&
+            faults_unchanged && owned_timer_phase_enabled && auto_sync_mode;
+    }
+
     [[nodiscard]] static constexpr bool can_advertise_local(
         const bool injecting, const bool descriptor_qualified) noexcept {
         return injecting && descriptor_qualified;
