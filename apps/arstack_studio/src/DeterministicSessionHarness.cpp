@@ -37,6 +37,7 @@ public:
             {"firmware build mismatch explains expected and observed IDs", reconnectBuildMismatchPreservesEvidence()},
             {"fragmented espflash progress -> monotonic", fragmentedEspflashProgressIsMonotonic()},
             {"verified COM hint falls back without bypassing identity", verifiedComOrderingPreservesFallback()},
+            {"reconnect focuses verified USB, never blind Bluetooth COM sweeps", fastPhysicalUsbCandidateSelection()},
             {"automatic IDENTIFY timeout never implies missing firmware", automaticIdentityTimeoutOffersFirmwareRecovery()},
             {"single COM semantic timeout stays unverified", singleVisibleTimeoutWithoutRecommendationOffersFirmwareRecovery()},
             {"ambiguous identity timeout -> UNIDENTIFIED", ambiguousIdentityTimeoutStaysUnidentified()},
@@ -456,6 +457,35 @@ private:
                    visible, QString{}, QString{}) == visible &&
                DeviceIoWorker::identityMaxAttempts() >= 5 &&
                DeviceIoWorker::identityRetryIntervalMs() >= 1000;
+    }
+
+    static bool fastPhysicalUsbCandidateSelection() {
+        const QStringList allPorts{
+            QStringLiteral("COM3"), QStringLiteral("COM9"),
+            QStringLiteral("COM15"), QStringLiteral("COM24")};
+        const QStringList trustedPhysical{QStringLiteral("COM15")};
+        const QStringList realOnly{QStringLiteral("COM15")};
+        // Restore within one semantic timeout rather than chasing several
+        // unrelated generic/virtual ports for 5 * 1100ms EACH.
+        return DeviceIoWorker::focusedAutomaticPorts(
+                   allPorts, trustedPhysical,
+                   QStringLiteral("COM15"), QStringLiteral("COM15")) == realOnly &&
+               DeviceIoWorker::focusedAutomaticPorts(
+                   allPorts, trustedPhysical,
+                   QStringLiteral("COM99"), QStringLiteral("COM15")) == realOnly &&
+               DeviceIoWorker::focusedAutomaticPorts(
+                   allPorts, QStringList{},
+                   QStringLiteral("COM15"), QString{}) == realOnly &&
+               // Initial setup without USB metadata is still supported.
+               DeviceIoWorker::focusedAutomaticPorts(
+                   allPorts, QStringList{}, QString{}, QString{}) == allPorts &&
+               // Multiple physically plausible devices require *real*
+               // IDENTIFY of each, ordered by verified identity.
+               DeviceIoWorker::focusedAutomaticPorts(
+                   allPorts,
+                   QStringList{QStringLiteral("COM9"), QStringLiteral("COM15")},
+                   QStringLiteral("COM15"), QStringLiteral("COM9")) ==
+                   QStringList{QStringLiteral("COM15"), QStringLiteral("COM9")};
     }
 
     static bool automaticIdentityTimeoutOffersFirmwareRecovery() {
