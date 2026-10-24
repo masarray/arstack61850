@@ -4,6 +4,8 @@
 
 Generate IEC 61850 Sampled Values and emulate PTP synchronization using **ARStack Studio and ESP32-P4 Ethernet hardware**. This edition combines a 4-current + 4-voltage SV publisher, internal laboratory PTP grandmaster simulation, and hardware-assisted phase synchronization.
 
+![ARStack Studio 4I+4V workspace and waveforms](../../assets/screenshots/arstack-studio-windows.png)
+
 ## What's new
 
 - **SV + PTP in one lab setup** — real Ethernet SV at 4,000 frames/s alongside Layer-2 PTP Announce, Sync and Follow_Up.

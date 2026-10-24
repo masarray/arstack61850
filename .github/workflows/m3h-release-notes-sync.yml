@@ -1,0 +1,107 @@
+name: Synchronize M3.H Public Release Notes
+
+on:
+  pull_request:
+    paths:
+      - 'docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md'
+      - 'scripts/render_m3h_release_notes.py'
+      - '.github/workflows/m3h-release-notes-sync.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md'
+      - 'scripts/render_m3h_release_notes.py'
+      - '.github/workflows/m3h-release-notes-sync.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: m3h-public-release-notes-sync
+  cancel-in-progress: false
+
+jobs:
+  validate-notes:
+    name: Validate product release copy and links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render release notes from canonical public documentation
+        run: |
+          python3 scripts/render_m3h_release_notes.py /tmp/m3h-release-notes.md
+          grep -Fq 'ARStack Process Bus Simulator M3.H' /tmp/m3h-release-notes.md
+          grep -Fq 'raw.githubusercontent.com/masarray/arstack61850/main/assets/screenshots/arstack-studio-windows.png' /tmp/m3h-release-notes.md
+
+  update-existing-release-description:
+    name: Refresh M3.H release description only
+    needs: validate-notes
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: processbus-sim-m3h-20261024
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render existing stable release description
+        run: python3 scripts/render_m3h_release_notes.py /tmp/m3h-release-notes.md
+
+      - name: Verify release and snapshot immutable assets
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > /tmp/m3h-before.json
+          python3 - <<'PY'
+          import json
+          r=json.load(open("/tmp/m3h-before.json"))
+          assert r["tag_name"]=="processbus-sim-m3h-20261024" and not r["draft"] and not r["prerelease"], "Expected existing public stable M3.H release"
+          expected={
+            "ARStack-ESP32P4-ProcessBus-M3H-firmware.bin",
+            "ARStack-ProcessBus-M3H-win-x64-portable.zip",
+            "ARStack-ProcessBus-M3H-win-x64-setup.exe",
+            "firmware-manifest.json",
+            "SHA256SUMS.txt",
+          }
+          actual={a["name"] for a in r["assets"]}
+          assert actual==expected, f"Release asset inventory changed: {actual ^ expected}"
+          print("PASS: verified existing stable tag and exact five assets")
+          PY
+
+      - name: Update descriptive release notes if changed
+        id: check
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os
+          previous=json.load(open("/tmp/m3h-before.json"))
+          desired=open("/tmp/m3h-release-notes.md", encoding="utf-8").read()
+          changed=previous.get("body","").strip()!=desired.strip()
+          with open(os.environ["GITHUB_OUTPUT"],"a") as out:
+              out.write(f"changed={'true' if changed else 'false'}\n")
+          print("Release description update required:", changed)
+          PY
+
+      - name: Synchronize only existing release description
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --notes-file /tmp/m3h-release-notes.md
+
+      - name: Verify description and asset identities unchanged
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > /tmp/m3h-after.json
+          python3 - <<'PY'
+          import json
+          before=json.load(open("/tmp/m3h-before.json"))
+          after=json.load(open("/tmp/m3h-after.json"))
+          desired=open("/tmp/m3h-release-notes.md", encoding="utf-8").read()
+          assert after.get("body","").strip()==desired.strip(), "Release notes did not match source"
+          for key in ("id", "tag_name", "target_commitish", "draft", "prerelease", "published_at"):
+              assert before[key]==after[key], f"Unexpected release field change: {key}"
+          def assets(r):
+              return sorted((a["id"], a["name"], a["size"], a.get("digest")) for a in r["assets"])
+          assert assets(before)==assets(after), "Release assets changed unexpectedly"
+          print("PASS: release description synchronized, tag and assets preserved")
+          PY
