@@ -1,7 +1,7 @@
-# M3.H Source Integration Audit — 24 October 2026
+# M3.H Source Integration Audit — Integrated into Main (24 October 2026)
 
 **Release state:** PUBLIC STABLE *Lab Simulator* at [processbus-sim-m3h-20261024](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h-20261024).
-**Source merge state:** NOT INTEGRATED into `main`. Release status must not be confused with source integration.
+**Source merge state (final):** **INTEGRATED into `main` through [PR #299](https://github.com/masarray/arstack61850/pull/299)**, merge commit `ad2ebd0e7696dcbc389f1241fedbec5ecf504881`. The verified source `a922e9bd...` and public release tag commit `a4b6e53d...` are both ancestors of main (`behind=0` for each). **14/14 exact integration HEAD `c90a979...` CI workflows SUCCESS.** The code files were checked byte-identical against firmware/Studio source baseline; all post-fork main file blobs were preserved.
 
 ## Immutable shipped baseline
 
@@ -15,18 +15,18 @@
 
 | PR | Branch head (verified) | Base branch | Scope | Merge status |
 | --- | --- | --- | --- | --- |
-| [#295](https://github.com/masarray/arstack61850/pull/295) | `a0a2a4350dadacacd73120e83e3fc3b13f42edd8` | `feat/m3d-ptp-advanced-policy-diagnostics-20261024` | simulated Global GM on boot/fallback and warm SV resume | OPEN / DRAFT / NOT merged |
-| [#296](https://github.com/masarray/arstack61850/pull/296) | `34b26147ea19bd31153ced9eafba1f019151fb4f` | `fix/m3d-preserve-fresh-bench-gm-seed-20261024` (#295) | parked 4kHz clock and PTP lease/phase authority | OPEN / DRAFT / NOT merged |
-| [#297](https://github.com/masarray/arstack61850/pull/297) | `a8ca25293311575d170d1f9ef1cd3aa388a8c002` | `fix/m3e-continuous-sv-clock-authority-20261024` (#296) | Studio USB/COM lifecycle/hysteresis, safe rediscovery | OPEN / DRAFT / NOT merged |
-| [#298](https://github.com/masarray/arstack61850/pull/298) | `a922e9bdba4e57a4e88406eb83344455dd8ff142` | `fix/m3f-usb-hotplug-session-recovery-20261024` (#297) | PTP source readiness continuity and SV sync flutter regression | OPEN / DRAFT / NOT merged |
+| [#295](https://github.com/masarray/arstack61850/pull/295) | `a0a2a4350dadacacd73120e83e3fc3b13f42edd8` | `feat/m3d-ptp-advanced-policy-diagnostics-20261024` | simulated Global GM on boot/fallback and warm SV resume | CLOSED / HEAD integrated through #299 |
+| [#296](https://github.com/masarray/arstack61850/pull/296) | `34b26147ea19bd31153ced9eafba1f019151fb4f` | `fix/m3d-preserve-fresh-bench-gm-seed-20261024` (#295) | parked 4kHz clock and PTP lease/phase authority | CLOSED / HEAD integrated through #299 |
+| [#297](https://github.com/masarray/arstack61850/pull/297) | `a8ca25293311575d170d1f9ef1cd3aa388a8c002` | `fix/m3e-continuous-sv-clock-authority-20261024` (#296) | Studio USB/COM lifecycle/hysteresis, safe rediscovery | CLOSED / HEAD integrated through #299 |
+| [#298](https://github.com/masarray/arstack61850/pull/298) | `a922e9bdba4e57a4e88406eb83344455dd8ff142` | `fix/m3f-usb-hotplug-session-recovery-20261024` (#297) | PTP source readiness continuity and SV sync flutter regression | CLOSED / HEAD integrated through #299 |
 
 GitHub compare of successive PR heads: #295 → #296 is ahead by 20 commits / 8 changed files; #296 → #297 is ahead by 14 commits / 9 files; #297 → #298 is ahead by 10 commits / 7 files. This is a **stack**, not four independent patches. Review submissions on #295–#297 were COMMENTED, not approval evidence; #298 has no submitted reviews at audit time.
 
-At this audit, `main...`tested head `a922e9bd...` is **DIVERGED: 636 commits ahead and 14 commits behind main, 142 compared files** (the counts are directional from `main` to the M3.H source head). These are NOT safe merge-ready delta sizes. Verify freshly before any future integration because `main` can advance.
+Historical before integration, `main...`tested head `a922e9bd...` was **DIVERGED: 636 commits ahead and 14 commits behind main, 142 compared files** (the counts are directional from `main` to the M3.H source head). These are NOT safe merge-ready delta sizes. Verify freshly before any future integration because `main` can advance.
 
-## Integration safety decision
+## Integration safety decision (satisfied through the guarded integration)
 
-**DO NOT merge #295–#298 into `main` as a batch, squash all historical branches, or force-update the released baseline.** Reasons: long ancestry from earlier #288/#290/#291/#292/#293 branches, large historical code surface, and independent post-release documentation commits on `main`. A green PR mergeability flag is not sufficient risk acceptance.
+**Resolved via guarded integration PR #299:** no stack-by-stack blind merging, squash or force-push was used. GitHub Actions generated a two-parent merge with the exact tested source, verified all implementation files against the baseline, preserved every main-changed blob, then recorded release-tag ancestry with no tree change. The exact final candidate passed 14/14 workflows before GitHub's ordinary merge-commit operation. Branches #290–#293 and #295–#298 were then closed as already contained in main, with individually verified Git ancestry. Divergent #289/#294/#284 were NOT silently merged.
 
 1. Preserve tagged shipped source + manifests + five immutable assets. Stable M3.H **public lab simulator** does not require GPS/Omicron/relay/IEC certification to be shipped.
 2. In a separate integration worktree/branch based on current `main`, identify only required M3.H product source changes and their prerequisites. Reconcile the existing Workbench/Browser and other `main` work before applying deltas; do not manufacture a merge commit claiming acceptance.
@@ -38,5 +38,5 @@ At this audit, `main...`tested head `a922e9bd...` is **DIVERGED: 636 commits ahe
 ## Publication vs integration checkpoints
 
 - **Publication:** GitHub Stable promotion **DONE**, source README and release notes synced, site/portfolio source wording synced.
-- **Integration:** PR #295–#298 **OPEN DRAFT** intentionally; reconciliation/merge **NOT DONE**. This is a separate development track and does not invalidate the reproducible M3.H lab simulator binary.
+- **Integration:** **DONE** in [#299](https://github.com/masarray/arstack61850/pull/299). The eight ancestor PRs #290–#293/#295–#298 were **CLOSED with linked ancestry evidence**; closure does not falsely mark them as separately merged through their own PR numbers. No change to source firmware baseline or published release assets.
 - **Web smoke evidence:** [Live HTML and HTTP asset workflow](https://github.com/masarray/masarray.github.io/actions/workflows/m3h-public-stable-live-smoke.yml). Acceptance requires an actual successful execution; a source-link check alone is not an HTTP/deployed proof.
