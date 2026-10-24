@@ -2,7 +2,9 @@
 
 This target runs the ARStack61850 Sampled Values injector on the current ESP32-P4 Ethernet development board using the internal EMAC and onboard RMII PHY.
 
-> **Public product milestone:** the validated 4I+4V / 4000 fps path is released as stable [`v0.1.0`](https://github.com/masarray/arstack61850/releases/tag/v0.1.0). The broader runtime experiments documented below remain engineering follow-on work and do not expand the v0.1.0 claim boundary.
+> **Current public simulator:** [M3.H Process Bus Lab Edition](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h-20261024), offering isolated-bench **PTP Layer-2 internal simulated Global GM**, hardware-derived Follow_Up and phase-aligned **4I+4V SV 4 kHz**. No GPS/relay required to experiment; relay interoperability has not been validated. [Earlier v0.1.0 stable SV-only baseline](https://github.com/masarray/arstack61850/releases/tag/v0.1.0) remains historical.
+>
+> The M3.H on-wire capture: **163,048 SV / 40.763 seconds**, all `smpSynch=2`, zero missing/duplicate/malformed, 44 PTP Announce and 43 Sync/Follow_Up pairs. Studio's requested 120-second capture was interrupted at STOP. Hardware timestamp TX evidence and phase servo remain enabled in firmware build `a922e9bdba4e57a4`. See [M3.H release notes](../../docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md).
 
 The firmware has progressed beyond the original fixed 4000 fps bring-up. The current runtime accepts a bounded immutable SCL-compiled publisher profile from the host GUI, arms that profile while STOPPED, and publishes deterministic Sampled Values while live signal values remain mutable.
 
@@ -13,7 +15,9 @@ See:
 
 ## Current hardware result
 
-The released P0 baseline has been proven on real ESP32-P4 hardware:
+The public M3.H simulated Global GM / SV hardware evidence is documented above. It supersedes v0.1.0 as the latest simulator lab edition; neither GPS traceability nor real-relay acceptance is claimed.
+
+The historical P0 v0.1.0 baseline has been proven on real ESP32-P4 hardware:
 
 - 10/10 Start/Stop cycles passed;
 - the 4I+4V reference profile retained 4000 fps for an uninterrupted 3600-second run;
@@ -23,7 +27,7 @@ The released P0 baseline has been proven on real ESP32-P4 hardware:
 
 The repository also contains broader engineering experiments, including SCL-driven alternate rates such as 4800 fps. Those experiments are not part of the stable v0.1.0 public product boundary unless a later versioned release explicitly promotes them.
 
-This is product-level engineering evidence for the bounded v0.1.0 profile, not IEC 61850 conformance certification or a protection-grade synchronization claim.
+These legacy v0.1.0 results are retained as historical SV-only evidence. M3.H adds an experimental PTP SOURCE with hardware timestamp-based phase qualification, but is not a calibrated protection-grade timing instrument.
 ## Runtime profile model
 
 The embedded runtime currently accepts a bounded `RuntimePublisherProfile` containing:
