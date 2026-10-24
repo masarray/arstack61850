@@ -6,33 +6,30 @@ ARStack61850 is the real-time, hardware-aware evolution of ARIEC61850.
 
 The portable C++20 stack remains rooted in the ARIEC61850 behavioral model, but the project north star is now broader: build an open, deterministic IEC 61850 instrumentation platform for hardware-timestamped Sampled Values/GOOSE/PTP injection, analysis, commissioning and real-time closed-loop testing.
 
-## Public release — SMV Injector v0.1.0
+## Public release — Process Bus Simulator M3.H (2026-10-24)
 
-**Status: STABLE PUBLIC RELEASE · 2026-09-15**
+**Current public laboratory edition: [M3.H Experimental](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h-20261024).** This is an open-source engineering simulator, **not** a certified merging unit or UTC time reference. No GPS, Omicron, or protection relay is required for an isolated-lab experiment.
 
-ARStack Studio / SMV Injector v0.1.0 is the first public production milestone of the ESP32-P4 Sampled Values track. It packages the native Windows operator application, the accepted ESP32-P4 firmware, recovery tooling, and the validated 4I+4V reference workflow.
+**[Download Setup EXE](https://github.com/masarray/arstack61850/releases/download/processbus-sim-m3h-20261024/ARStack-ProcessBus-M3H-win-x64-setup.exe)** · **[Portable ZIP](https://github.com/masarray/arstack61850/releases/download/processbus-sim-m3h-20261024/ARStack-ProcessBus-M3H-win-x64-portable.zip)** · **[ESP32-P4 firmware](https://github.com/masarray/arstack61850/releases/download/processbus-sim-m3h-20261024/ARStack-ESP32P4-ProcessBus-M3H-firmware.bin)** · [Release notes and engineer quick start](docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md)
 
-**[Download SMV Injector v0.1.0](https://github.com/masarray/arstack61850/releases/tag/v0.1.0)**
+* **ESP32-P4 Ethernet:** 4I+4V IEC 61850 SV publisher, one ASDU, 64-byte samples, 4,000 frames/s, continuous `smpCnt 0–3999` with explicit START/STOP.
+* **IEEE 1588 / IEC/IEEE 61850-9-3-style PTP emulation:** isolated-bench **internal simulated Global GM**, Layer-2 Announce/Sync/Follow_Up at approximately 1 Hz, ESP32-P4 EMAC hardware transmit timestamp, phase servo and MAC egress evidence. `smpSynch AUTO` supports `smpSynch=2` after local measured evidence; not an assertion of GPS/UTC traceability.
+* **ARStack Studio on Windows:** 4I+4V waveform/phasor controls, capture/reporting, SCL input within supported profile, supervised firmware flashing, verified COM identity and USB hotplug recovery.
+* **Actual independent M3.H capture:** **163,048 SV in 40.763 seconds**, 100% `smpSynch=2`, **zero missing, duplicate, counter-reset or malformed SV**, measured **3999.884 fps**, plus 44 PTP Announce and 43 each Sync/Follow_Up. A STOP truncated the requested 120-second capture; 120-second endurance and physical relay locking were **not** tested.
+* **Source pinned:** `a922e9bdba4e57a4e88406eb83344455dd8ff142`; **10/10 CI workflows PASS** for the shipped Studio/firmware pairing. The public tag includes only documentation/packaging deltas from that tested build.
 
-Public P0 profile:
+For electrical safety, transmit PTP and SV only on an isolated lab switch/VLAN: never introduce an unsolicited PTP grandmaster or SV publisher onto an operating substation LAN.
 
-- 4 current + 4 voltage channels;
-- 4000 frames/s;
-- 1 ASDU per Ethernet frame;
-- 64-byte sample payload;
-- `smpCnt` modulus 4000;
-- `smpSynch=0` until separately measured disciplined-clock evidence exists.
+### Earlier general-purpose Studio releases
 
-Accepted physical evidence includes 10/10 Start/Stop cycles, live engineering edits, an uninterrupted 3600-second retained run at 4000 fps with `missed=0`, `txFailures=0`, `healthReconnects=0`, and `automaticStarts=0`, plus an independent SV capture spot-check with continuous `smpCnt` including 3999 -> 0 wraps.
-
-Release source target: `9c7fc7300220db4643e5643081240b955cfe12df`. Accepted binary build head: `d9b5b6848415c7e6d1c52ec929e57c66b608058d`. See [`docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md`](docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md) for immutable release provenance, hashes, scope, and the remaining non-blocking research boundary.
+[v0.1.1](https://github.com/masarray/arstack61850/releases/tag/v0.1.1) remains an earlier Studio release; [v0.1.0](https://github.com/masarray/arstack61850/releases/tag/v0.1.0) retains historical 4I+4V / 4000 fps **`smpSynch=0`** evidence, 10/10 START/STOP and a 3600-second retained run. These older results are not the M3.H measured PTP/SV evidence.
 
 ## Start here
 
 For a new engineer or AI development thread, read these before making architecture changes:
 
 1. [`NORTH_STAR.md`](NORTH_STAR.md) — product thesis, standards, hardware roadmap and definition of success.
-2. [`docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md`](docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md) — current public SMV product milestone, release provenance and validated boundary.
+2. [`docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md`](docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md) — latest public process-bus laboratory simulator evidence, setup and release boundary; [`v0.1.0 historical evidence`](docs/SMV_STUDIO_V0.1.0_PUBLIC_RELEASE.md).
 3. [`PROJECT_HANDOFF.md`](PROJECT_HANDOFF.md) — current repository handoff and separation between released SMV work and active follow-on tracks.
 4. [`apps/arstack_studio/README.md`](apps/arstack_studio/README.md) — operator workflow, firmware recovery and Windows distribution details.
 5. [`docs/ONLINE_MODEL_CONNECT_DECISION.md`](docs/ONLINE_MODEL_CONNECT_DECISION.md) — short decision contract separating full live discovery from SCL-assisted online connect.
@@ -42,19 +39,12 @@ For a new engineer or AI development thread, read these before making architectu
 
 The project deliberately separates **wire facts**, **configured expectations**, **profile claims**, and **synchronization evidence**. A packet that decodes in a host capture tool is not, by itself, a conformance or timing claim.
 
-## Current SMV product milestone
+## Current process-bus simulator milestone
 
-The P0 ESP32-P4 Sampled Values product track is **released and public** as `v0.1.0`. The stable GitHub release points to production merge `9c7fc7300220db4643e5643081240b955cfe12df` and publishes a Windows installer, portable package, accepted firmware image, manifest and release checksums.
+**M3.H Lab Edition is published publicly** as an experimental engineer-facing SV publisher + internal PTP grandmaster emulator. The 40.76-second raw PCAP validates stable lab traffic and hardware-evidence-qualified `smpSynch=2`; it does not prove a subscriber relay would accept or lock without alarms. No external GPS/certification is a dependency for running or releasing this lab simulator.
 
-Physical acceptance retained for the public milestone:
+The older v0.1.0/v0.1.1 products remain available as historical releases. Further work: independent relay/IED interoperability when hardware is available, deeper 120-second and multi-cycle captures, alternate SV profiles, and optional external time references—not blockers for M3.H public distribution.
 
-- 10/10 Start/Stop cycles passed;
-- uninterrupted 3600-second retained run held 4000 fps;
-- `missed=0`, `txFailures=0`, `healthReconnects=0`, `automaticStarts=0`;
-- independent capture confirmed the expected SV profile, one ASDU, 64-byte `seqData`, continuous `smpCnt` and 3999 -> 0 wraps;
-- `smpSynch=0` remains the truthful synchronization state.
-
-The next process-bus research gate is measured hardware timestamp/PTP discipline and broader profile support. Those are follow-on milestones and are **not** retroactively claimed by v0.1.0.
 ## Lineage and portable core
 
 The original work began as an incremental C++20 migration of the ARIEC61850 C# protocol stack. The C# implementation remains a behavioral oracle where cross-language equivalence is still useful, while ARStack-specific work adds deterministic RTOS/hardware execution and evidence that a normal desktop stack cannot provide.
