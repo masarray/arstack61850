@@ -314,6 +314,17 @@ void DeviceIoWorker::disconnectPort(const quint64 generation) {
     closePortInternal(true);
 }
 
+void DeviceIoWorker::retireUnresponsivePort(const quint64 generation) {
+    if (!initialized_ || shuttingDown_ || generation == 0 ||
+        generation != activeGeneration_ || serial_ == nullptr ||
+        !serial_->isOpen() || !identityConfirmed_) return;
+    // A bounded failure of bidirectional SHOW/telemetry means the old
+    // handle may be a zombie even if Windows has already re-enumerated
+    // the same COM number. Do not mistake this for operator DISCONNECT.
+    handleSerialFailure(QStringLiteral(
+        "Verified serial control path stopped responding; retiring stale COM for recovery."));
+}
+
 void DeviceIoWorker::closePortInternal(const bool emitRelease) {
     if (serial_ == nullptr) return;
     if (verificationTimer_ != nullptr) verificationTimer_->stop();
@@ -597,11 +608,17 @@ void DeviceIoWorker::handleSerialFailure(const QString& message) {
     const QString detail = message.trimmed().isEmpty()
         ? QStringLiteral("Serial transport failed.")
         : message.trimmed();
-    emit transportError(activeGeneration_, detail, true);
+    const bool hadVerifiedIdentity = identityConfirmed_;
+    const quint64 lostGeneration = activeGeneration_;
+    const QString lostPort = serial_ != nullptr ? serial_->portName() : lastPort_;
+    emit transportError(lostGeneration, detail, true);
     probeQueue_.clear();
     genericProbeActive_ = false;
     automaticConnection_ = false;
+    // Close and release the handle BEFORE asking the GUI for new discovery.
     closePortInternal(true);
+    if (hadVerifiedIdentity && lostGeneration != 0U)
+        emit unexpectedPortLoss(lostGeneration, lostPort);
 }
 
 void DeviceIoWorker::setHeartbeatEnabled(const bool enabled, const quint64 generation) {
