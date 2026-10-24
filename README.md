@@ -18,6 +18,12 @@ Generate real Sampled Values (SV) traffic, explore PTP synchronization, and expe
 
 **M3.H stable lab release (24 October 2026):** an independent capture measured **163,048 consecutive SV frames at 3,999.884 frames/s**, with no missing, duplicate or malformed SV packets and `smpSynch=2` throughout the recorded interval. [View the full measurements](docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md).
 
+## Inside ARStack Studio
+
+![ARStack Studio Windows desktop running 4I+4V engineering workspace and live waveform preview](assets/screenshots/arstack-studio-windows.png)
+
+*Screenshot captured directly from the Windows Qt application by the native GUI test.*
+
 ## Get started in minutes
 
 1. **[Download ARStack Studio](https://github.com/masarray/arstack61850/releases/latest)** for Windows x64 (Setup EXE or Portable ZIP).
