@@ -50,6 +50,8 @@ The released **M3.H** laboratory milestone captured **163,048 SV frames** in 40.
 
 ARStack includes a portable C++20 IEC 61850 engine, Qt desktop applications, embedded targets and automated protocol tests.
 
+- [Contributing](CONTRIBUTING.md) — propose improvements with reproducible evidence and current-main PRs
+- [Security policy](SECURITY.md) — report vulnerabilities privately and handle lab evidence responsibly
 - [Technical & developer reference](docs/DEVELOPER_GUIDE.md) — architecture, build commands, implemented modules and lab validation
 - [Project direction](NORTH_STAR.md) — product goals and architecture
 - [Studio operator guide](apps/arstack_studio/README.md) — usage and firmware handling
