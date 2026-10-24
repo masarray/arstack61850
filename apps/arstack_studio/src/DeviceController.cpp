@@ -432,6 +432,12 @@ void DeviceController::connectWorkerSignals() {
         } else setError(message);
     });
 
+    connect(ioWorker_, &DeviceIoWorker::unexpectedPortLoss, this,
+            [this](const quint64 generation, const QString& port) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
+        emit unexpectedTransportLoss(generation, port);
+    });
+
     connect(ioWorker_, &DeviceIoWorker::transportError, this,
             [this](const quint64 generation, const QString& message, const bool fatal) {
         if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
@@ -643,6 +649,16 @@ void DeviceController::disconnectPort() {
     QMetaObject::invokeMethod(
         ioWorker_,
         [worker = ioWorker_, generation] { worker->disconnectPort(generation); },
+        Qt::QueuedConnection);
+}
+
+void DeviceController::recoverUnresponsivePort() {
+    if (!ioWorkerReady_ || ioWorker_ == nullptr || sessionGeneration_ == 0 ||
+        !deviceVerified_ || !connected_) return;
+    const quint64 generation = sessionGeneration_;
+    QMetaObject::invokeMethod(
+        ioWorker_,
+        [worker = ioWorker_, generation] { worker->retireUnresponsivePort(generation); },
         Qt::QueuedConnection);
 }
 
