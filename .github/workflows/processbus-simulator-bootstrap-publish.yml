@@ -1,0 +1,131 @@
+name: Bootstrap Public M3.H Process Bus Simulator Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/processbus-simulator-bootstrap-publish.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish-verified-lab-simulator:
+    name: Publish immutable M3.H Setup, Portable and ESP32-P4 firmware
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ACCEPTED_SOURCE_SHA: a922e9bdba4e57a4e88406eb83344455dd8ff142
+      ACCEPTED_RUN: '40061206222'
+      WINDOWS_ARTIFACT: arstack-studio-native-preview-win-x64-298-a922e9bdba4e57a4e88406eb83344455dd8ff142
+      FIRMWARE_ARTIFACT: arstack-esp32p4-smv-firmware
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout pinned laboratory release branch and its evidence
+        uses: actions/checkout@v4
+        with:
+          ref: release/processbus-simulator-m3h-20261024
+          fetch-depth: 0
+
+      - name: Enforce immutable accepted M3.H software and successful source CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          # This trusted workflow runs from main but checks out ONLY the
+          # already-approved lab release branch with documentation-only deltas.
+          test "$GITHUB_REF_NAME" = 'main'
+          test "$(git rev-parse HEAD)" = 'a4b6e53d0dbbcababc55ba8a4ff97ade6f2a6200'
+          git merge-base --is-ancestor "$ACCEPTED_SOURCE_SHA" HEAD
+          # Tag may add public documentation/workflow only. Never silently
+          # rebuild or change the on-board realtime code after the wire FAT.
+          if git diff --name-only "$ACCEPTED_SOURCE_SHA" HEAD |
+             grep -Ev '^(docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024\.md|apps/arstack_studio/README\.md|\.github/workflows/processbus-simulator-public-release\.yml)$'; then
+            echo 'REJECT: tagged source modified beyond release evidence/packaging' >&2
+            exit 1
+          fi
+          actual="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ACCEPTED_RUN" --jq '.head_sha')"
+          conclusion="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ACCEPTED_RUN" --jq '.conclusion')"
+          test "$actual" = "$ACCEPTED_SOURCE_SHA"
+          test "$conclusion" = success
+          echo "Immutable M3.H SOURCE verified: $actual"
+
+      - name: Download exact successful 10/10-CI Windows and firmware artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p input/windows input/firmware dist
+          gh run download "$ACCEPTED_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name "$WINDOWS_ARTIFACT" --dir input/windows
+          gh run download "$ACCEPTED_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name "$FIRMWARE_ARTIFACT" --dir input/firmware
+
+      - name: Verify binary checksums, embedded Build ID and portable pairing
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, pathlib, shutil, zipfile
+          win = pathlib.Path('input/windows')
+          firmware = pathlib.Path('input/firmware')
+          expected = {
+            'ARStack-Studio-Preview-win-x64-setup.exe': '4902e8bf44e78fc55a139ce84a1273f0768ef6fe10000f5d0f85d75d2f6c736e',
+            'ARStack-Studio-Preview-win-x64-portable.zip': 'ca01424e4102aa65e353737024ebf3258b4d2f614fa60d932c95c353ee228d8f',
+            'arstack-esp32p4-smv-0.1.1.bin': '61c508e9bf1357eb964d2b817b260b6a0e985446ddd68de1d45d9467e25c4607',
+          }
+          def sha(b): return hashlib.sha256(b).hexdigest()
+          for name, digest in expected.items():
+            src = (firmware if name.endswith('.bin') else win) / name
+            assert src.is_file(), f'MISSING {src}'
+            assert sha(src.read_bytes()) == digest, f'MISMATCH {src}'
+          manifest = json.loads((firmware / 'firmware-manifest.json').read_text())
+          assert manifest['sourceCommit'] == 'a922e9bdba4e57a4e88406eb83344455dd8ff142'
+          assert manifest['buildId'] == 'a922e9bdba4e57a4'
+          assert manifest['sha256'] == expected['arstack-esp32p4-smv-0.1.1.bin']
+          assert manifest['phaseServoEnabled'] is True
+          assert manifest['canonicalMacTxEvidenceEnabled'] is True
+          assert manifest['bootSimulatedGlobalGmEnabled'] is True
+          assert manifest['defaultPtpPolicy'] == 'INTERNAL_GM_ONLY'
+          with zipfile.ZipFile(win / 'ARStack-Studio-Preview-win-x64-portable.zip') as z:
+              assert z.testzip() is None
+              portable_manifest = json.loads(z.read('firmware/firmware-manifest.json'))
+              assert portable_manifest['sourceCommit'] == manifest['sourceCommit']
+              assert sha(z.read('firmware/arstack-esp32p4-smv-0.1.1.bin')) == manifest['sha256']
+          names = {
+            'ARStack-Studio-Preview-win-x64-setup.exe':'ARStack-ProcessBus-M3H-win-x64-setup.exe',
+            'ARStack-Studio-Preview-win-x64-portable.zip':'ARStack-ProcessBus-M3H-win-x64-portable.zip',
+            'arstack-esp32p4-smv-0.1.1.bin':'ARStack-ESP32P4-ProcessBus-M3H-firmware.bin',
+          }
+          out = pathlib.Path('dist')
+          for old, new in names.items():
+              shutil.copy2((firmware if old.endswith('.bin') else win) / old, out / new)
+          shutil.copy2(firmware / 'firmware-manifest.json', out / 'firmware-manifest.json')
+          with (out / 'SHA256SUMS.txt').open('w') as f:
+              for path in sorted(out.iterdir()):
+                  if path.name != 'SHA256SUMS.txt':
+                      f.write(f'{sha(path.read_bytes())}  {path.name}\n')
+          print((out / 'SHA256SUMS.txt').read_text())
+          PY
+
+      - name: Publish public experimental release with verified assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A release created through the GitHub UI may already exist by
+          # the time the tag-triggered job begins. Attach verified binaries
+          # idempotently rather than failing or replacing an unrelated tag.
+          if gh release view "processbus-sim-m3h-20261024" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "processbus-sim-m3h-20261024" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "processbus-sim-m3h-20261024" --repo "$GITHUB_REPOSITORY" \
+              --title 'ARStack Process Bus Simulator — M3.H Lab Edition (2026-10-24)' \
+              --notes-file docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md \
+              --prerelease --latest=false
+          else
+            gh release create "processbus-sim-m3h-20261024" dist/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --title 'ARStack Process Bus Simulator — M3.H Lab Edition (2026-10-24)' \
+              --notes-file docs/releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md \
+              --prerelease --latest=false --target "$(git rev-parse HEAD)"
+          fi
