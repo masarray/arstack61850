@@ -47,6 +47,13 @@ assert "g_running.exchange(false" in link_handler
 assert "g_start_request.store(false" in link_handler
 assert "if (!was_running) return;" in link_handler
 assert "SvStopCause::ethernet_link_down" in link_handler
+# Link events may arrive after esp_eth_start() but before live_control_initialize().
+# Never overwrite the event-owned PHY state during console initialization.
+boot_init = fw.split("void live_control_initialize(", 1)[1].split(
+    "void live_control_bind_publisher_task(", 1)[0]
+assert "g_physical_link_up.store(false" not in boot_init
+app_boot = eth.split('extern "C" void app_main(void)', 1)[1]
+assert app_boot.index("esp_eth_start(eth_handle)") < app_boot.index("live_control_initialize(")
 assert "SV-LAN-AUTONOMY-V1" in fw
 assert "SESSION-LEASE" not in fw
 assert "SV-LAN-AUTONOMY-V1" in device
