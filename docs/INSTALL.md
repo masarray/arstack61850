@@ -34,4 +34,4 @@ The install script verifies the matching published SHA-256. The M3.H.3 official 
 3. Select a simulated PTP source, set waveform values, and press **Start**.
 4. Inspect SV and PTP traffic on a dedicated test switch or network segment.
 
-No external timing reference is required for the internal lab PTP SOURCE simulation. External GM lock or UTC traceability is not claimed. With the ESP32-P4 still powered, closing Studio does not itself STOP SV; reopening Studio adopts the current board state. Review the [M3.H.3 release evidence](releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md) and pair the board only with its matched firmware.
+**Try a relay/BCU Process Bus lab:** configure an SV stream's APPID, MAC, VLAN and svID to match your subscriber's expected inputs, press Start and capture real Layer-2 traffic with Wireshark. ARStack also publishes internal PTP SOURCE traffic for lab timing simulations. With the ESP32-P4 powered, closing Studio does not stop SV; reopening Studio adopts the actual board state. Use the firmware paired with this release. [M3.H.3 on-wire lab capture](releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md).
