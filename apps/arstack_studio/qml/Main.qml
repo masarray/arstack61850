@@ -200,8 +200,9 @@ ApplicationWindow {
 
     font.family: root.uiFont
 
-    // Primary-window close owns application exit. C++ teardown owns STOP, COM
-    // close and worker retirement; QML must not race it with another async STOP.
+    // Closing Studio retires the serial observer only. The ESP32 owns its
+    // ongoing LAN SV/PTP session; only a deliberate STOP command ends it.
+    // C++ still owns bounded COM/worker retirement without async QML writes.
     onClosing: function(close) {
         close.accepted = true
         if (root.applicationShutdownRequested) return
