@@ -1941,6 +1941,24 @@ void DeviceController::failScenarioStart(const QString& message) {
 
 void DeviceController::setRunning(const bool value) {
     if (running_ == value) return;
+    const bool unexpectedEdge = running_ && !value && !operatorStopPending_ &&
+        scenarioStage_ == ScenarioStage::idle;
+    bool presentationChanged = false;
+    if (value) {
+        // A new verified RUNNING state ends the old active incident, without
+        // erasing the board's sticky stop history in diagnostics.
+        if (svUnexpectedStopObserved_ || !svStopReason_.isEmpty()) {
+            svUnexpectedStopObserved_ = false;
+            svStopReason_.clear();
+            presentationChanged = true;
+        }
+    } else if (unexpectedEdge) {
+        svUnexpectedStopObserved_ = true;
+        ++svUnexpectedStopIncident_;
+        if (svStopReason_.isEmpty())
+            svStopReason_ = QStringLiteral("AWAITING_BOARD_CAUSE");
+        presentationChanged = true;
+    }
     appendLog(QStringLiteral("SVTX"), QStringLiteral(
         "RUNNING_EDGE previous=%1 next=%2 operator_stop=%3 session=%4 boot=%5 stop_reason=%6 last_cause=%7")
         .arg(running_ ? 1 : 0).arg(value ? 1 : 0)
@@ -1959,14 +1977,10 @@ void DeviceController::setRunning(const bool value) {
                 static_cast<void>(sendQuietCommand(QStringLiteral("SHOW")));
         });
     }
-    if (!value && running_ && !operatorStopPending_ && svStopReason_.isEmpty()) {
-        // Do not silently turn a physical STOP into a green READY state.
-        // SHOW/SVLIFE will replace this interim state with the board cause.
-        svStopReason_ = QStringLiteral("AWAITING_BOARD_CAUSE");
-        emit svStopReasonChanged();
-    }
     running_ = value;
     emit runningChanged();
+    // Emit after running_ changes so QML observes an atomic incident state.
+    if (presentationChanged) emit svStopReasonChanged();
 }
 
 void DeviceController::setIdentificationState(const IdentificationState state) {
@@ -2206,12 +2220,15 @@ void DeviceController::processLine(const QString& rawLine) {
             .arg(forced ? QStringLiteral("RUNTIME_FAIL_SAFE_STOP_OBSERVED")
                         : QStringLiteral("STOP_ACK_OBSERVED"))
             .arg(sessionGeneration_).arg(identity_.bootId).arg(running_ ? 1 : 0));
-        if (forced && svStopReason_ != QStringLiteral("RUNTIME_FAULT")) {
+        // A log line by itself can be a boot/USB backlog. Only an observed
+        // local RUNNING -> STOPPED incident may raise a live alarm.
+        setRunning(false); // preserve operatorStopPending_ until edge classification
+        operatorStopPending_ = false;
+        if (forced && svUnexpectedStopObserved_ &&
+            svStopReason_ != QStringLiteral("RUNTIME_FAULT")) {
             svStopReason_ = QStringLiteral("RUNTIME_FAULT");
             emit svStopReasonChanged();
         }
-        operatorStopPending_ = false;
-        setRunning(false);
     }
     if (line.contains(QStringLiteral("Control session lease expired"), Qt::CaseInsensitive) ||
         line.contains(QStringLiteral("Control session heartbeat could not rearm"), Qt::CaseInsensitive) ||
@@ -2227,7 +2244,11 @@ void DeviceController::processLine(const QString& rawLine) {
             svLastStopCause_ = reason;
             emit svStopReasonChanged();
         }
-        if (svStopReason_ != reason) {
+        // Firmware diagnostic text does not prove the STOP happened in this
+        // connection. Preserve it in svLastStopCause, never awaken a stale
+        // red toast while the board is simply READY at startup.
+        if (!operatorStopPending_ && (running_ || svUnexpectedStopObserved_) &&
+            svStopReason_ != reason) {
             svStopReason_ = reason;
             emit svStopReasonChanged();
         }
@@ -2249,7 +2270,9 @@ void DeviceController::processLine(const QString& rawLine) {
                 emit svStopReasonChanged();
             }
             const bool boardStopped = svLife.captured(1) == QStringLiteral("STOPPED");
-            const QString effective = boardStopped && lastReason != QStringLiteral("OPERATOR_STOP") &&
+            const QString effective =
+                boardStopped && svUnexpectedStopObserved_ &&
+                lastReason != QStringLiteral("OPERATOR_STOP") &&
                 lastReason != QStringLiteral("NONE") ? lastReason : QString{};
             if (svStopReason_ != effective) {
                 svStopReason_ = effective;
@@ -2545,7 +2568,11 @@ void DeviceController::resetTelemetry() {
     operatorStopPending_ = false;
     lastSvStopSeq_ = 0;
     const bool hadStopDetails = !svLastStopCause_.isEmpty() ||
-        !svTxFaultDetail_.isEmpty() || !svStopReason_.isEmpty();
+        !svTxFaultDetail_.isEmpty() || !svStopReason_.isEmpty() ||
+        svUnexpectedStopObserved_;
+    svUnexpectedStopObserved_ = false;
+    // Incident sequence intentionally monotonic across COM reconnects, so
+    // the same QML window never de-duplicates a new real fault as an old one.
     svLastStopCause_.clear();
     svStopReason_.clear();
     svTxFaultDetail_.clear();
