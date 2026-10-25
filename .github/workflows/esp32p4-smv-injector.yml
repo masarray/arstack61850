@@ -281,7 +281,7 @@ jobs:
               "chipRevisionPolicy": "pre-v3",
               "version": os.environ["ARSTACK_FIRMWARE_VERSION"],
               "protocol": int(os.environ["ARSTACK_PROTOCOL_VERSION"]),
-              "capabilities": ["SMV-4I4V", "PROFILE", "PROFILE-BINARY-V1", "LIVE-SETPOINTS", "SESSION-LEASE", "PTP-P2", "SMPSYNCH-AUTO"],
+              "capabilities": ["SMV-4I4V", "PROFILE", "PROFILE-BINARY-V1", "LIVE-SETPOINTS", "SV-LAN-AUTONOMY-V1", "PTP-P2", "SMPSYNCH-AUTO"],
               "flashOffset": 0,
               "image": image,
               "sha256": sha256,
