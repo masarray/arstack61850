@@ -195,10 +195,10 @@ bool DeviceController::shutdown() {
     shuttingDown_ = true;
     pendingAutoDetect_ = false;
     pendingConnectPort_.clear();
-    // M3.B: Studio owns the SV output lease, never the board's persistent
-    // time authority. On USB/Studio shutdown request only SV STOP; stopping
-    // PTP here would destroy clock phase across a simple GUI disconnect.
-    // Explicit operator PTP STOP remains a separate verified command.
+    // Studio is the control/observer client, NOT the SV/PTP lifetime owner.
+    // Closing Studio, losing COM or a USB re-enumeration must never send STOP.
+    // Only an explicit operator Stop action or board link/transport fault may
+    // end an autonomous SV session. Keep PTP authority on the board.
     constexpr bool requestPtpStop = false;
     resetPtpStartup();
     resetScenarioStart();
