@@ -283,7 +283,7 @@ void eth_event_handler(void*, esp_event_base_t, const std::int32_t event_id, voi
         break;
     case ETHERNET_EVENT_DISCONNECTED:
         xEventGroupClearBits(g_link_events, kLinkUpBit);
-        live_control_stop_for_link_loss(); // fail closed immediately, not after 400 hot-path misses
+        live_control_set_ethernet_link(false); // stop immediately, not after 400 hot-path misses
         ESP_LOGW(kTag, "Ethernet link down");
         break;
     case ETHERNET_EVENT_START:
