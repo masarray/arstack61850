@@ -1189,7 +1189,7 @@ extern "C" void ar_ptp_lab_stop(void) {
     ar::esp32p4::smv::stop_ptp_lab();
 }
 
-extern "C" void ar_ptp_lab_request_link_down_stop(void) {
+extern "C" void ar_ptp_source_request_link_down_stop(void) {
     // Event loop must never block, nor dereference a task handle which can
     // concurrently be deleted during teardown. PTP polls this atomic flag
     // at <=5-ms cadence and performs its own EMAC/role cleanup.
