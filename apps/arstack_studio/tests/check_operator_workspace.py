@@ -608,10 +608,30 @@ def main() -> None:
             and "SvStopCause::runtime_fault" in life_firmware
             and "Q_PROPERTY(QString svStopReason READ svStopReason NOTIFY svStopReasonChanged)" in life_header
             and "ribbon.unexpectedSvStop" in life_qml
-            and "workflowBar.displayState" in source("Main.qml")
+            and "BoardConnectionIndicator {" in source("Main.qml")
+            and "svUnexpectedStopObserved" in life_qml
+            and "svUnexpectedStopObserved" in device_control_cpp
             and "function onSvStopReasonChanged()" in source("Main.qml"),
             "SV output must fail-closed on measured heartbeat loss, preserve board STOP cause, "
             "and never show misleading green READY after an unrequested stop")
+
+    # The bottom-left board indicator must reflect physical serial/identity
+    # readiness, not a persisted SVLIFE fault from the previous session.
+    indicator = source("BoardConnectionIndicator.qml")
+    require('qml/BoardConnectionIndicator.qml' in
+                (STUDIO / "CMakeLists.txt").read_text(encoding="utf-8")
+            and "device.connected" in indicator
+            and "device.deviceVerified" in indicator
+            and "device.svUnexpectedStopObserved" in indicator
+            and "supervisorState === \"READY\"" in indicator
+            and all(value in indicator for value in
+                    ('"disconnected"', '"connecting"', '"preparing"',
+                     '"ready"', '"running"', '"error"'))
+            and "indicator.stateColor" in indicator
+            and "lastNotifiedSvStopIncident" in source("Main.qml")
+            and "device.svUnexpectedStopIncident" in source("Main.qml")
+            and "if (seqOk && (seq >= lastSvStopSeq_" in device_control_cpp,
+            "Footer status must use truthful board/COM states and ignore historical SV faults")
 
     # Default workbench should never stretch the 4I+4V setpoint matrix
     # beyond a useful editing width while starving Phasor/Waveform charts.
