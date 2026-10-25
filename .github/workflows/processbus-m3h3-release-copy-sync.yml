@@ -1,0 +1,73 @@
+name: Synchronize Official M3.H.3 Product Release Notes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md'
+      - '.github/workflows/processbus-m3h3-release-copy-sync.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: processbus-m3h3-release-copy
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Refresh release notes only; preserve stable tag and binary identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: processbus-sim-m3h3-20261025
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate official current release and immutable asset inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > /tmp/official-before.json
+          python3 - <<'PY'
+          import json,pathlib
+          r=json.load(open('/tmp/official-before.json'))
+          names={
+            'ARStack-Studio-M3H3-win-x64-setup.exe',
+            'ARStack-Studio-M3H3-win-x64-portable.zip',
+            'ARStack-ESP32P4-M3H3-firmware.bin',
+            'firmware-manifest.json',
+            'ARStack-Studio-linux-x86_64.AppImage',
+            'ARStack-Studio-linux-x86_64.sha256',
+            'SHA256SUMS.txt'
+          }
+          assert not r['prerelease'] and not r['draft'] and r['tag_name']=='processbus-sim-m3h3-20261025'
+          assert {x['name'] for x in r['assets']}==names
+          assert all((a.get('digest') or '').startswith('sha256:') for a in r['assets'])
+          doc=pathlib.Path('docs/releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md').read_text()
+          assert 'relay/BCU' in doc and 'Multi-SV' in doc and 'SCL-driven virtual Merging Unit' in doc
+          assert 'internal lab PTP SOURCE' in doc and 'not a GPS/UTC metrology reference' in doc
+          print('PASS seven original stable assets and engineer-first release copy')
+          PY
+
+      - name: Update just the published release description
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --notes-file docs/releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > /tmp/official-after.json
+          python3 - <<'PY'
+          import json,pathlib
+          before=json.load(open('/tmp/official-before.json'))
+          after=json.load(open('/tmp/official-after.json'))
+          expected=pathlib.Path('docs/releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md').read_text().strip()
+          assert (after.get('body') or '').strip()==expected
+          for key in ('id','tag_name','target_commitish','draft','prerelease','published_at'):
+            assert before[key]==after[key], 'Unexpected change to '+key
+          def assets(r):
+            return sorted((a['id'],a['name'],a['size'],a['digest']) for a in r['assets'])
+          assert assets(before)==assets(after), 'Published binary assets changed'
+          print('PASS official stable release copy synchronized with no asset or state changes')
+          PY
