@@ -127,37 +127,19 @@ void clear_control_session() noexcept {
     portEXIT_CRITICAL(&g_control_lease_mux);
 }
 
-// A control lease is NOT a PTP clock lease. The board must stop publishing
-// when the Studio connection actually disappears; loss of PTP qualification
-// only deasserts smpSynch and does not silently stop the SV publisher.
+// Studio heartbeat is diagnostic/control-session liveness ONLY. A running
+// publisher belongs to the ESP32-P4, not to a USB or Windows process.
+// Real Ethernet failure still triggers fail-closed STOP in app_main.cpp.
+// Preserve the 4 Hz timer for future telemetry, without issuing STOP.
 void enforce_control_lease() noexcept {
-    std::uint32_t expired_age_ms = 0U;
-    bool expired = false;
-    portENTER_CRITICAL(&g_control_lease_mux);
-    if (g_running.load(std::memory_order_acquire) &&
-        g_control_lease_active.load(std::memory_order_acquire)) {
-        const auto now = monotonic_ms();
-        const auto last = g_last_heartbeat_ms.load(std::memory_order_acquire);
-        const auto elapsed = static_cast<std::uint32_t>(now - last);
-        if (elapsed >= kControlLeaseTimeoutMs) {
-            g_control_lease_active.store(false, std::memory_order_release);
-            g_start_request.store(false, std::memory_order_release);
-            expired = g_running.exchange(false, std::memory_order_acq_rel);
-            expired_age_ms = elapsed;
-            if (expired) record_sv_stop(SvStopCause::lease_expired, elapsed);
-        }
-    }
-    portEXIT_CRITICAL(&g_control_lease_mux);
-    if (expired) {
-        wake_publisher();
-        ESP_LOGW(kTag,
-                 "Control session lease expired after %lu ms; SV transmission stopped",
-                 static_cast<unsigned long>(expired_age_ms));
-    }
+    if (!g_running.load(std::memory_order_acquire)) return;
+    if (!g_control_lease_active.load(std::memory_order_acquire)) return;
+    if (!heartbeat_is_fresh())
+        g_control_lease_active.store(false, std::memory_order_release);
 }
 
 void control_lease_timer_callback(void*) noexcept {
-    enforce_control_lease(); // 4 Hz bounded age check; NEVER rearm the timer.
+    enforce_control_lease();
 }
 
 void record_control_heartbeat() noexcept {
