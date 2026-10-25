@@ -212,7 +212,9 @@ bool DeviceController::shutdown() {
         return true;
     }
 
-    const bool requestSvStop = running_;
+    // Closing Studio/disconnecting USB is not an operator STOP command.
+    // The board continues publishing until explicit STOP or physical fault.
+    const bool requestSvStop = false;
     if (QThread::currentThread() == &ioThread_) {
         ioWorker_->shutdown(requestSvStop, requestPtpStop);
         ioThread_.quit();
