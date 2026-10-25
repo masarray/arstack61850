@@ -279,6 +279,9 @@ void eth_event_handler(void*, esp_event_base_t, const std::int32_t event_id, voi
     case ETHERNET_EVENT_CONNECTED:
         xEventGroupSetBits(g_link_events, kLinkUpBit);
         live_control_set_ethernet_link(true);
+#if CONFIG_AR_PTP_LAB_TX
+        ar_ptp_lab_set_ethernet_link_up(true);
+#endif
         ESP_LOGI(kTag, "Ethernet link up");
         break;
     case ETHERNET_EVENT_DISCONNECTED:
