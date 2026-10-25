@@ -67,6 +67,7 @@ class DeviceController : public QObject {
     Q_PROPERTY(QString missed READ missed NOTIFY telemetryChanged)
     Q_PROPERTY(QString txFailures READ txFailures NOTIFY telemetryChanged)
     Q_PROPERTY(QString signalGeneration READ signalGeneration NOTIFY telemetryChanged)
+    Q_PROPERTY(QVariantMap boardScenario READ boardScenario NOTIFY boardScenarioChanged)
     Q_PROPERTY(QString profileGeneration READ profileGeneration NOTIFY profileStateChanged)
     Q_PROPERTY(bool profileArmed READ profileArmed NOTIFY profileStateChanged)
     Q_PROPERTY(bool profileWasReused READ profileWasReused NOTIFY profileStateChanged)
@@ -170,6 +171,7 @@ public:
     [[nodiscard]] QString fps() const;
     [[nodiscard]] QString missed() const;
     [[nodiscard]] QString txFailures() const;
+    [[nodiscard]] QVariantMap boardScenario() const { return boardScenario_; }
     [[nodiscard]] QString signalGeneration() const;
     [[nodiscard]] QString profileGeneration() const;
     [[nodiscard]] bool profileArmed() const noexcept;
@@ -333,6 +335,7 @@ signals:
     void logTextChanged();
     void syncDiagnosticsChanged();
     void telemetryChanged();
+    void boardScenarioChanged();
     void profileStateChanged();
     void profileDeploymentProgress();
     void ptpStateChanged();
@@ -448,6 +451,13 @@ private:
     QString missed_{QStringLiteral("—")};
     QString txFailures_{QStringLiteral("—")};
     QString signalGeneration_{QStringLiteral("—")};
+    QVariantMap boardScenario_;
+    QVariantMap pendingBoardRows_;
+    QVariantMap pendingBoardCt_;
+    QString pendingBoardGeneration_;
+    QString pendingBoardBoot_;
+    quint32 pendingBoardHzMilli_{0U};
+    bool pendingBoardSnapshot_{false};
     QString profileGeneration_{QStringLiteral("—")};
     QString lastIdentificationPort_;
     QString portName_;

@@ -41,14 +41,11 @@ constexpr char kTag[] = "ar_smv_ctrl";
 constexpr std::array<std::string_view, 8> kChannelNames{
     "IA", "IB", "IC", "IN", "UA", "UB", "UC", "UN"};
 constexpr std::string_view kTokenDelimiters{" \t\r\n"};
-// A 700-ms host heartbeat is coalesced through a serial command queue.
-// A 2.5-second lease caused unnecessary SV STOP during transient Windows USB
-// stalls. Allow several missed scheduling slots, but still fail CLOSED after
-// six seconds without a real device-consumed heartbeat.
+// Heartbeat measures operator-console freshness at START only. Once START
+// commits, the data-plane lifetime is independent of Studio and USB/COM.
 constexpr std::uint32_t kControlLeaseTimeoutMs = 6000U;
 constexpr std::uint32_t kSlowHeartbeatGapMs = 2000U;
-// Fixed-rate watchdog never stops/rearms from console heartbeat and timer
-// callback concurrently. An expired lease is detected in <=timeout+250ms.
+// The optional 4-Hz diagnostic timer never owns the SV publisher.
 constexpr std::uint64_t kControlWatchdogPeriodUs = 250000ULL;
 
 enum class SvStopCause : std::uint32_t {
@@ -69,6 +66,9 @@ SvLiveSignalBank g_signal_bank;
 SvScenarioTransaction g_scenario_txn;
 std::atomic<bool> g_running{false};
 std::atomic<bool> g_start_request{false};
+// Written only by the Ethernet event owner and checked atomically with START.
+std::atomic<bool> g_physical_link_up{false};
+portMUX_TYPE g_publisher_lifecycle_mux = portMUX_INITIALIZER_UNLOCKED;
 std::atomic<TaskHandle_t> g_publisher_task{nullptr};
 std::atomic<bool> g_control_heartbeat_seen{false};
 std::atomic<bool> g_control_lease_active{false};
@@ -162,7 +162,8 @@ void record_control_heartbeat() noexcept {
 }
 
 bool arm_control_lease_if_fresh() noexcept {
-    if (!g_control_watchdog_ready.load(std::memory_order_acquire)) return false;
+    // A failed optional telemetry timer is not an output safety failure.
+    // Still require a recently received heartbeat for explicit operator START.
     bool fresh = false;
     portENTER_CRITICAL(&g_control_lease_mux);
     if (g_control_heartbeat_seen.load(std::memory_order_acquire)) {
@@ -264,13 +265,11 @@ void print_identity() noexcept {
     const esp_app_desc_t* app = esp_app_get_description();
     const char* version = app != nullptr ? app->version : "unknown";
 #if CONFIG_AR_PTP_LAB_TX
-    const char* capabilities = g_control_lease_timer != nullptr
-        ? "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE,SV-CONFIG-TXN-V1,PTP-P2,PTP-GM-BENCH-V1,PTP-POLICY-M3D-V1,SMPSYNCH-AUTO,PROFILE-BINARY-V1,PROFILE-REUSE-V1"
-        : "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-CONFIG-TXN-V1,PTP-P2,PTP-GM-BENCH-V1,PTP-POLICY-M3D-V1,SMPSYNCH-AUTO,PROFILE-BINARY-V1,PROFILE-REUSE-V1";
+    const char* capabilities =
+        "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-LAN-AUTONOMY-V1,SV-CONFIG-TXN-V1,PTP-P2,PTP-GM-BENCH-V1,PTP-POLICY-M3D-V1,SMPSYNCH-AUTO,PROFILE-BINARY-V1,PROFILE-REUSE-V1";
 #else
-    const char* capabilities = g_control_lease_timer != nullptr
-        ? "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE,SV-CONFIG-TXN-V1,PROFILE-BINARY-V1,PROFILE-REUSE-V1"
-        : "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-CONFIG-TXN-V1,PROFILE-BINARY-V1,PROFILE-REUSE-V1";
+    const char* capabilities =
+        "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-LAN-AUTONOMY-V1,SV-CONFIG-TXN-V1,PROFILE-BINARY-V1,PROFILE-REUSE-V1";
 #endif
     ESP_LOGI(kTag,
              "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 device_id=%02X%02X%02X%02X%02X%02X firmware=%s build=%s boot_id=%016llX capabilities=%s",
@@ -574,6 +573,9 @@ void print_state() noexcept {
                  g_max_heartbeat_gap_ms.load(std::memory_order_acquire)),
              static_cast<unsigned long>(
                  g_slow_heartbeat_events.load(std::memory_order_acquire)));
+    ESP_LOGI(kTag, "SVLAN owner=BOARD physical_link=%s output=%s studio_control=OPTIONAL",
+             g_physical_link_up.load(std::memory_order_acquire) ? "UP" : "DOWN",
+             g_running.load(std::memory_order_acquire) ? "RUNNING" : "STOPPED");
     // This is sticky historical TRANSPORT evidence, not the current STOP
     // condition. A restarted publisher may be RUNNING while last_stop_seq>0.
     const auto tx = live_tx_fault_snapshot();
@@ -597,6 +599,20 @@ void print_state() noexcept {
              static_cast<long>(tx.stop_first_error),
              static_cast<long>(tx.stop_last_error),
              tx.stop_link_up ? 1U : 0U);
+    // Coherent 4I4V readback: BEGIN/END refer to this same immutable bank
+    // snapshot, its generation and its physical boot identity. No state write.
+    ESP_LOGI(kTag,
+             "SVBANK BEGIN generation=%llu boot=%016llX hz_millihz=%u "
+             "ct_enabled=%u ct_dc_permille=%ld ct_harmonic_permille=%lu "
+             "ct_order=%u ct_clip_permille=%lu",
+             static_cast<unsigned long long>(state.generation),
+             static_cast<unsigned long long>(g_boot_id),
+             static_cast<unsigned>(state.frequency_millihz),
+             state.current_shape.enabled ? 1U : 0U,
+             static_cast<long>(state.current_shape.dc_offset_permille),
+             static_cast<unsigned long>(state.current_shape.harmonic_permille),
+             static_cast<unsigned>(state.current_shape.harmonic_order),
+             static_cast<unsigned long>(state.current_shape.clip_permille));
     for (std::size_t index = 0U; index < state.channels.size(); ++index) {
         const auto& channel = state.channels[index];
         ESP_LOGI(kTag,
@@ -608,6 +624,9 @@ void print_state() noexcept {
                  static_cast<unsigned long>(channel.quality),
                  channel.enabled ? 1U : 0U);
     }
+    ESP_LOGI(kTag, "SVBANK END generation=%llu boot=%016llX",
+             static_cast<unsigned long long>(state.generation),
+             static_cast<unsigned long long>(g_boot_id));
 }
 
 bool publish_state(const SvLiveSignalState& state) noexcept {
@@ -743,9 +762,24 @@ void handle_line(char* line) noexcept {
             return;
         }
         profile_control_abort_staging();
-        g_scenario_txn.consume_start();
-        g_start_request.store(true, std::memory_order_release);
-        g_running.store(true, std::memory_order_release);
+        // Serialize against the asynchronous Ethernet DOWN callback. A
+        // link-down that wins this short critical section cannot be undone
+        // by a late USB START on the other CPU.
+        bool armed = false;
+        portENTER_CRITICAL(&g_publisher_lifecycle_mux);
+        if (g_physical_link_up.load(std::memory_order_relaxed) &&
+            !g_running.load(std::memory_order_relaxed)) {
+            g_scenario_txn.consume_start();
+            g_start_request.store(true, std::memory_order_release);
+            g_running.store(true, std::memory_order_release);
+            armed = true;
+        }
+        portEXIT_CRITICAL(&g_publisher_lifecycle_mux);
+        if (!armed) {
+            disarm_control_lease();
+            ESP_LOGE(kTag, "START rejected: physical Ethernet LAN is DOWN or publisher already running");
+            return;
+        }
         wake_publisher();
         ESP_LOGI(kTag, "START accepted: profile armed token=%llu hash=%016llX, phase and smpCnt reset at first sample boundary",
                  static_cast<unsigned long long>(token), static_cast<unsigned long long>(hash));
@@ -756,7 +790,10 @@ void handle_line(char* line) noexcept {
             ESP_LOGE(kTag, "Usage: STOP");
             return;
         }
+        portENTER_CRITICAL(&g_publisher_lifecycle_mux);
         const bool was_running = g_running.exchange(false, std::memory_order_acq_rel);
+        g_start_request.store(false, std::memory_order_release);
+        portEXIT_CRITICAL(&g_publisher_lifecycle_mux);
         g_scenario_txn.reset();
         disarm_control_lease();
         if (was_running) record_sv_stop(SvStopCause::operator_request, 0U);
@@ -972,6 +1009,9 @@ void live_control_initialize(
     g_scenario_txn.reset();
     g_running.store(false, std::memory_order_release);
     g_start_request.store(false, std::memory_order_release);
+    // Ethernet driver starts before this control task initializes. Its LINK UP
+    // event can already have arrived: do not overwrite the physical PHY state
+    // with a stale "boot default DOWN" at this point.
     clear_control_session();
     g_max_heartbeat_gap_ms.store(0U, std::memory_order_release);
     g_slow_heartbeat_events.store(0U, std::memory_order_release);
@@ -1011,22 +1051,30 @@ void live_control_bind_publisher_task(const TaskHandle_t task) noexcept {
     g_publisher_task.store(task, std::memory_order_release);
 }
 
-void live_control_ethernet_link_down_stop() noexcept {
-    // Called only on a real ETH_EVENT DISCONNECTED edge. USB/Studio status
-    // never reaches this path. Fail closed immediately rather than waiting
-    // for 400 consecutive failures on the SV TX hot path.
-    const bool was_running = g_running.exchange(false, std::memory_order_acq_rel);
+void live_control_set_ethernet_link(const bool up) noexcept {
+    // Ethernet DISCONNECTED and driver STOP both revoke transmit authority.
+    // USB/Studio never calls this function. A true UP only permits a future
+    // verified START; it does not restart any faulted session.
+    bool was_running = false;
+    portENTER_CRITICAL(&g_publisher_lifecycle_mux);
+    g_physical_link_up.store(up, std::memory_order_release);
+    if (!up) {
+        was_running = g_running.exchange(false, std::memory_order_acq_rel);
+        g_start_request.store(false, std::memory_order_release);
+    }
+    portEXIT_CRITICAL(&g_publisher_lifecycle_mux);
     if (!was_running) return;
-    g_start_request.store(false, std::memory_order_release);
     clear_control_session();
     record_sv_stop(SvStopCause::ethernet_link_down, 0U);
     wake_publisher();
-    ESP_LOGW(kTag, "Ethernet PHY link lost: SV STOP enforced, operator START required after recovery");
+    ESP_LOGW(kTag, "Ethernet PHY/driver down: SV STOP enforced; operator START required");
 }
 
 void live_control_force_stop() noexcept {
+    portENTER_CRITICAL(&g_publisher_lifecycle_mux);
     const bool was_running = g_running.exchange(false, std::memory_order_acq_rel);
     g_start_request.store(false, std::memory_order_release);
+    portEXIT_CRITICAL(&g_publisher_lifecycle_mux);
     clear_control_session();
     if (was_running) record_sv_stop(SvStopCause::runtime_fault, 0U);
     wake_publisher();
