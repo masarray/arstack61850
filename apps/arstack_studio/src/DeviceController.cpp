@@ -1942,7 +1942,7 @@ void DeviceController::failScenarioStart(const QString& message) {
 void DeviceController::setRunning(const bool value) {
     if (running_ == value) return;
     const bool unexpectedEdge = running_ && !value && !operatorStopPending_ &&
-        scenarioStage_ == ScenarioStage::idle;
+        connected_ && deviceVerified_ && scenarioStage_ == ScenarioStage::idle;
     bool presentationChanged = false;
     if (value) {
         // A new verified RUNNING state ends the old active incident, without
