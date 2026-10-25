@@ -17,7 +17,8 @@ void live_control_initialize(
 
 void live_control_bind_publisher_task(TaskHandle_t task) noexcept;
 void live_control_force_stop() noexcept;
-void live_control_ethernet_link_down_stop() noexcept;
+// PHY/driver-owned link state. DOWN atomically revokes SV; UP never rearms it.
+void live_control_set_ethernet_link(bool up) noexcept;
 
 [[nodiscard]] ar::iec61850::sampled_values::SvTxFaultSnapshot
 live_tx_fault_snapshot() noexcept;
