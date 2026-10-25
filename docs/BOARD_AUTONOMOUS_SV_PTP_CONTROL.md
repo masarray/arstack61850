@@ -23,9 +23,10 @@ The firmware advertises `SV-LAN-AUTONOMY-V1` instead of the obsolete `SESSION-LE
 
 User-supplied independent NIC capture report (firmware build `83439a4a15f186b0`, **before** this change) recorded approximately 1231.679 seconds, 4,926,580 SV frames, 3,999.89 frames/s, zero missing/duplicates/reordered sample counts, zero malformed frames, and 3,693 PTP Layer 2 packets. It ended `INVALID_CAPTURE` because the publisher reported STOPPED before the requested 3600 seconds. The report does NOT identify the actual STOP cause or prove USB was lost: `PUBLISHER_STOP` in SVSYNC is a consequence, not a causal classification. Full `SVLIFE` and `SVTXFAULT` around STOP remain necessary.
 
-Do not relabel the M3.H.2 RC1 release as stable until a **new exact-head firmware+GUI** physical acceptance demonstrates:
-1. Start in Studio, then disconnect USB/close/crash Studio for at least 10 minutes while independent NIC captures uninterrupted SV/PTP.
-2. Reconnect Studio; verified `RUNNING` should appear without replaying START, and no change in smpCnt phase trajectory should be seen.
-3. Explicit operator SV STOP works promptly while PTP remains in its role; explicit PTP STOP works independently.
-4. Unplug Ethernet in isolated test network. SV must stop fail-closed, PTP must tear down promptly; SV must not resume implicitly on replug. PTP does not automatically resume on replug; explicit operator restart is required.
-5. Run a 3600-second uninterrupted receiving-NIC SV test, then verify independent ARSAS/DigSubAnalyzer receive and decode with APPID/svID/smpCnt evidence.
+## Current release decision and follow-on work
+
+The earlier **M3.H.2 RC1 physical-acceptance checklist below is historical**, superseded for the **official M3.H.3 Stable Lab release** of 25 October 2026. The owner accepted the practical 19-minute/4.7M-frame capture and verified GUI-close continuity/reconnect adoption rather than treating a 3,600-second test or expensive external timing equipment as a mandatory product-release gate.
+
+For future development, concentrate on **multiple SV streams on one ESP32-P4 and SCL-based virtual Merging Unit simulation**. Existing Ethernet link fail-closed behavior and autonomous publishing remain non-negotiable regression invariants. Normal engineering debugging with Wireshark/Npcap and user-submitted relay/BCU feedback is welcome, not a prerequisite for the app to be usable.
+
+See [the M3.H.3 official release](releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md) and [Multi-SV + SCL roadmap](PROCESS_BUS_MULTI_SV_SCL_NEXT_PHASE.md).
