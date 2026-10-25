@@ -36,7 +36,10 @@ jobs:
           grep -Fq 'data-asset="portable"' index.html
           grep -Fq 'data-asset="firmware"' index.html
           grep -Fq 'M3.H' index.html
-          grep -Fq '163,048' index.html
+          grep -Fq '4,705,090' index.html
+          grep -Fq 'processbus-sim-m3h3-20261025' index.html
+          grep -Fq 'PTP SOURCE operated in INTERNAL_GM_ONLY mode' index.html
+          grep -Fq 'ARStack-Studio-M3H3-win-x64-setup.exe' index.html
           mkdir -p _site
           cp index.html _site/index.html
           test -s assets/screenshots/arstack-studio-windows.png
@@ -60,7 +63,9 @@ jobs:
               -o /tmp/arstack-live.html; then
               if grep -Fq 'syncLatestRelease' /tmp/arstack-live.html &&
                  grep -Fq 'data-asset="windows"' /tmp/arstack-live.html &&
-                 grep -Fq 'data-asset="portable"' /tmp/arstack-live.html; then
+                 grep -Fq 'data-asset="portable"' /tmp/arstack-live.html &&
+                 grep -Fq '4,705,090' /tmp/arstack-live.html &&
+                 grep -Fq 'processbus-sim-m3h3-20261025' /tmp/arstack-live.html; then
                 echo 'PASS: latest-release links deployed on the public product URL'
                 exit 0
               fi
