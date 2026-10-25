@@ -47,6 +47,19 @@ ApplicationWindow {
             return
         if (typeof snapshot.hz !== "number" || !validFrequency(snapshot.hz))
             return
+        var ct = snapshot.ct
+        // The complete board scenario includes waveform shaping. Omitting CT
+        // would make the next user edit silently overwrite live CT saturation.
+        if (!ct || typeof ct.enabled !== "boolean" ||
+            typeof ct.dc !== "number" || typeof ct.harmonic !== "number" ||
+            typeof ct.order !== "number" || typeof ct.clip !== "number" ||
+            !isFinite(ct.dc) || !isFinite(ct.harmonic) || !isFinite(ct.clip) ||
+            ct.dc < -300 || ct.dc > 300 ||
+            ct.harmonic < 0 || ct.harmonic > 300 ||
+            ct.order < 2 || ct.order > 63 || ct.order !== Math.floor(ct.order) ||
+            ct.clip < 1 || ct.clip > 1000 ||
+            (ct.enabled && snapshot.hz === 0))
+            return
         var groups = [snapshot.current, snapshot.voltage]
         var scales = [currentScale, voltageScale]
         for (var group = 0; group < 2; ++group) {
@@ -73,6 +86,11 @@ ApplicationWindow {
             }
         }
         signalFrequency = snapshot.hz
+        ctSaturationEnabled = ct.enabled
+        ctDcOffsetPercent = ct.dc
+        ctHarmonicPercent = ct.harmonic
+        ctHarmonicOrder = ct.order
+        ctClipPercent = ct.clip
         previousAcFrequency = signalFrequency > 0 ? signalFrequency : 50
         frequencyField.text = signalFrequency.toFixed(3)
         // Board phase angles are authoritative, not the locally persisted
