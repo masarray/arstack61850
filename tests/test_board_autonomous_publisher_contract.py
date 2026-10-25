@@ -60,6 +60,13 @@ assert "SV-LAN-AUTONOMY-V1" in device
 assert "SVBANK BEGIN generation=" in fw and "SVBANK END generation=" in fw
 assert "SVBANK BEGIN" in device and "SVBANK END" in device
 assert "pendingBoardRows_.size() == 8" in device
+assert "ct_enabled=" in fw and "ct_harmonic_permille=" in fw
+assert "pendingBoardCt_" in device and "QStringLiteral(\"ct\")" in device
+qml = (root / "apps/arstack_studio/qml/Main.qml").read_text()
+assert "ctSaturationEnabled = ct.enabled" in qml
+assert "ctDcOffsetPercent = ct.dc" in qml
+assert "ctHarmonicPercent = ct.harmonic" in qml
+assert "ctClipPercent = ct.clip" in qml
 assert "pendingBoardBoot_.compare(identity_.bootId" in device
 assert "g_control_watchdog_ready.load" not in fw.split(
     "bool arm_control_lease_if_fresh()", 1)[1].split(
