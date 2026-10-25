@@ -126,9 +126,9 @@ void DeviceIoWorker::shutdown(const bool requestSvStop, const bool requestPtpSto
     probeQueue_.clear();
     genericProbeActive_ = false;
 
-    // Stop both independent publishers before handing the COM port to an
-    // installer. Keep SV stop ahead of PTP stop so no new SV frame is sent
-    // during grandmaster shutdown. This runs once during teardown only.
+    // Only an EXPLICITLY requested safety shutdown may send STOP here.
+    // Normal Studio exit and COM transport retirement pass false/false:
+    // the board already owns both LAN publisher lifetimes.
     commandQueue_.clear();
     ptpStopPending_ = false;
     svStopPending_ = false;
