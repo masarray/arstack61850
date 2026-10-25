@@ -278,6 +278,7 @@ void eth_event_handler(void*, esp_event_base_t, const std::int32_t event_id, voi
     switch (event_id) {
     case ETHERNET_EVENT_CONNECTED:
         xEventGroupSetBits(g_link_events, kLinkUpBit);
+        live_control_set_ethernet_link(true);
         ESP_LOGI(kTag, "Ethernet link up");
         break;
     case ETHERNET_EVENT_DISCONNECTED:
