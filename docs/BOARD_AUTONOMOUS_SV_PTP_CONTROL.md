@@ -17,7 +17,7 @@ The ESP32-P4 owns the IEC 61850 SV and PTP data plane. ARStack Studio owns **ope
 
 Scope: isolated process-bus laboratory only. This deliberately does **not** persist a RUNNING command to flash/NVS or restart an injector after a power loss, nor does it disable the canonical TX fail-closed protection, PTP lease validity checks, or actual operator STOP.
 
-The old `SESSION-LEASE` capability name is retained for wire-protocol interoperability with existing Studio versions; its heartbeat is now **diagnostic** for the publisher lifetime. START still requires fresh board-authorized scenario token/hash plus an active control session, whereas **ongoing transmission** never waits on a PC heartbeat. Compatibility should be verified against the shipped paired Studio/firmware after applying this change.
+The firmware advertises `SV-LAN-AUTONOMY-V1` instead of the obsolete `SESSION-LEASE` capability. Old Studio/firmware combinations must not be silently treated as compatible. Heartbeat is **diagnostic** for the publisher lifetime. START still requires fresh board-authorized scenario token/hash plus an active control session, whereas **ongoing transmission** never waits on a PC heartbeat. Compatibility should be verified against the shipped paired Studio/firmware after applying this change.
 
 ## Field evidence — 25 October 2026
 
