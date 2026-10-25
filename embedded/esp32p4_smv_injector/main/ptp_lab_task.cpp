@@ -1202,6 +1202,16 @@ extern "C" void ar_ptp_lab_stop(void) {
     ar::esp32p4::smv::stop_ptp_lab();
 }
 
+extern "C" void ar_ptp_lab_set_ethernet_link_up(const bool up) {
+    using namespace ar::esp32p4::smv;
+    g_ptp_physical_link_up.store(up, std::memory_order_release);
+    if (!up) {
+        g_ptp_ready.store(false, std::memory_order_release);
+        g_ptp_last_announce_us.store(0LL, std::memory_order_release);
+        g_ptp_last_sync_pair_us.store(0LL, std::memory_order_release);
+    }
+}
+
 extern "C" bool ar_ptp_lab_is_running(void) {
     return ar::esp32p4::smv::ptp_lab_is_running();
 }
