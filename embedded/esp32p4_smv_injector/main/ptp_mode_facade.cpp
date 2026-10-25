@@ -48,6 +48,8 @@ bool g_facade_override_valid = false;
 std::atomic_bool g_receiver_stop_pending{false};
 // Cancel only automatic boot attempts; operator PTP actions are authoritative.
 std::atomic_bool g_boot_source_autostart_allowed{true};
+// Changed only by a genuine PHY UP->DOWN. START crossing that edge must cancel.
+std::atomic<std::uint32_t> g_link_fault_generation{0U};
 std::atomic<std::uint32_t> g_ptp_policy_generation{1U};
 // Compiling external-GM arbitration must NEVER silently opt the relay
 // test-set into handover. SOURCE stays its own GM across every SV STOP/START.
@@ -382,6 +384,8 @@ extern "C" bool ar_ptp_lab_try_start(const esp_eth_handle_t eth_handle) {
     if (eth_handle == nullptr) return false;
     ar::esp32p4::smv::RoleControlClaim transaction{};
     if (!transaction.held || !ar::esp32p4::smv::emac_role_free()) return false;
+    const auto admitted_link_generation =
+        ar::esp32p4::smv::g_link_fault_generation.load(std::memory_order_acquire);
 
     const auto config = ar::esp32p4::smv::selected_config();
     if (!ar::esp32p4::smv::valid_public_config(config)) {
@@ -400,6 +404,14 @@ extern "C" bool ar_ptp_lab_try_start(const esp_eth_handle_t eth_handle) {
     }
     // STOP can race with the bounded blocking START: it must win the
     // cancellation handshake before START may report READY to its caller.
+    if (admitted_link_generation !=
+        ar::esp32p4::smv::g_link_fault_generation.load(std::memory_order_acquire)) {
+        // Link disappeared during bounded START readiness. Publish STOP to
+        // the cancellation gate: the current owner drains both role workers
+        // before releasing EMAC, outside of the ESP event callback.
+        static_cast<void>(
+            ar::esp32p4::smv::g_role_control.request_stop_and_try_acquire());
+    }
     const bool uncancelled = transaction.finish();
     return started && uncancelled;
 }
@@ -409,6 +421,8 @@ extern "C" void ar_ptp_lab_start(const esp_eth_handle_t eth_handle) {
 }
 
 extern "C" void ar_ptp_lab_request_link_down_stop(void) {
+    ar::esp32p4::smv::g_link_fault_generation.fetch_add(
+        1U, std::memory_order_acq_rel);
     // A verified PHY-down is independent of Studio/USB connection. Prevent
     // the boot PTP supervisor from re-admitting a stopped role on cable replug.
     // Explicit operator PTP START is still the recovery authority.
