@@ -1189,6 +1189,13 @@ extern "C" void ar_ptp_lab_stop(void) {
     ar::esp32p4::smv::stop_ptp_lab();
 }
 
+extern "C" void ar_ptp_lab_request_link_down_stop(void) {
+    // Task owns runtime and EMAC cleanup. Never wait inside esp_event callback.
+    ar::esp32p4::smv::g_stop_requested.store(true, std::memory_order_release);
+    if (ar::esp32p4::smv::g_ptp_context.task_handle != nullptr)
+        xTaskNotifyGive(ar::esp32p4::smv::g_ptp_context.task_handle);
+}
+
 extern "C" bool ar_ptp_lab_is_running(void) {
     return ar::esp32p4::smv::ptp_lab_is_running();
 }
