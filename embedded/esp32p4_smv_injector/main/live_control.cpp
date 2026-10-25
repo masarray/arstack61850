@@ -52,7 +52,7 @@ constexpr std::uint32_t kSlowHeartbeatGapMs = 2000U;
 constexpr std::uint64_t kControlWatchdogPeriodUs = 250000ULL;
 
 enum class SvStopCause : std::uint32_t {
-    none = 0U, operator_request, lease_expired, runtime_fault
+    none = 0U, operator_request, lease_expired, runtime_fault, ethernet_link_down
 };
 
 const char* sv_stop_cause_name(const SvStopCause cause) noexcept {
