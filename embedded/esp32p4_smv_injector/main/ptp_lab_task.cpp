@@ -1190,10 +1190,10 @@ extern "C" void ar_ptp_lab_stop(void) {
 }
 
 extern "C" void ar_ptp_lab_request_link_down_stop(void) {
-    // Task owns runtime and EMAC cleanup. Never wait inside esp_event callback.
+    // Event loop must never block, nor dereference a task handle which can
+    // concurrently be deleted during teardown. PTP polls this atomic flag
+    // at <=5-ms cadence and performs its own EMAC/role cleanup.
     ar::esp32p4::smv::g_stop_requested.store(true, std::memory_order_release);
-    if (ar::esp32p4::smv::g_ptp_context.task_handle != nullptr)
-        xTaskNotifyGive(ar::esp32p4::smv::g_ptp_context.task_handle);
 }
 
 extern "C" bool ar_ptp_lab_is_running(void) {
