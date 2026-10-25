@@ -2093,7 +2093,7 @@ void DeviceController::processLine(const QString& rawLine) {
     // must match the verified boot and one bank generation, never just a
     // partial line or values that happen to be cached in the UI.
     static const QRegularExpression kBankBegin{
-        QStringLiteral("SVBANK BEGIN generation=(\\d+) boot=([0-9A-Fa-f]{16}) hz_millihz=(\\d+)")};
+        QStringLiteral("SVBANK BEGIN generation=(\\d+) boot=([0-9A-Fa-f]{16}) hz_millihz=(\\d+) ct_enabled=([01]) ct_dc_permille=(-?\\d+) ct_harmonic_permille=(\\d+) ct_order=(\\d+) ct_clip_permille=(\\d+)")};
     static const QRegularExpression kBankRow{
         QStringLiteral("(IA|IB|IC|IN|UA|UB|UC|UN) rms_counts=(-?\\d+) phase_mdeg=(-?\\d+) quality=0x([0-9A-Fa-f]{8}) enabled=([01])")};
     static const QRegularExpression kBankEnd{
@@ -2102,13 +2102,30 @@ void DeviceController::processLine(const QString& rawLine) {
     if (begin.hasMatch()) {
         pendingBoardSnapshot_ = false;
         pendingBoardRows_.clear();
-        bool hzOk = false;
+        pendingBoardCt_.clear();
+        bool hzOk = false, dcOk = false, harmonicOk = false, orderOk = false, clipOk = false;
         const auto mhz = begin.captured(3).toUInt(&hzOk);
+        const auto dcPermille = begin.captured(5).toInt(&dcOk);
+        const auto harmonicPermille = begin.captured(6).toUInt(&harmonicOk);
+        const auto order = begin.captured(7).toUInt(&orderOk);
+        const auto clipPermille = begin.captured(8).toUInt(&clipOk);
+        const bool shapeEnabled = begin.captured(4) == QStringLiteral("1");
         if (deviceVerified_ && connected_ && hzOk && mhz <= 1000000U &&
+            dcOk && dcPermille >= -3000 && dcPermille <= 3000 &&
+            harmonicOk && harmonicPermille <= 3000U &&
+            orderOk && order >= 2U && order <= 63U &&
+            clipOk && clipPermille >= 10U && clipPermille <= 10000U &&
+            (!shapeEnabled || mhz != 0U) &&
             begin.captured(2).compare(identity_.bootId, Qt::CaseInsensitive) == 0) {
             pendingBoardGeneration_ = begin.captured(1);
             pendingBoardBoot_ = begin.captured(2);
             pendingBoardHzMilli_ = mhz;
+            pendingBoardCt_ = QVariantMap{
+                {QStringLiteral("enabled"), shapeEnabled},
+                {QStringLiteral("dc"), static_cast<double>(dcPermille) / 10.0},
+                {QStringLiteral("harmonic"), static_cast<double>(harmonicPermille) / 10.0},
+                {QStringLiteral("order"), static_cast<int>(order)},
+                {QStringLiteral("clip"), static_cast<double>(clipPermille) / 10.0}};
             pendingBoardSnapshot_ = true;
         }
         return;
@@ -2128,6 +2145,7 @@ void DeviceController::processLine(const QString& rawLine) {
             pendingBoardRows_.contains(key)) {
             pendingBoardSnapshot_ = false;
             pendingBoardRows_.clear();
+            pendingBoardCt_.clear();
         } else {
             pendingBoardRows_.insert(key, QVariantMap{
                 {QStringLiteral("counts"), counts},
@@ -2141,6 +2159,7 @@ void DeviceController::processLine(const QString& rawLine) {
     const auto end = kBankEnd.match(line);
     if (end.hasMatch()) {
         if (pendingBoardSnapshot_ && pendingBoardRows_.size() == 8 &&
+            !pendingBoardCt_.isEmpty() &&
             connected_ && deviceVerified_ &&
             end.captured(1) == pendingBoardGeneration_ &&
             end.captured(2).compare(pendingBoardBoot_, Qt::CaseInsensitive) == 0 &&
@@ -2156,6 +2175,7 @@ void DeviceController::processLine(const QString& rawLine) {
                 {QStringLiteral("boot"), pendingBoardBoot_},
                 {QStringLiteral("generation"), pendingBoardGeneration_},
                 {QStringLiteral("hz"), static_cast<double>(pendingBoardHzMilli_) / 1000.0},
+                {QStringLiteral("ct"), pendingBoardCt_},
                 {QStringLiteral("current"), current},
                 {QStringLiteral("voltage"), voltage}
             };
@@ -2166,6 +2186,7 @@ void DeviceController::processLine(const QString& rawLine) {
         }
         pendingBoardSnapshot_ = false;
         pendingBoardRows_.clear();
+        pendingBoardCt_.clear();
         return;
     }
 
@@ -2661,6 +2682,7 @@ void DeviceController::processLine(const QString& rawLine) {
 void DeviceController::resetTelemetry() {
     pendingBoardSnapshot_ = false;
     pendingBoardRows_.clear();
+    pendingBoardCt_.clear();
     pendingBoardGeneration_.clear();
     pendingBoardBoot_.clear();
     pendingBoardHzMilli_ = 0U;
