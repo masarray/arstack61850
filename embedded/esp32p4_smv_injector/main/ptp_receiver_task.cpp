@@ -977,6 +977,12 @@ bool ptp_receiver_start(
     }
 }
 
+void ptp_receiver_request_link_down_stop() noexcept {
+    // Receiver and monitor share this worker; task polls at bounded cadence.
+    // Do not dereference task_handle while its owner can be deleting it.
+    g_receiver_stop_requested.store(true, std::memory_order_release);
+}
+
 void ptp_receiver_stop() noexcept {
     if (!g_receiver_running.load(std::memory_order_acquire)) return;
     g_receiver_stop_requested.store(true, std::memory_order_release);
