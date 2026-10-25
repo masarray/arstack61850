@@ -601,10 +601,18 @@ void print_state() noexcept {
              tx.stop_link_up ? 1U : 0U);
     // Coherent 4I4V readback: BEGIN/END refer to this same immutable bank
     // snapshot, its generation and its physical boot identity. No state write.
-    ESP_LOGI(kTag, "SVBANK BEGIN generation=%llu boot=%016llX hz_millihz=%u",
+    ESP_LOGI(kTag,
+             "SVBANK BEGIN generation=%llu boot=%016llX hz_millihz=%u "
+             "ct_enabled=%u ct_dc_permille=%ld ct_harmonic_permille=%lu "
+             "ct_order=%u ct_clip_permille=%lu",
              static_cast<unsigned long long>(state.generation),
              static_cast<unsigned long long>(g_boot_id),
-             static_cast<unsigned>(state.frequency_millihz));
+             static_cast<unsigned>(state.frequency_millihz),
+             state.current_shape.enabled ? 1U : 0U,
+             static_cast<long>(state.current_shape.dc_offset_permille),
+             static_cast<unsigned long>(state.current_shape.harmonic_permille),
+             static_cast<unsigned>(state.current_shape.harmonic_order),
+             static_cast<unsigned long>(state.current_shape.clip_permille));
     for (std::size_t index = 0U; index < state.channels.size(); ++index) {
         const auto& channel = state.channels[index];
         ESP_LOGI(kTag,
