@@ -70,6 +70,7 @@ namespace {
 using ar::esp32p4::smv::RuntimePublisherProfile;
 using ar::esp32p4::smv::live_control_bind_publisher_task;
 using ar::esp32p4::smv::live_control_force_stop;
+using ar::esp32p4::smv::live_control_ethernet_link_down_stop;
 using ar::esp32p4::smv::live_control_initialize;
 using ar::esp32p4::smv::live_control_task;
 using ar::esp32p4::smv::live_signal_snapshot;
@@ -279,10 +280,22 @@ void eth_event_handler(void*, esp_event_base_t, const std::int32_t event_id, voi
         xEventGroupSetBits(g_link_events, kLinkUpBit);
         ESP_LOGI(kTag, "Ethernet link up");
         break;
-    case ETHERNET_EVENT_DISCONNECTED:
+    case ETHERNET_EVENT_DISCONNECTED: {
+        const bool was_up = (xEventGroupGetBits(g_link_events) & kLinkUpBit) != 0U;
         xEventGroupClearBits(g_link_events, kLinkUpBit);
-        ESP_LOGW(kTag, "Ethernet link down");
+        if (was_up) {
+            // A genuine UP -> DOWN transition, not initial no-cable startup.
+            live_control_ethernet_link_down_stop();
+#if CONFIG_AR_PTP_LAB_TX
+            // Role-aware, atomic cancellation; event callback never blocks.
+            ar_ptp_lab_request_link_down_stop();
+#endif
+            ESP_LOGW(kTag, "Ethernet PHY lost: SV stopped; PTP role teardown requested");
+        } else {
+            ESP_LOGW(kTag, "Ethernet down (no prior link-UP); no false startup fault");
+        }
         break;
+    }
     case ETHERNET_EVENT_START:
         ESP_LOGI(kTag, "Ethernet driver started");
         break;

@@ -91,6 +91,10 @@ jobs:
           restore-keys: |
             esp32p4-idf554-ccache-v1-${{ runner.os }}-
 
+      - name: Guard autonomous publisher and explicit Ethernet STOP policy
+        shell: bash
+        run: python3 "$GITHUB_WORKSPACE/tests/test_board_autonomous_publisher_contract.py"
+
       - name: Reset compiler cache statistics
         run: |
           if command -v ccache >/dev/null 2>&1; then

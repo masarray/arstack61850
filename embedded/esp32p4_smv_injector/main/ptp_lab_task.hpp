@@ -166,6 +166,9 @@ void ar_ptp_lab_start(esp_eth_handle_t eth_handle);
 /** Request a clean stop of the PTP task without touching the SV hot path. */
 void ar_ptp_lab_stop(void);
 
+/** Ethernet event callback: request task-owned teardown without blocking event loop. */
+void ar_ptp_lab_request_link_down_stop(void);
+
 /** Return whether the selected PTP runtime is currently ready/running. */
 bool ar_ptp_lab_is_running(void);
 

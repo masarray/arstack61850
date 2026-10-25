@@ -15,6 +15,8 @@ namespace ar::esp32p4::smv {
     const ar_ptp_lab_config_t& config) noexcept;
 
 void ptp_receiver_stop() noexcept;
+/** Physical-LAN-fault cancellation: atomic and nonblocking from event task. */
+void ptp_receiver_request_link_down_stop() noexcept;
 
 /** True only after hardware PTP + RX timestamp callback readiness completes. */
 [[nodiscard]] bool ptp_receiver_is_running() noexcept;
