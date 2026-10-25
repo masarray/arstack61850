@@ -1211,8 +1211,9 @@ private:
 
     static bool boardStopCausePersistsUntilVerifiedRestart() {
         Fixture f;
+        if (!f.profileReady) return false;
+        seedVerified(f, identity(), QStringLiteral("COM7"), true);
         auto& d = f.device;
-        d.setRunning(true);
         d.processLine(QStringLiteral(
             "I ar_smv_ctrl: state=STOPPED generation=3 signal_frequency=50000 mHz"));
         if (d.running() || d.svStopReason_ != QStringLiteral("AWAITING_BOARD_CAUSE"))
