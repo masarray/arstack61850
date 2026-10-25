@@ -70,6 +70,7 @@ namespace {
 using ar::esp32p4::smv::RuntimePublisherProfile;
 using ar::esp32p4::smv::live_control_bind_publisher_task;
 using ar::esp32p4::smv::live_control_force_stop;
+using ar::esp32p4::smv::live_control_stop_for_link_loss;
 using ar::esp32p4::smv::live_control_initialize;
 using ar::esp32p4::smv::live_control_task;
 using ar::esp32p4::smv::live_signal_snapshot;
