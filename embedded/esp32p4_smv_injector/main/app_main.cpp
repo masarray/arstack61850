@@ -296,6 +296,11 @@ void eth_event_handler(void*, esp_event_base_t, const std::int32_t event_id, voi
         ESP_LOGI(kTag, "Ethernet driver started");
         break;
     case ETHERNET_EVENT_STOP:
+        xEventGroupClearBits(g_link_events, kLinkUpBit);
+        live_control_set_ethernet_link(false);
+#if CONFIG_AR_PTP_LAB_TX
+        ar_ptp_lab_set_ethernet_link_up(false);
+#endif
         ESP_LOGI(kTag, "Ethernet driver stopped");
         break;
     default:
