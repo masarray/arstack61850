@@ -345,6 +345,18 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         DeviceController::identitySupportsCurrentContract(
             currentIdentity, QStringLiteral(ARSTACK_STUDIO_VERSION), QStringLiteral("0123456789abcdef"));
 
+    // A lease-era board may have an identical version/build-looking header.
+    // It must not be accepted as proof of autonomous LAN behavior.
+    DeviceIdentity oldLeaseIdentity;
+    const QString oldLeaseLine = QStringLiteral(
+        "I (413) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
+        "device_id=A1B2C3D4E5F6 firmware=%1 build=0123456789abcdef boot_id=0123456789ABCDEF "
+        "capabilities=SMV-4I4V,PROFILE,PROFILE-BINARY-V1,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO")
+        .arg(QStringLiteral(ARSTACK_STUDIO_VERSION));
+    const bool oldLeaseRejected = DeviceController::parseIdentityLine(oldLeaseLine, oldLeaseIdentity) &&
+        !DeviceController::identitySupportsCurrentContract(
+            oldLeaseIdentity, QStringLiteral(ARSTACK_STUDIO_VERSION), QStringLiteral("0123456789abcdef"));
+
     DeviceIdentity legacyIdentity;
     const QString legacyLine = QStringLiteral(
         "I (417) ar_smv_ctrl: ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 "
@@ -503,7 +515,7 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         !detachedSupervisor.requestStartPtp() &&
         !detachedSupervisor.requestStopPtp();
 
-    if (!currentAccepted || !legacyRejectedAsCurrent || !protocolLegacyParsed ||
+    if (!currentAccepted || !oldLeaseRejected || !legacyRejectedAsCurrent || !protocolLegacyParsed ||
         !capabilityFailClosed || !rejectsWrongTarget || !rejectsMissingFirmware ||
         !rejectsMalformedBoot || !boundedIdentifyPolicy || !boundedProfileSyncPolicy ||
         !workerPolicyAligned || !generationPolicy || !portOwnershipPolicy ||
@@ -511,6 +523,7 @@ int checkP0ControllerPolicy(int argc, char* argv[]) {
         qCritical().noquote()
             << "S1/S2/S3/S4/S5/S6/S7 control-plane contract: FAIL"
             << "current=" << currentAccepted
+            << "old-lease-rejected=" << oldLeaseRejected
             << "legacy=" << legacyRejectedAsCurrent
             << "protocol-legacy=" << protocolLegacyParsed
             << "capability-fail-closed=" << capabilityFailClosed
