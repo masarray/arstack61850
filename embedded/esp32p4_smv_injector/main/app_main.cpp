@@ -16,6 +16,9 @@
 #include "ethernet_port.h"
 #include "live_control.hpp"
 #include "runtime_profile.hpp"
+#include "multi_profile_control.hpp"
+#include "compiled_profile_adapter.hpp"
+#include "ariec61850/sampled_values/m4_three_sv_grid.hpp"
 #include "sdkconfig.h"
 #if CONFIG_AR_PTP_LAB_TX
 #include "ptp_lab_task.hpp"
@@ -1115,6 +1118,16 @@ void publisher_task(void* argument) {
 
     PacketTemplate canonical;
     PacketTemplate mirror;
+    // One publisher task, one timer and one Ethernet MAC. Extra MUs have
+    // dedicated packet storage and DDS phase; no extra RTOS tasks/timers.
+    static std::array<PacketTemplate, 2> multi_extra_packets{};
+    static std::array<RuntimePublisherProfile, 3> multi_profiles{};
+    static std::array<SvFixedPointSineEngine, 2> multi_extra_engines{};
+    static std::array<SvLiveSignalState, 2> multi_extra_signals{};
+    ar::iec61850::sampled_values::M4ThreeSvGridPlanner multi_grid{};
+    bool multi_active = false;
+    std::uint64_t multi_tick_index = 0U;
+    std::uint64_t multi_ptp_session = 1U;
     RuntimePublisherProfile active_profile = initial_profile;
     static SvFixedPointSineEngine signal_engine;
     gptimer_handle_t sample_clock = nullptr;
@@ -1150,9 +1163,35 @@ void publisher_task(void* argument) {
         if (pending_ticks == 0U && live_tx_running()) continue;
 
         if (take_start_request()) {
+            // BEGIN/VALIDATE/COMMIT and explicit SELECT came through one
+            // console task while STOPPED. A selected roster is immutable
+            // until STOP; never decode XML or allocate in a 250us tick.
+            multi_active = false;
+            if (const auto* roster =
+                    ar::esp32p4::smv::multi_profile_tx_roster_if_selected()) {
+                bool valid = true;
+                for (std::size_t slot = 0U; slot < multi_profiles.size(); ++slot) {
+                    if (ar::esp32p4::smv::map_compiled_runtime_profile(
+                            roster[slot], multi_profiles[slot]) !=
+                            ar::esp32p4::smv::BinaryRuntimeProfileStatus::ok ||
+                        !runtime_profile_validate(multi_profiles[slot]) ||
+                        multi_profiles[slot].publisher_rate_hz != 4000U ||
+                        multi_profiles[slot].sample_counter_modulus != 4000U) {
+                        valid = false;
+                        break;
+                    }
+                }
+                if (!valid) {
+                    ESP_LOGE(kTag, "MULTISV START rejected: invalid or unsupported MU profile");
+                    live_control_force_stop();
+                    continue;
+                }
+                multi_active = true;
+            }
 #if AR_SV_PTP_PHASE_SUPPORTED
             const auto now_lease = read_ptp_epoch_clock_lease();
-            const auto requested_profile = runtime_profile_snapshot();
+            const auto requested_profile = multi_active
+                ? multi_profiles[0] : runtime_profile_snapshot();
             // A fast STOP→START may arrive before the publisher has run its
             // 200-ms idle/park branch. There is still exactly one valid timer;
             // do not destroy that continuously aligned phase grid just
@@ -1172,7 +1211,8 @@ void publisher_task(void* argument) {
                     sample_clock != nullptr, epoch_armed,
                     g_sample_clock_context.phase_enabled, source_unchanged,
                     profile_unchanged, auto_mode);
-            const bool reuse_preflight = sample_clock != nullptr && epoch_armed &&
+            const bool reuse_preflight = !multi_active &&
+                sample_clock != nullptr && epoch_armed &&
                 requested_profile.sample_counter_modulus ==
                     requested_profile.publisher_rate_hz &&
                 SvAutoPreflightPolicy::can_reuse(
@@ -1220,17 +1260,44 @@ void publisher_task(void* argument) {
             stop_sample_clock(sample_clock);
 #endif
             preflight_clock = false;
-            active_profile = runtime_profile_snapshot();
+            active_profile = multi_active
+                ? multi_profiles[0] : runtime_profile_snapshot();
             if (!runtime_profile_validate(active_profile)) {
                 ESP_LOGE(kTag, "START rejected: active runtime profile is invalid");
                 continue;
             }
             if (!build_packet_template(source_mac, active_profile, false, false, canonical)) {
                 ESP_LOGE(kTag, "START rejected: canonical template build failed");
+                live_control_force_stop();
                 continue;
             }
+            if (multi_active) {
+                bool built = true;
+                for (std::size_t slot = 1U; slot < multi_profiles.size(); ++slot) {
+                    if (!build_packet_template(source_mac, multi_profiles[slot],
+                                               false, false, multi_extra_packets[slot - 1U])) {
+                        built = false;
+                        break;
+                    }
+                }
+                if (!built) {
+                    ESP_LOGE(kTag, "MULTISV START rejected: three canonical templates required");
+                    live_control_force_stop();
+                    continue;
+                }
+                const auto base_signal = live_signal_snapshot();
+                for (std::size_t slot = 0U; slot < multi_extra_signals.size(); ++slot) {
+                    // Physical per-MU live edits arrive with P0D; until then
+                    // separate immutable initial copies prevent shared state
+                    // mutation and each MU has an independent phase engine.
+                    multi_extra_signals[slot] = base_signal;
+                    multi_extra_engines[slot].reset_phase();
+                }
+                multi_tick_index = 0U;
+            }
 #if CONFIG_AR_SMV_BROADCAST_MIRROR
-            if (!build_packet_template(source_mac, active_profile, true, true, mirror)) {
+            if (!multi_active &&
+                !build_packet_template(source_mac, active_profile, true, true, mirror)) {
                 ESP_LOGE(kTag, "START rejected: diagnostic mirror template build failed");
                 continue;
             }
@@ -1325,6 +1392,21 @@ void publisher_task(void* argument) {
                 if (!epoch_armed) {
                     static_cast<void>(expected_schedule.next_ticks());
                 }
+            }
+            // The timer/ISR is the sole sampling clock for all selected
+            // MUs. Its PTP session generation is shared, not one per stream.
+            if (multi_active) {
+#if AR_SV_PTP_PHASE_SUPPORTED
+                multi_ptp_session = std::max<std::uint64_t>(
+                    1U, g_sample_clock_context.session_generation.load(
+                        std::memory_order_acquire));
+#else
+                multi_ptp_session = 1U;
+#endif
+                multi_grid.reset(multi_ptp_session);
+                ESP_LOGI(kTag,
+                    "M4 THREE_SV armed: 3 x 4000fps, shared sample GPTimer, "
+                    "distinct MAC/APPID/svID; 250us deadline target");
             }
             // Do not log after the timer is enabled: even a single slow
             // console write can accumulate ISR notifications before the
