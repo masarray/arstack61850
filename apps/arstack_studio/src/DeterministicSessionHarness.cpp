@@ -1662,7 +1662,8 @@ private:
         device.processLine(replacement);
         return device.bootId() == QStringLiteral("FEDCBA9876543210") &&
             device.deviceVerified() &&
-            !device.running() && !device.profileArmed() &&
+            !device.running() && !device.svUnexpectedStopObserved() &&
+            device.svStopReason().isEmpty() && !device.profileArmed() &&
             !device.profileWasReused() &&
             session.profileSyncBootId_ != oldIdentity.bootId &&
             !session.startReady();
