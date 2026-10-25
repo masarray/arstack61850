@@ -1,10 +1,10 @@
 # Install ARStack Studio
 
-**[Latest stable release](https://github.com/masarray/arstack61850/releases/latest)** · **[Product page](https://masarray.github.io/arstack61850/)**
+**[M3.H.3 Official Stable Release](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h3-20261025)** · **[Product page](https://masarray.github.io/arstack61850/)**
 
 ## Windows 10/11 (x64)
 
-Download the `win-x64-setup.exe` asset from **Latest stable release**, open it and follow Setup. The portable ZIP works without installing.
+Download **[`ARStack-Studio-M3H3-win-x64-setup.exe`](https://github.com/masarray/arstack61850/releases/download/processbus-sim-m3h3-20261025/ARStack-Studio-M3H3-win-x64-setup.exe)** and follow Setup. The matching portable package is `ARStack-Studio-M3H3-win-x64-portable.zip`. The official installer is built from the accepted Windows CI preview binary and retains its historical internal installer identity; it does not silently replace older stable installs.
 
 To download the newest installer through PowerShell, verify its SHA-256 and open Setup automatically:
 
@@ -18,14 +18,14 @@ To download a verified copy without starting the installer, run `& $script -Down
 
 ## Linux (x86_64)
 
-For Linux x86_64, download `ARStack-Studio-linux-x86_64.AppImage` from the [latest stable release](https://github.com/masarray/arstack61850/releases/latest) when listed. Mark it executable (`chmod +x`) and open it. You can also install it into your home folder with:
+For Linux x86_64, download `ARStack-Studio-linux-x86_64.AppImage` from the [M3.H.3 stable release](https://github.com/masarray/arstack61850/releases/latest). Mark it executable (`chmod +x`) and open it. You can also install it into your home folder with:
 
 ```bash
 curl -fLsS https://raw.githubusercontent.com/masarray/arstack61850/main/scripts/install-linux.sh -o /tmp/arstack-install-linux.sh
 bash /tmp/arstack-install-linux.sh
 ```
 
-The install script checks the matching published SHA-256. It will explain when the current release does not yet contain a Linux build rather than downloading an older or unverified binary. The AppImage build is only published after Linux CI succeeds.
+The install script verifies the matching published SHA-256. The M3.H.3 official stable release contains the tested Linux AppImage.
 
 ## First lab experiment
 
@@ -34,4 +34,4 @@ The install script checks the matching published SHA-256. It will explain when t
 3. Select a simulated PTP source, set waveform values, and press **Start**.
 4. Inspect SV and PTP traffic on a dedicated test switch or network segment.
 
-No external timing reference is required for the basic simulation. Use the [release notes](https://github.com/masarray/arstack61850/releases/latest) for the exact validated capabilities and device/firmware pairing.
+No external timing reference is required for the internal lab PTP SOURCE simulation. External GM lock or UTC traceability is not claimed. With the ESP32-P4 still powered, closing Studio does not itself STOP SV; reopening Studio adopts the current board state. Review the [M3.H.3 release evidence](releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md) and pair the board only with its matched firmware.
