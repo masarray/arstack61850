@@ -1351,6 +1351,8 @@ void publisher_task(void* argument) {
                 current_phase_healthy ? 1U : 0U,
                 phase_observer_fresh ? 1U : 0U);
 #endif
+            if (multi_active)
+                ESP_LOGI(kTag, "MULTISV TX selected: 3 x 4000fps, common GPTimer/PTP sample grid");
             ESP_LOGI(kTag,
                      "PROFILE armed generation=%llu svID=%s APPID=0x%04X rate=%lu wrap=%u confRev=%lu VLAN=%u/%u/%u frameLen=%u",
                      static_cast<unsigned long long>(active_profile.generation),
@@ -1404,9 +1406,7 @@ void publisher_task(void* argument) {
                 multi_ptp_session = 1U;
 #endif
                 multi_grid.reset(multi_ptp_session);
-                ESP_LOGI(kTag,
-                    "M4 THREE_SV armed: 3 x 4000fps, shared sample GPTimer, "
-                    "distinct MAC/APPID/svID; 250us deadline target");
+
             }
             // Do not log after the timer is enabled: even a single slow
             // console write can accumulate ISR notifications before the
@@ -1559,6 +1559,13 @@ void publisher_task(void* argument) {
                 signal_state,
                 active_profile.publisher_rate_hz,
                 static_cast<std::uint32_t>(missed_slots));
+            if (multi_active) {
+                for (std::size_t slot = 0U; slot < multi_extra_engines.size(); ++slot)
+                    multi_extra_engines[slot].advance(
+                        multi_extra_signals[slot], 4000U,
+                        static_cast<std::uint32_t>(missed_slots));
+                multi_tick_index += missed_slots;
+            }
         }
 
         const std::int64_t lateness_us = actual_wake_us - expected_wake_us;
@@ -1629,6 +1636,27 @@ void publisher_task(void* argument) {
             const auto sync_decision = smp_synch_lab_decision();
             const auto sample_synchronization =
                 static_cast<std::uint8_t>(sync_decision.value);
+            if (multi_active) {
+#if AR_SV_PTP_PHASE_SUPPORTED
+                const auto actual_session = std::max<std::uint64_t>(
+                    1U, g_sample_clock_context.session_generation.load(
+                        std::memory_order_acquire));
+#else
+                const auto actual_session = multi_ptp_session;
+#endif
+                const auto shared = multi_grid.plan({
+                    actual_session, multi_tick_index, sample_synchronization, true});
+                // A change to the one sample clock/lease revokes the whole
+                // three-stream batch, rather than sending three stale epochs.
+                if (shared.timing_discontinuity || shared.count != 3U ||
+                    shared.frames[0].smp_cnt != canonical_sample_count) {
+                    ESP_LOGE(kTag, "MULTISV shared PTP/sample grid revoked");
+                    live_control_force_stop();
+                    stop_sample_clock(sample_clock);
+                    schedule_anchored = false;
+                    continue;
+                }
+            }
             patch_packet(
                 canonical, canonical_sample_count, sample_synchronization, row, signal_state);
 #if AR_SV_TX_EGRESS_SUPPORTED
@@ -1791,17 +1819,62 @@ void publisher_task(void* argument) {
 #endif
             }
 
+            // M4: exactly two additional canonical SV frames from the same
+            // hardware-timed tick. Each has independent prebuilt packet bytes
+            // and DDS state. The three frames share smpCnt/smpSynch; egress
+            // uses ONE EMAC and is necessarily serialized. No malloc, locks,
+            // XML traversal or logging on a successful 250us batch.
+            if (multi_active && live_tx_running()) {
+                for (std::size_t slot = 0U; slot < multi_extra_packets.size(); ++slot) {
+                    const auto extra_row = multi_extra_engines[slot].next(
+                        multi_extra_signals[slot], 4000U);
+                    patch_packet(multi_extra_packets[slot], canonical_sample_count,
+                                 sample_synchronization, extra_row,
+                                 multi_extra_signals[slot]);
+                    const auto tx = esp_eth_transmit(
+                        eth_handle, multi_extra_packets[slot].bytes.data(),
+                        multi_extra_packets[slot].bytes.size());
+                    if (tx == ESP_OK) {
+                        ++local.canonical_ok;
+                        if (consecutive_canonical_tx_failures != 0U)
+                            g_sv_tx_faults.recovered();
+                        consecutive_canonical_tx_failures = 0U;
+                        last_canonical_tx_error = ESP_OK;
+                    } else {
+                        ++local.canonical_fail;
+                        last_canonical_tx_error = tx;
+                        ++consecutive_canonical_tx_failures;
+                        const bool first = g_sv_tx_faults.failure(
+                            static_cast<std::int32_t>(tx),
+                            (xEventGroupGetBits(g_link_events) & kLinkUpBit) != 0U);
+#if AR_SV_PTP_PHASE_SUPPORTED
+                        if (first) {
+                            g_sample_clock_context.publisher_fault_generation.fetch_add(
+                                1U, std::memory_order_release);
+                            g_sample_clock_context.phase_authority_valid.store(
+                                false, std::memory_order_release);
+                            revoke_sv_auto_claims(SvSyncLossReason::canonical_tx);
+                        }
+#else
+                        (void)first;
+#endif
+                    }
+                }
+            }
+
 #if CONFIG_AR_SMV_BROADCAST_MIRROR
+            if (!multi_active) {
             patch_packet(
                 mirror, mirror_sample_count, sample_synchronization, row, signal_state);
             const esp_err_t mirror_result =
                 esp_eth_transmit(eth_handle, mirror.bytes.data(), mirror.bytes.size());
             if (mirror_result == ESP_OK) ++local.mirror_ok;
             else ++local.mirror_fail;
+            }
 #endif
 
 #if CONFIG_AR_SMV_DIAGNOSTIC_PROBES
-            if (canonical_sample_count == 0U) {
+            if (!multi_active && canonical_sample_count == 0U) {
                 static_cast<void>(esp_eth_transmit(
                     eth_handle, probe_broadcast.data(), probe_broadcast.size()));
                 static_cast<void>(esp_eth_transmit(
@@ -1837,6 +1910,7 @@ void publisher_task(void* argument) {
         }
         canonical_sample_count = static_cast<std::uint16_t>(
             (canonical_sample_count + 1U) % active_profile.sample_counter_modulus);
+        if (multi_active) ++multi_tick_index;
         mirror_sample_count = static_cast<std::uint16_t>(mirror_sample_count + 1U);
         if (local.samples >= kStatsMergeEvery) merge_stats(local);
     }
