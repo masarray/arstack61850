@@ -1,0 +1,157 @@
+name: Publish M3.H.2 RC1 Verified Windows Engineering Preview
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/m3h2-rc1-public-candidate.yml'
+      - 'docs/releases/M3H2_RC1_PUBLIC_CANDIDATE_2026-10-25.md'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/m3h2-rc1-public-candidate.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: publish-m3h2-rc1-once
+  cancel-in-progress: false
+
+env:
+  RC_TAG: processbus-sim-m3h2-rc1-20261025
+  RC_HEAD: fb81c247fb24cd6b5ac6aad6b3fb27486d620b96
+  RC_RUN: '40145602361'
+  RC_ARTIFACT: arstack-studio-native-preview-win-x64-328-fb81c247fb24cd6b5ac6aad6b3fb27486d620b96
+  PREVIOUS_STABLE_ID: '422727082'
+
+jobs:
+  evidence:
+    name: Verify preview evidence, main ancestry and frozen stable release
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check exact provenance; do not promote physical RX evidence
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$RC_HEAD" HEAD
+          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/328" --jq '.merged')" = true
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RC_RUN" --jq '.head_sha')" = "$RC_HEAD"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RC_RUN" --jq '.conclusion')" = success
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.id')" = "$PREVIOUS_STABLE_ID"
+          test -s docs/releases/M3H2_RC1_PUBLIC_CANDIDATE_2026-10-25.md
+          grep -q 'prerelease, NOT Public Stable' docs/releases/M3H2_RC1_PUBLIC_CANDIDATE_2026-10-25.md
+          test "$(gh api "repos/$GITHUB_REPOSITORY/issues/324" --jq '.state')" = open
+          if gh release view "$RC_TAG" >/dev/null 2>&1; then
+            echo 'Refusing to overwrite or duplicate M3.H.2 RC1 release' >&2
+            exit 1
+          fi
+          echo 'PASS: exact PR-head Windows+firmware CI, ancestry and immutable stable release'
+
+  publish:
+    name: Publish checksummed public prerelease only
+    needs: evidence
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download exact successful Windows preview artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p candidate extracted dist
+          gh run download "$RC_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name "$RC_ARTIFACT" --dir candidate
+          test -s candidate/ARStack-Studio-Preview-win-x64-setup.exe
+          test -s candidate/ARStack-Studio-Preview-win-x64-portable.zip
+          test -s candidate/SHA256SUMS.txt
+          (cd candidate && sha256sum -c SHA256SUMS.txt)
+          unzip -t candidate/ARStack-Studio-Preview-win-x64-portable.zip | tail -n 1
+          unzip -q candidate/ARStack-Studio-Preview-win-x64-portable.zip -d extracted
+          test -s extracted/PREVIEW-PROVENANCE.json
+          test -s extracted/firmware/firmware-manifest.json
+          python3 - <<'PY'
+          import hashlib, json, pathlib, os
+          root=pathlib.Path('extracted')
+          m=json.loads((root/'firmware/firmware-manifest.json').read_text(encoding='utf-8-sig'))
+          p=json.loads((root/'PREVIEW-PROVENANCE.json').read_text(encoding='utf-8-sig'))
+          sha=os.environ['RC_HEAD']
+          assert p['guiCommit']==sha and p['firmwareSourceCommit']==sha
+          assert p['guiVersion']=='0.1.1-preview'
+          assert m['sourceCommit']==sha and m['chip']=='esp32p4'
+          assert m['phaseSyncPreview'] is True
+          assert m['globalGmTraceabilityPhysicallyProven'] is False
+          firmware=root/'firmware'/m['image']
+          assert firmware.is_file() and firmware.stat().st_size>100000
+          assert hashlib.sha256(firmware.read_bytes()).hexdigest()==m['sha256']
+          assert len(m['image'])<128 and '/' not in m['image'] and '\\' not in m['image']
+          assert (root/'ARStackStudio.exe').is_file()
+          print('PASS: preview GUI/source SHA equals bundled firmware SHA; firmware checksum valid')
+          PY
+          cp candidate/ARStack-Studio-Preview-win-x64-setup.exe dist/
+          cp candidate/ARStack-Studio-Preview-win-x64-portable.zip dist/
+          cp extracted/firmware/firmware-manifest.json dist/
+          firmware_name="$(python3 -c 'import json; print(json.load(open("extracted/firmware/firmware-manifest.json"))["image"])')"
+          cp "extracted/firmware/$firmware_name" "dist/$firmware_name"
+          (cd dist && sha256sum ./*.exe ./*.zip ./*.bin ./firmware-manifest.json > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
+
+      - name: Publish new prerelease without changing latest stable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = main
+          git merge-base --is-ancestor "$RC_HEAD" HEAD
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.id')" = "$PREVIOUS_STABLE_ID"
+          if gh release view "$RC_TAG" >/dev/null 2>&1; then
+            echo 'RC tag/release already exists; no --clobber permitted' >&2
+            exit 1
+          fi
+          gh release create "$RC_TAG" dist/* \
+            --target "$GITHUB_SHA" \
+            --title 'ARStack M3.H.2 RC1 — Windows Engineering Preview (not stable)' \
+            --prerelease \
+            --notes-file docs/releases/M3H2_RC1_PUBLIC_CANDIDATE_2026-10-25.md \
+            --verify-tag=false
+
+      - name: Verify published public preview and stable preservation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RC_TAG" > /tmp/rc.json
+          gh api "repos/$GITHUB_REPOSITORY/releases/latest" > /tmp/latest.json
+          python3 - <<'PY'
+          import json,pathlib,hashlib,os
+          rc=json.load(open('/tmp/rc.json'))
+          stable=json.load(open('/tmp/latest.json'))
+          assert rc['tag_name']==os.environ['RC_TAG']
+          assert rc['prerelease'] is True and rc['draft'] is False
+          assert stable['id']==int(os.environ['PREVIOUS_STABLE_ID']), 'Stable latest was inadvertently replaced'
+          expected={f.name for f in pathlib.Path('dist').iterdir() if f.is_file()}
+          actual={a['name'] for a in rc['assets']}
+          assert actual==expected, f'Published asset list mismatch: {actual ^ expected}'
+          for asset in rc['assets']:
+              source=pathlib.Path('dist')/asset['name']
+              assert source.stat().st_size==asset['size']
+              digest=asset.get('digest')
+              if digest:
+                  assert digest=='sha256:'+hashlib.sha256(source.read_bytes()).hexdigest()
+          print('PASS: M3.H.2 RC1 public prerelease, all exact files and immutable latest stable')
+          PY
