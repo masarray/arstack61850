@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace ar::iec61850::sampled_values {
 namespace {
@@ -67,9 +68,9 @@ M4ThreeSvCompileResult M4ThreeSvRosterCompiler::compile(
 
         const SvPublisherProfile& p = *compiled.profile;
         if (p.timing.exact_sample_rate_hz() !=
-                std::optional<std::uint64_t>{m4_three_sv_rate_hz} ||
+                std::optional<std::uint32_t>{m4_three_sv_rate_hz} ||
             p.timing.exact_frame_rate_hz() !=
-                std::optional<std::uint64_t>{m4_three_sv_rate_hz} ||
+                std::optional<std::uint32_t>{m4_three_sv_rate_hz} ||
             p.timing.asdus_per_frame != 1U ||
             p.sample_counter_modulus != context.sample_counter_modulus ||
             !p.asdu_options.sample_synchronized ||
