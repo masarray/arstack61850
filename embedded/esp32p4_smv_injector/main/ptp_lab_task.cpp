@@ -140,6 +140,7 @@ std::atomic<PtpConfigFailure> g_ptp_config_failure{PtpConfigFailure::none};
 std::atomic_bool g_ptp_started{false};
 std::atomic_bool g_bench_global_active{false};
 std::atomic_bool g_ptp_ready{false};
+std::atomic_bool g_ptp_physical_link_up{false};
 std::atomic<std::int64_t> g_ptp_last_announce_us{0LL};
 std::atomic<std::int64_t> g_ptp_last_sync_pair_us{0LL};
 std::atomic<std::int64_t> g_ptp_freshness_timeout_us{3000000LL};
