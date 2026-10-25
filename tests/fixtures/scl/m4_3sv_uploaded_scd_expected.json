@@ -1,0 +1,125 @@
+{
+  "sourceFileName": "01_SV_Stream_4I+4V_(9-2LE).scd",
+  "sourceSha256": "a4aac361dc1a857793400cf5b9d67d4d6a9d9f04ccfa143802c9bd4b7dad4a4e",
+  "sourceBytes": 13622,
+  "expectedStreams": [
+    {
+      "stream_key": {
+        "ied": "MU01_4I_4V_1",
+        "accessPoint": "LD0",
+        "ldInst": "MU01",
+        "ln0": "LLN0",
+        "cbName": "MSVCB01"
+      },
+      "svID": "MU01_SV1",
+      "sampleRate": 4000,
+      "sampleMode": "SmpPerSec",
+      "nofASDU": 1,
+      "confRev": 1,
+      "address": {
+        "VLAN-ID": "0",
+        "VLAN-PRIORITY": "4",
+        "MAC-Address": "01-0C-CD-04-00-01",
+        "APPID": "4000"
+      },
+      "fcdaCount": 16,
+      "fcdaNames": [
+        "TCTR1.AmpSv.instMag.i",
+        "TCTR1.AmpSv.q",
+        "TCTR2.AmpSv.instMag.i",
+        "TCTR2.AmpSv.q",
+        "TCTR3.AmpSv.instMag.i",
+        "TCTR3.AmpSv.q",
+        "TCTR4.AmpSv.instMag.i",
+        "TCTR4.AmpSv.q",
+        "TVTR1.VolSv.instMag.i",
+        "TVTR1.VolSv.q",
+        "TVTR2.VolSv.instMag.i",
+        "TVTR2.VolSv.q",
+        "TVTR3.VolSv.instMag.i",
+        "TVTR3.VolSv.q",
+        "TVTR4.VolSv.instMag.i",
+        "TVTR4.VolSv.q"
+      ]
+    },
+    {
+      "stream_key": {
+        "ied": "MU01_4I_4V_2",
+        "accessPoint": "LD0",
+        "ldInst": "MU01",
+        "ln0": "LLN0",
+        "cbName": "MSVCB01"
+      },
+      "svID": "MU01_SV2",
+      "sampleRate": 4000,
+      "sampleMode": "SmpPerSec",
+      "nofASDU": 1,
+      "confRev": 1,
+      "address": {
+        "VLAN-ID": "0",
+        "VLAN-PRIORITY": "4",
+        "MAC-Address": "01-0C-CD-04-00-02",
+        "APPID": "4000"
+      },
+      "fcdaCount": 16,
+      "fcdaNames": [
+        "TCTR1.AmpSv.instMag.i",
+        "TCTR1.AmpSv.q",
+        "TCTR2.AmpSv.instMag.i",
+        "TCTR2.AmpSv.q",
+        "TCTR3.AmpSv.instMag.i",
+        "TCTR3.AmpSv.q",
+        "TCTR4.AmpSv.instMag.i",
+        "TCTR4.AmpSv.q",
+        "TVTR1.VolSv.instMag.i",
+        "TVTR1.VolSv.q",
+        "TVTR2.VolSv.instMag.i",
+        "TVTR2.VolSv.q",
+        "TVTR3.VolSv.instMag.i",
+        "TVTR3.VolSv.q",
+        "TVTR4.VolSv.instMag.i",
+        "TVTR4.VolSv.q"
+      ]
+    },
+    {
+      "stream_key": {
+        "ied": "MU01_4I_4V_3",
+        "accessPoint": "LD0",
+        "ldInst": "MU01",
+        "ln0": "LLN0",
+        "cbName": "MSVCB01"
+      },
+      "svID": "MU01_SV3",
+      "sampleRate": 4000,
+      "sampleMode": "SmpPerSec",
+      "nofASDU": 1,
+      "confRev": 1,
+      "address": {
+        "VLAN-ID": "0",
+        "VLAN-PRIORITY": "4",
+        "MAC-Address": "01-0C-CD-04-00-03",
+        "APPID": "4000"
+      },
+      "fcdaCount": 16,
+      "fcdaNames": [
+        "TCTR1.AmpSv.instMag.i",
+        "TCTR1.AmpSv.q",
+        "TCTR2.AmpSv.instMag.i",
+        "TCTR2.AmpSv.q",
+        "TCTR3.AmpSv.instMag.i",
+        "TCTR3.AmpSv.q",
+        "TCTR4.AmpSv.instMag.i",
+        "TCTR4.AmpSv.q",
+        "TVTR1.VolSv.instMag.i",
+        "TVTR1.VolSv.q",
+        "TVTR2.VolSv.instMag.i",
+        "TVTR2.VolSv.q",
+        "TVTR3.VolSv.instMag.i",
+        "TVTR3.VolSv.q",
+        "TVTR4.VolSv.instMag.i",
+        "TVTR4.VolSv.q"
+      ]
+    }
+  ],
+  "scope": "Host SCL compilation golden expectations, not proof of firmware 3-stream support"
+}
