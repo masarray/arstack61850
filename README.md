@@ -1,8 +1,8 @@
 # ARStack61850
 
-**Open-source IEC 61850 Process Bus engineering lab**
+**Your practical IEC 61850 Process Bus traffic generator — free, open-source, real Ethernet output**
 
-Generate real Sampled Values (SV) traffic, explore PTP synchronization, and experiment with digital-substation signals using **ARStack Studio** and an **ESP32-P4 Ethernet board**.
+Use **ARStack Studio** and one affordable **ESP32-P4 Ethernet board** to generate actual IEC 61850 Sampled Values and PTP traffic for process-bus and digital-substation lab simulation. Give a relay, BCU or analyzer a configurable SV stream to subscribe to, inspect its behavior and troubleshoot engineering configurations without needing a full physical Merging Unit test rack.
 
 [**Download the latest stable release**](https://github.com/masarray/arstack61850/releases/latest) · [**Getting started**](docs/GETTING_STARTED.md) · [**Product website**](https://masarray.github.io/arstack61850/) · [**Get help**](SUPPORT.md)
 
@@ -10,13 +10,17 @@ Generate real Sampled Values (SV) traffic, explore PTP synchronization, and expe
 
 | Explore | With ARStack |
 | --- | --- |
-| **Generate Sampled Values** | Publish 4 current + 4 voltage channels over real Ethernet at 4,000 SV frames/s. |
-| **Experiment with PTP** | Run an internal laboratory PTP SOURCE emulator; external grandmaster lock or UTC traceability is not claimed. |
+| **Inject real Process Bus traffic** | Publish 4 current + 4 voltage channels over Ethernet at nominal 4,000 SV frames/s; use this traffic as lab input for relay/BCU/analyzer experiments. |
+| **Simulate SV + PTP together** | Generate IEC 61850 SV frames alongside PTP Announce/Sync/Follow_Up with an internal laboratory PTP SOURCE; inspect `smpSynch` and signal timing. |
 | **Control waveforms** | Set 4I+4V current, voltage and phase values; the powered board keeps publishing if Studio closes and Studio re-adopts its state when reopened. |
-| **Inspect live traffic** | Capture SV and PTP using Studio, Wireshark, ARSAS or DigSubAnalyzer. |
-| **Learn with engineering files** | Open SCL files and deploy supported 4I+4V publisher profiles. |
+| **Inspect and troubleshoot** | Use Studio or Wireshark to inspect SV/PTP; compare APPID, svID, multicast MAC and VLAN with the subscriber configuration. Other analyzers can be tried with matching filters. |
+| **Try engineering-file profiles** | Import supported SCL/SCD/CID/IID SV engineering configurations; inspect stream identity and deploy supported single-stream 4I+4V profiles. |
 
-**M3.H.3 official stable lab release (25 October 2026):** an independent NIC captured **4,705,090 SV frames over 19 min 36 s at 3,999.886 fps** with no missing, duplicate, reorder or malformed frames. PTP SOURCE/L2 traffic was present with `smpSynch=2` on all received SV; **external GM lock was not proven** (`UNLOCKED` in the internal-source telemetry). Closing Studio leaves the powered ESP32-P4 publisher running, and reopening Studio adopts the board's live state. [Engineering evidence and limits](docs/releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md).
+**M3.H.3 official stable lab release:** **4,705,090 SV frames** captured across **19 min 36 s** at **3,999.886 fps**, with **zero missing, duplicate, reordered or malformed SV frames**. SV and PTP were on the wire, and all received SV carried `smpSynch=2` in the internal lab timing profile. Close Studio and the powered ESP32-P4 keeps publishing; reopen it and Studio adopts the live board state. [Capture details](docs/releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md).
+
+## Next: multiple virtual Merging Units from one ESP32-P4
+
+**Roadmap: Multi-SV + SCL-driven MU simulation.** The next engineering phase is to publish **multiple independently identifiable SV streams** concurrently from a single ESP32-P4, then let engineers **open an SCL/SCD/CID file, choose SV streams and deploy their supported DataSet/communication profiles**. One small board, multiple process-bus sources, real Ethernet packets. These are **upcoming features**, not included in the M3.H.3 single-stream release. [Implementation roadmap](docs/PROCESS_BUS_MULTI_SV_SCL_NEXT_PHASE.md).
 
 ## Inside ARStack Studio
 
@@ -52,11 +56,11 @@ Every published Windows release includes the application dependencies and a matc
 ARStack is built to make IEC 61850 experiments more accessible to engineers, students and automation enthusiasts around the world.
 
 - **[Ask a question or report a problem](SUPPORT.md)** — share what you tried and what happened.
-- **[Share an interoperability experiment](docs/COMMUNITY_TESTING.md)** — independent lab experiences help improve the project; [browse community reports](docs/community/README.md).
+- **[Share your lab result](docs/COMMUNITY_TESTING.md)** — relay/BCU screenshots, stream configuration and Wireshark results are welcome; hardware purchase or formal test reports are **not** required.
 - **[SCL import help](docs/SCL_TROUBLESHOOTING.md)** — a practical path when imported SV fields do not appear.
 - **[Contribute](CONTRIBUTING.md)** — improvements to documentation, software, tests and examples are welcome.
 
-ARStack uses the [GPL-3.0 license](LICENSE). It is a laboratory simulation and engineering tool, not a certified primary measurement or UTC reference device.
+ARStack uses the [GPL-3.0 license](LICENSE). **Run it on an isolated bench/test network, not an energized/live substation process bus.** It generates simulated traffic, not calibrated primary measurement data.
 
 ## For developers
 
