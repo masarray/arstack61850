@@ -92,6 +92,7 @@ public:
             {"USB port loss requires two verified misses; replug emits one arrival", usbPhysicalPortLossAndArrivalGate()},
             {"READY unplug/replug COM renumber -> READY stopped", readyReplugRecoversWithoutStart()},
             {"RUNNING unplug/replug -> never auto-restarts", runningReplugNeverAutoStarts()},
+            {"RUNNING board remains independent while Studio reconnects", runningReplugAdoptsLiveBoardState()},
             {"wrong device during recovery -> SETUP ERROR", wrongDeviceRecoveryFailsClosed()},
             {"CFG transport exclusivity cannot trigger false health loss", healthProbeDefersDuringScenario()},
             {"control health misses -> bounded failure", healthTimeoutIsBounded()},
@@ -1852,6 +1853,27 @@ private:
         return fixture.session.state() == QStringLiteral("READY") &&
             fixture.session.startReady() &&
             !fixture.device.running();
+    }
+
+    static bool runningReplugAdoptsLiveBoardState() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        const auto board = identity();
+        seedVerified(fixture, board, QStringLiteral("COM15"), true);
+        if (fixture.session.state() != QStringLiteral("RUNNING")) return false;
+        simulateDisconnect(fixture);
+
+        // The GUI no longer has a COM observation; it may show DISCONNECTED,
+        // but MUST NOT assume the hardware SV stopped or request a restart.
+        if (fixture.device.connected() || fixture.device.running()) return false;
+
+        // Reconnect to the same boot and obtain a fresh authoritative board
+        // RUNNING readback: adopt it without START and without a new STOP.
+        seedVerified(fixture, board, QStringLiteral("COM16"), true);
+        return fixture.device.connected() && fixture.device.running() &&
+            !fixture.device.svUnexpectedStopObserved() &&
+            fixture.session.state() == QStringLiteral("RUNNING") &&
+            fixture.device.portName() == QStringLiteral("COM16");
     }
 
     static bool wrongDeviceRecoveryFailsClosed() {
