@@ -85,7 +85,8 @@ Item {
             radius: 7
             color: "transparent"
             border.width: 1
-            border.color: Qt.alpha(indicator.stateColor, 0.44)
+            border.color: Qt.rgba(indicator.stateColor.r, indicator.stateColor.g,
+                                  indicator.stateColor.b, 0.44)
             Rectangle {
                 anchors.centerIn: parent
                 width: 8
