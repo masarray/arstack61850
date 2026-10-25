@@ -287,6 +287,9 @@ void eth_event_handler(void*, esp_event_base_t, const std::int32_t event_id, voi
     case ETHERNET_EVENT_DISCONNECTED:
         xEventGroupClearBits(g_link_events, kLinkUpBit);
         live_control_set_ethernet_link(false); // stop immediately, not after 400 hot-path misses
+#if CONFIG_AR_PTP_LAB_TX
+        ar_ptp_lab_set_ethernet_link_up(false); // revoke SOURCE ready; PTP TX paused
+#endif
         ESP_LOGW(kTag, "Ethernet link down");
         break;
     case ETHERNET_EVENT_START:
