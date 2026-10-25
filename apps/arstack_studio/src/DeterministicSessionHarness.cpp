@@ -92,6 +92,8 @@ public:
             {"USB port loss requires two verified misses; replug emits one arrival", usbPhysicalPortLossAndArrivalGate()},
             {"READY unplug/replug COM renumber -> READY stopped", readyReplugRecoversWithoutStart()},
             {"RUNNING unplug/replug -> never auto-restarts", runningReplugNeverAutoStarts()},
+            {"Reconnect adopts autonomous RUNNING board without START", runningReplugAdoptsLiveBoardState()},
+            {"4I4V board bank requires eight coherent boot/gen rows", coherentBoardBankReadback()},
             {"wrong device during recovery -> SETUP ERROR", wrongDeviceRecoveryFailsClosed()},
             {"CFG transport exclusivity cannot trigger false health loss", healthProbeDefersDuringScenario()},
             {"control health misses -> bounded failure", healthTimeoutIsBounded()},
@@ -1852,6 +1854,80 @@ private:
         return fixture.session.state() == QStringLiteral("READY") &&
             fixture.session.startReady() &&
             !fixture.device.running();
+    }
+
+    static bool runningReplugAdoptsLiveBoardState() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        const auto board = identity();
+        seedVerified(fixture, board, QStringLiteral("COM15"), true);
+        if (fixture.session.state() != QStringLiteral("RUNNING")) return false;
+        simulateDisconnect(fixture);
+
+        // The GUI no longer has a COM observation; it may show DISCONNECTED,
+        // but MUST NOT assume the hardware SV stopped or request a restart.
+        if (fixture.device.connected() || fixture.device.running()) return false;
+
+        // Reconnect to the same boot and obtain a fresh authoritative board
+        // RUNNING readback: adopt it without START and without a new STOP.
+        seedVerified(fixture, board, QStringLiteral("COM16"), true);
+        return fixture.device.connected() && fixture.device.running() &&
+            !fixture.device.svUnexpectedStopObserved() &&
+            fixture.session.state() == QStringLiteral("RUNNING") &&
+            fixture.device.portName() == QStringLiteral("COM16");
+    }
+
+    static bool coherentBoardBankReadback() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        seedVerified(fixture, identity(), QStringLiteral("COM15"), true);
+        auto& d = fixture.device;
+        const QString boot = d.bootId();
+        d.processLine(QStringLiteral(
+            "SVBANK BEGIN generation=13 boot=%1 hz_millihz=50000").arg(boot));
+        const QStringList rows{
+            QStringLiteral("IA rms_counts=1200 phase_mdeg=30000 quality=0x00000000 enabled=1"),
+            QStringLiteral("IB rms_counts=500 phase_mdeg=-120000 quality=0x00000000 enabled=1"),
+            QStringLiteral("IC rms_counts=1000 phase_mdeg=140000 quality=0x00000000 enabled=1"),
+            QStringLiteral("IN rms_counts=0 phase_mdeg=0 quality=0x00000000 enabled=1"),
+            QStringLiteral("UA rms_counts=2000 phase_mdeg=0 quality=0x00000000 enabled=1"),
+            QStringLiteral("UB rms_counts=6000 phase_mdeg=-120000 quality=0x00000000 enabled=1"),
+            QStringLiteral("UC rms_counts=3000 phase_mdeg=120000 quality=0x00000000 enabled=1"),
+            QStringLiteral("UN rms_counts=0 phase_mdeg=0 quality=0x00000000 enabled=0")
+        };
+        for (int i = 0; i < 7; ++i) d.processLine(rows[i]);
+        d.processLine(QStringLiteral("SVBANK END generation=13 boot=%1").arg(boot));
+        if (!d.boardScenario().isEmpty()) return false; // incomplete snapshot
+        d.processLine(QStringLiteral(
+            "SVBANK BEGIN generation=13 boot=%1 hz_millihz=50000").arg(boot));
+        for (const QString& row : rows) d.processLine(row);
+        d.processLine(QStringLiteral(
+            "SVBANK END generation=14 boot=%1").arg(boot));
+        if (!d.boardScenario().isEmpty()) return false; // wrong generation
+        d.processLine(QStringLiteral(
+            "SVBANK BEGIN generation=13 boot=FEDCBA9876543210 hz_millihz=50000"));
+        for (const QString& row : rows) d.processLine(row);
+        d.processLine(QStringLiteral(
+            "SVBANK END generation=13 boot=FEDCBA9876543210"));
+        if (!d.boardScenario().isEmpty()) return false; // foreign boot
+
+        d.processLine(QStringLiteral(
+            "SVBANK BEGIN generation=13 boot=%1 hz_millihz=50000").arg(boot));
+        for (const QString& row : rows) d.processLine(row);
+        d.processLine(QStringLiteral("SVBANK END generation=13 boot=%1").arg(boot));
+        const auto data = d.boardScenario();
+        if (data.value(QStringLiteral("boot")).toString() != boot ||
+            data.value(QStringLiteral("generation")).toString() != QStringLiteral("13") ||
+            data.value(QStringLiteral("hz")).toDouble() != 50.0) return false;
+        const auto currents = data.value(QStringLiteral("current")).toList();
+        const auto voltages = data.value(QStringLiteral("voltage")).toList();
+        if (currents.size() != 4 || voltages.size() != 4 ||
+            currents[0].toMap().value(QStringLiteral("counts")).toLongLong() != 1200 ||
+            currents[1].toMap().value(QStringLiteral("angleMdeg")).toLongLong() != -120000 ||
+            voltages[2].toMap().value(QStringLiteral("counts")).toLongLong() != 3000 ||
+            voltages[3].toMap().value(QStringLiteral("enabled")).toBool()) return false;
+        d.resetTelemetry();
+        return d.boardScenario().isEmpty(); // invalidate on COM/boot switch
     }
 
     static bool wrongDeviceRecoveryFailsClosed() {
