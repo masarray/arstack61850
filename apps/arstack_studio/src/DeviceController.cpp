@@ -212,7 +212,7 @@ bool DeviceController::shutdown() {
         return true;
     }
 
-    const bool requestSvStop = running_;
+    constexpr bool requestSvStop = false;
     if (QThread::currentThread() == &ioThread_) {
         ioWorker_->shutdown(requestSvStop, requestPtpStop);
         ioThread_.quit();
