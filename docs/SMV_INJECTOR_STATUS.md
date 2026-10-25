@@ -1,6 +1,6 @@
 # SMV Injector status and completion boundary
 
-> **Latest public process-bus simulator progress (2026-10-24):** [M3.H Lab Edition](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h-20261024) adds an isolated-bench **internal simulated Global PTP GM**, EMAC hardware TX timestamp / phase evidence, `smpSynch AUTO` and 4I+4V SV at 4000 fps. Engineer PCAP recorded 163,048 consecutive SV frames in 40.763 s (all `smpSynch=2`, no missing/duplicate/malformed), 44 Announce, and 43 complete Sync/Follow_Up pairs. A voluntary/observed SV STOP interrupted the requested 120 s capture. No GPS or relay required for simulation; compatibility with actual relay subscribers not yet tested. See [release evidence and quick start](releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md). The 4800-fps SCL-derived experiment below is an **older independent engineering result**, not an advertised capability of this exact M3.H reference profile.
+> **Official M3.H.3 stable baseline (25 October 2026):** [Download Studio + ESP32-P4 firmware](https://github.com/masarray/arstack61850/releases/latest). Autonomous 4I+4V SV + internal PTP SOURCE traffic for practical relay/BCU process-bus lab simulation. A real capture counted **4,705,090 SV frames in 19 min 36 s** with no missing, duplicate, reorder or malformed SV; reopening Studio adopts the active board state. The current embedded profile publishes **one** configured SV stream. **Next development priority: multiple concurrent SV streams per ESP32-P4 plus SCL-driven virtual Merging Unit deployment**; see [next-phase roadmap](PROCESS_BUS_MULTI_SV_SCL_NEXT_PHASE.md).
 
 This document records the current engineering status of the ESP32-P4 Sampled Values injector and defines what is considered complete versus what remains as validation, timing, analyzer and product-hardening work.
 
@@ -136,13 +136,13 @@ The goal is to remove the current Windows USB-NIC capture ambiguity and make con
 
 The injector has crossed the boundary from a fixed bench waveform generator to an **SCL-driven IEC 61850 Sampled Values injection instrument** for the current supported profile.
 
-The next work should focus on verification depth and profile breadth rather than re-opening the already proven core workflow:
+The next work should expand **stream count and SCL-backed MU simulation**, reusing the proven single-stream embedded and SCL workflow rather than reopening it:
 
 ```text
-Configured engineering intent
-        -> deterministic injector
-        -> independent raw analyzer
-        -> configured-vs-observed evidence
+SCL / SCD / CID / IID intent
+        -> supported multiple SV publisher profiles
+        -> deterministic concurrent ESP32-P4 stream engine
+        -> relay / BCU / analyzer process-bus lab
 ```
 
 No decoded packet or successful bench run by itself is treated as a formal conformance certificate.
