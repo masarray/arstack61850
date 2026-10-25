@@ -23,7 +23,40 @@ assert "void record_control_heartbeat()" in fw
 assert 'std::strcmp(command, "STOP") == 0' in fw
 assert "SvStopCause::operator_request" in fw
 assert "const bool requestSvStop = false;" in device
-assert "live_control_ethernet_link_down_stop();" in eth
+assert "live_control_set_ethernet_link(true);" in eth
+assert eth.count("live_control_set_ethernet_link(false);") >= 2
+assert "case ETHERNET_EVENT_DISCONNECTED:" in eth
+assert "case ETHERNET_EVENT_STOP:" in eth
+driver_stop = eth.split("case ETHERNET_EVENT_STOP:", 1)[1].split("default:", 1)[0]
+assert "xEventGroupClearBits(g_link_events, kLinkUpBit);" in driver_stop
+assert "live_control_set_ethernet_link(false);" in driver_stop
+assert "ar_ptp_lab_request_link_down_stop();" in driver_stop
+
+start = fw.split('if (std::strcmp(command, "START") == 0)', 1)[1].split(
+    'if (std::strcmp(command, "STOP") == 0)', 1)[0]
+assert "portENTER_CRITICAL(&g_publisher_lifecycle_mux);" in start
+assert "g_physical_link_up.load(std::memory_order_relaxed)" in start
+assert "g_scenario_txn.consume_start();" in start
+assert start.index("g_physical_link_up.load") < start.index("g_running.store(true")
+assert "START rejected: physical Ethernet LAN is DOWN" in start
+link_handler = fw.split("void live_control_set_ethernet_link(", 1)[1].split(
+    "void live_control_force_stop()", 1)[0]
+assert "portENTER_CRITICAL(&g_publisher_lifecycle_mux);" in link_handler
+assert "g_physical_link_up.store(up" in link_handler
+assert "g_running.exchange(false" in link_handler
+assert "g_start_request.store(false" in link_handler
+assert "if (!was_running) return;" in link_handler
+assert "SvStopCause::ethernet_link_down" in link_handler
+assert "SV-LAN-AUTONOMY-V1" in fw
+assert "SESSION-LEASE" not in fw
+assert "SV-LAN-AUTONOMY-V1" in device
+assert "SVBANK BEGIN generation=" in fw and "SVBANK END generation=" in fw
+assert "SVBANK BEGIN" in device and "SVBANK END" in device
+assert "pendingBoardRows_.size() == 8" in device
+assert "pendingBoardBoot_.compare(identity_.bootId" in device
+assert "g_control_watchdog_ready.load" not in fw.split(
+    "bool arm_control_lease_if_fresh()", 1)[1].split(
+    "void uppercase_ascii(", 1)[0]
 assert "SvStopCause::ethernet_link_down" in fw
 assert 'return "ETHERNET_LINK_DOWN"' in fw
 assert "const bool was_running = g_running.exchange(false" in fw
