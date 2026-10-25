@@ -93,6 +93,16 @@ void three_v1_profiles_inside_v2_envelope() {
     auto wrong_rate = profiles;
     wrong_rate[1].frame_rate_hz = 4800U;
     CHECK(!M4ThreeSvBinaryCodec::encoded_size(wrong_rate).has_value());
+    // A 64-byte, 16-leaf DataSet is not sufficient: MU waveform output needs
+    // eight exact INT32/Quality pairs in the expected positional order.
+    auto wrong_leaf = profiles;
+    wrong_leaf[1].leaves[0].wire_type = SvDeviceWireType::uint32;
+    CHECK(!M4ThreeSvBinaryCodec::encoded_size(wrong_leaf).has_value());
+    auto wrong_quality = profiles;
+    wrong_quality[2].leaves[1].wire_type = SvDeviceWireType::uint32;
+    wrong_quality[2].leaves[1].quality = false;
+    CHECK(!M4ThreeSvBinaryCodec::encoded_size(wrong_quality).has_value());
+
 
     std::cout << "PASS: V2 three-stream envelope: CRC32, all-or-none "
                  "readback, V1 nested profiles, replay-safe byte format\n";
