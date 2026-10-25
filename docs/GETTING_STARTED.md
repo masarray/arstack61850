@@ -1,6 +1,6 @@
 # Your first IEC 61850 Process Bus experiment
 
-This guide takes you from a fresh Windows installation to inspecting Sampled Values and PTP on a small Ethernet lab.
+This guide takes you from installing Studio to injecting real IEC 61850 Sampled Values and PTP traffic into an isolated engineering bench. Use the packets to explore process-bus subscriber settings on a relay, BCU or analyzer.
 
 **You will learn how to:** open ARStack Studio, generate a 4-current + 4-voltage waveform, start real SV traffic from an ESP32-P4, and inspect PTP alongside SV.
 
@@ -50,18 +50,18 @@ The official M3.H.3 lab profile sends 4 current and 4 voltage values at nominal 
 
 ## Step 5 — View your Ethernet traffic
 
-With the PC capture interface connected to the relevant lab segment or switch mirror:
+With the PC capture interface connected to the relevant lab segment or switch mirror (or a relay/BCU test-port subscriber configured for the stream):
 
 - Filter **Sampled Values:** `eth.type == 0x88ba`
 - Filter **PTP:** `eth.type == 0x88f7`
 - Watch the SV `smpCnt` increase and wrap from `3999` to `0`.
 - Inspect `svID`, `APPID`, quality fields, and the PTP Announce/Sync/Follow_Up messages.
 
-A switched network does not automatically forward every multicast frame to the PC capture port. If you cannot see SV, verify the lab capture topology before changing the publisher.
+**Engineer tip:** if a relay/BCU or capture tool does not display values, first compare its expected APPID, multicast MAC, svID, VLAN/PCP and input network interface to the Studio stream settings. A normal switch may not mirror multicast to the PC NIC; use the intended capture port or mirrored lab port.
 
 ## Try something different
 
-Adjust a voltage or current setpoint and observe the generated waveform. Open a compatible SCL/CID/SCD/IID file to inspect and select an SV stream supported by the currently published 4I+4V device profile.
+Adjust voltage/current amplitude or phase and observe changes in the subscriber. Open a compatible SCL/CID/SCD/IID engineering file and select a supported 4I+4V publisher profile. **Coming next:** concurrent Multi-SV and multi-Merging-Unit stream selection from SCL on one ESP32-P4 — [roadmap](PROCESS_BUS_MULTI_SV_SCL_NEXT_PHASE.md).
 
 ## Need help?
 
@@ -69,4 +69,4 @@ Check the [installation guide](INSTALL.md) or [support guide](../SUPPORT.md). Fo
 
 Want to publish observations from another IEC 61850 tool or device? See the [community testing guide](COMMUNITY_TESTING.md).
 
-For the official M3.H.3 stable lab edition, 4,705,090-frame independent capture results, and precise internal-PTP-vs-external-lock limitation, see the [M3.H.3 technical record](releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md).
+For the M3.H.3 on-wire SV/PTP capture and exact shipped profile, see the [official release record](releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md).
