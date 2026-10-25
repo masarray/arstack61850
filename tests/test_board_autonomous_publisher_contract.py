@@ -21,6 +21,10 @@ assert "void record_control_heartbeat()" in fw
 assert 'std::strcmp(command, "STOP") == 0' in fw
 assert "SvStopCause::operator_request" in fw
 assert "const bool requestSvStop = false;" in device
+assert "live_control_ethernet_link_down_stop();" in eth
+assert "SvStopCause::ethernet_link_down" in fw
+assert 'return "ETHERNET_LINK_DOWN"' in fw
+assert "const bool was_running = g_running.exchange(false" in fw
 assert "ar_ptp_lab_request_link_down_stop();" in eth
 assert "consecutive_canonical_tx_failures >= kTransportFailureStopThreshold" in eth
 assert "g_stop_requested.store(true" in ptp
