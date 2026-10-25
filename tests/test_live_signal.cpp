@@ -266,6 +266,26 @@ void independent_channels_change_without_stream_restart() {
     CHECK(row[6] != 0);
 }
 
+void shared_quarter_wave_rom_lut_has_legacy_sine_parity() {
+    using namespace ar::iec61850::sampled_values;
+    static_assert(sizeof(SvFixedPointSineEngine) <= 16U);
+    constexpr double pi = 3.141592653589793238462643383279502884;
+    constexpr double q30 = static_cast<double>(std::uint64_t{1} << 30U);
+    for (std::size_t index = 0U; index < kLiveSineLutSize; ++index) {
+        const double angle = 2.0 * pi * static_cast<double>(index) /
+                             static_cast<double>(kLiveSineLutSize);
+        // Original M3 engine populated a private 4096-entry array using
+        // llround(sin(angle)*Q30). The shared 1025-value ROM quarter-wave
+        // should differ by at most one Q30 integer at libm rounding edges.
+        const auto legacy = static_cast<std::int32_t>(std::llround(std::sin(angle) * q30));
+        const auto current = detail::sine_q30_from_index(index);
+        const std::int64_t delta = static_cast<std::int64_t>(current) - legacy;
+        CHECK(delta >= -1LL && delta <= 1LL);
+    }
+    CHECK(detail::sine_q30_from_index(4096U) ==
+          detail::sine_q30_from_index(0U));
+}
+
 } // namespace
 
 int main() {
@@ -273,6 +293,7 @@ int main() {
         bank_commits_complete_generations();
         concurrent_publisher_and_diagnostics_snapshots_are_coherent();
         fixed_point_engine_preserves_frequency_and_phase();
+        shared_quarter_wave_rom_lut_has_legacy_sine_parity();
         dc_engine_outputs_constant_engineering_values();
         ct_saturation_shape_is_bounded_and_asymmetric();
         independent_channels_change_without_stream_restart();
