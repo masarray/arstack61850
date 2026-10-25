@@ -12,6 +12,7 @@ idf_component_register(
         "ethernet_port.c"
         "live_control.cpp"
         "profile_control.cpp"
+        "multi_profile_control.cpp"
         "runtime_profile.cpp"
         "smp_synch_lab.cpp"
         ${AR_PTP_LAB_SRCS}

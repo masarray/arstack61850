@@ -60,7 +60,28 @@ void write_u32(const std::span<std::uint8_t> data,
            p.no_asdu == 1U &&
            p.leaf_count == 16U &&
            p.payload_size_bytes == 64U &&
-           p.asdu_options.sample_synchronized;
+           p.asdu_options.sample_synchronized &&
+           !p.asdu_options.refresh_time &&
+           !p.asdu_options.security &&
+           !p.asdu_options.synch_source_id &&
+           [&p]() noexcept {
+               // The ESP32-P4 runtime patches eight exactly ordered
+               // INT32+Quality pairs; 16 arbitrary four-byte leaves are NOT
+               // an interchangeable 4I+4V waveform payload.
+               for (std::size_t channel = 0U; channel < 8U; ++channel) {
+                   const auto& value = p.leaves[channel * 2U];
+                   const auto& quality = p.leaves[channel * 2U + 1U];
+                   if (value.wire_type != SvDeviceWireType::int32 ||
+                       value.wire_width_bytes != 4U || value.quality ||
+                       value.timestamp ||
+                       quality.wire_type != SvDeviceWireType::quality ||
+                       quality.wire_width_bytes != 4U || !quality.quality ||
+                       quality.timestamp) {
+                       return false;
+                   }
+               }
+               return true;
+           }();
 }
 
 [[nodiscard]] bool distinct_identity(
