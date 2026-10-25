@@ -73,7 +73,7 @@ public:
             {"live SV fault has one active incident and manual STOP stays quiet", liveSvStopIsNewIncidentOnly()},
             {"PTP STOP requires firmware ACK and stopped readback", ptpStopConfirmationCannotBeGuessed()},
             {"PTP STOP timeout blocks restart pending manual recovery", ptpUnverifiedStopBlocksRestart()},
-            {"App teardown must stop PTP without SV output", ptpOnlyShutdownIntent()},
+            {"Studio teardown never owns autonomous SV/PTP lifetime", ptpOnlyShutdownIntent()},
             {"PTP role mismatch and new session revoke pending start", ptpGuidedRoleAndGenerationGuards()},
             {"profile timeout -> bounded terminal error", profileTimeoutIsTerminal()},
             {"profile failure waits visible bounded cooldown before retry", profileRetryCooldownIsVisible()},
