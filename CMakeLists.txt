@@ -345,6 +345,14 @@ if(ARIEC61850_BUILD_TESTS)
     add_test(NAME ariec61850_m4_multi_profile_staging_tests
              COMMAND ariec61850_m4_multi_profile_staging_tests)
 
+    add_executable(ariec61850_m4_three_sv_grid_tests tests/test_m4_three_sv_grid.cpp)
+    target_link_libraries(ariec61850_m4_three_sv_grid_tests PRIVATE ARIEC61850::core)
+    target_compile_features(ariec61850_m4_three_sv_grid_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_m4_three_sv_grid_tests)
+    ariec61850_apply_sanitizers(ariec61850_m4_three_sv_grid_tests)
+    add_test(NAME ariec61850_m4_three_sv_grid_tests
+             COMMAND ariec61850_m4_three_sv_grid_tests)
+
     add_executable(ariec61850_simulation_tests tests/test_simulation.cpp)
     target_link_libraries(ariec61850_simulation_tests PRIVATE ARIEC61850::core)
     target_compile_definitions(ariec61850_simulation_tests PRIVATE
