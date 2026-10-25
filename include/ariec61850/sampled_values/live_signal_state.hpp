@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "ariec61850/sampled_values/sine_quarter_lut.hpp"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -159,9 +161,9 @@ class SvFixedPointSineEngine final {
 public:
     using SampleRow = std::array<std::int32_t, kLiveSignalChannelCount>;
 
-    SvFixedPointSineEngine() noexcept {
-        build_lut();
-    }
+    // One shared, precomputed flash LUT. Per MU only phase_accumulator_ lives
+    // in RAM; constructing three publishers no longer rebuilds 3 x 4096 sin().
+    SvFixedPointSineEngine() noexcept = default;
 
     void reset_phase(const std::uint32_t phase = 0U) noexcept {
         phase_accumulator_ = phase;
@@ -209,11 +211,11 @@ public:
             const auto offset = phase_from_millidegrees(channel.phase_millidegrees);
             const std::uint32_t phase = base_phase + offset;
             const auto lut_index = static_cast<std::size_t>(phase >> (32U - 12U));
-            std::int64_t sine_q30 = sine_lut_[lut_index & (kLiveSineLutSize - 1U)];
+            std::int64_t sine_q30 = detail::sine_q30_from_index(lut_index);
             if (index < 4U && state.current_shape.enabled) {
                 const auto harmonic_phase = phase * state.current_shape.harmonic_order;
                 const auto harmonic_index = static_cast<std::size_t>(harmonic_phase >> (32U - 12U));
-                const std::int64_t harmonic_q30 = sine_lut_[harmonic_index & (kLiveSineLutSize - 1U)];
+                const std::int64_t harmonic_q30 = detail::sine_q30_from_index(harmonic_index);
                 constexpr std::int64_t q30 = std::int64_t{1} << 30U;
                 sine_q30 += (harmonic_q30 * state.current_shape.harmonic_permille) / std::int64_t{1000};
                 sine_q30 += (q30 * state.current_shape.dc_offset_permille) / std::int64_t{1000};
@@ -258,18 +260,7 @@ public:
     }
 
 private:
-    std::array<std::int32_t, kLiveSineLutSize> sine_lut_{};
     std::uint32_t phase_accumulator_{};
-
-    void build_lut() noexcept {
-        constexpr double pi = 3.141592653589793238462643383279502884;
-        constexpr double q30 = static_cast<double>(std::uint64_t{1} << 30U);
-        for (std::size_t index = 0U; index < sine_lut_.size(); ++index) {
-            const double angle = 2.0 * pi * static_cast<double>(index) /
-                                 static_cast<double>(sine_lut_.size());
-            sine_lut_[index] = static_cast<std::int32_t>(std::llround(std::sin(angle) * q30));
-        }
-    }
 
     [[nodiscard]] static std::int64_t rms_to_peak_counts(const std::int32_t rms) noexcept {
         constexpr std::int64_t sqrt2_q30 = 1518500250LL;
@@ -298,6 +289,9 @@ private:
         return static_cast<std::int32_t>(value);
     }
 };
+
+static_assert(sizeof(SvFixedPointSineEngine) <= 16U,
+              "An MU DDS engine must not allocate its own sine LUT");
 
 [[nodiscard]] inline std::optional<std::size_t> live_channel_index(
     const std::string_view name) noexcept {
