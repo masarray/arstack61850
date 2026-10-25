@@ -38,7 +38,7 @@ jobs:
           grep -Fq 'M3.H' index.html
           grep -Fq '4,705,090' index.html
           grep -Fq 'processbus-sim-m3h3-20261025' index.html
-          grep -Fq 'PTP SOURCE operated in INTERNAL_GM_ONLY mode' index.html
+          grep -Fq 'Next: multiple virtual Merging Units from one board' index.html
           grep -Fq 'ARStack-Studio-M3H3-win-x64-setup.exe' index.html
           mkdir -p _site
           cp index.html _site/index.html
