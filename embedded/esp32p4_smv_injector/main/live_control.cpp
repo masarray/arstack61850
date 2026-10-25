@@ -212,7 +212,6 @@ void print_identity() noexcept {
     const esp_app_desc_t* app = esp_app_get_description();
     const char* version = app != nullptr ? app->version : "unknown";
 #if CONFIG_AR_PTP_LAB_TX
-#if CONFIG_AR_PTP_LAB_TX
     const char* capabilities =
         "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-LAN-AUTONOMY-V1,SV-CONFIG-TXN-V1,"
         "PTP-P2,PTP-GM-BENCH-V1,PTP-POLICY-M3D-V1,SMPSYNCH-AUTO,"
