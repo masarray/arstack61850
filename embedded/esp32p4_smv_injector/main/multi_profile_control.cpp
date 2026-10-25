@@ -2,6 +2,7 @@
 #include "multi_profile_control.hpp"
 #include "multi_profile_staging.hpp"
 #include "live_control.hpp"
+#include "ariec61850/sampled_values/m4_three_sv_signals.hpp"
 
 #include "esp_log.h"
 
@@ -24,6 +25,8 @@ constexpr char kDelimiters[] = " \t\r\n";
 // One UART control-task owner; real-time publisher does NOT touch this bank
 // until P0C2 adds a separately synchronized activation protocol.
 MultiSvConfigStore g_multi{};
+// Exactly three independent atomic waveform banks; only console task writes.
+ar::iec61850::sampled_values::M4ThreeSvSignalBanks g_mu_signals{};
 // Selection changes only in STOPPED control-plane commands; the active
 // publisher reads the immutable committed roster once at START.
 std::atomic<bool> g_multi_tx_selected{false};
@@ -45,6 +48,26 @@ void upper(char* text) noexcept {
     return true;
 }
 
+
+[[nodiscard]] bool parse_signed(const char* text, std::int32_t& output) noexcept {
+    if (!text || !*text) return false;
+    errno = 0;
+    char* end = nullptr;
+    const long value = std::strtol(text, &end, 10);
+    if (errno || end == text || *end || value < std::numeric_limits<std::int32_t>::min() ||
+        value > std::numeric_limits<std::int32_t>::max()) return false;
+    output = static_cast<std::int32_t>(value);
+    return true;
+}
+
+[[nodiscard]] int stream_channel(char* name) noexcept {
+    if (!name) return -1;
+    upper(name);
+    static constexpr const char* names[] = {"IA", "IB", "IC", "IN", "UA", "UB", "UC", "UN"};
+    for (int i = 0; i < 8; ++i)
+        if (std::strcmp(name, names[i]) == 0) return i;
+    return -1;
+}
 [[nodiscard]] int nibble(const char ch) noexcept {
     if (ch >= '0' && ch <= '9') return ch - '0';
     if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
@@ -127,6 +150,81 @@ multi_profile_tx_roster_if_selected() noexcept {
     // COMMIT is only accepted while STOPPED, and START is parsed by this
     // same serial command task; no writer can race a running publisher.
     return g_multi.committed_profiles().data();
+}
+
+
+ar::iec61850::sampled_values::SvLiveSignalState
+multi_profile_signal_snapshot(const std::size_t slot) noexcept {
+    ar::iec61850::sampled_values::SvLiveSignalState value{};
+    // Invalid slot is only reachable by programming error, never UI input.
+    static_cast<void>(g_mu_signals.snapshot(slot, value));
+    return value;
+}
+
+void handle_svstream_command(char* arguments) noexcept {
+    char* save = nullptr;
+    const char* slot_text = strtok_r(arguments, kDelimiters, &save);
+    std::uint32_t slot_number{};
+    if (!parse_uint(slot_text, slot_number) || slot_number < 1U || slot_number > 3U ||
+        !g_multi.configured() ||
+        !g_multi_tx_selected.load(std::memory_order_acquire)) {
+        ESP_LOGE(kTag, "SVSTREAM rejected: select committed MULTISV roster first; slot 1..3");
+        return;
+    }
+    const std::size_t slot = slot_number - 1U;
+    char* verb = strtok_r(nullptr, kDelimiters, &save);
+    if (!verb) { ESP_LOGE(kTag, "SVSTREAM usage: <1..3> SHOW|SET|FREQ"); return; }
+    upper(verb);
+    auto state = multi_profile_signal_snapshot(slot);
+    if (std::strcmp(verb, "SHOW") == 0) {
+        if (!no_extra(&save)) { ESP_LOGE(kTag, "SVSTREAM SHOW takes no extras"); return; }
+        ESP_LOGI(kTag, "SVSTREAM slot=%lu generation=%llu frequency_millihz=%lu",
+                 static_cast<unsigned long>(slot_number),
+                 static_cast<unsigned long long>(state.generation),
+                 static_cast<unsigned long>(state.frequency_millihz));
+        static constexpr const char* names[] = {"IA", "IB", "IC", "IN", "UA", "UB", "UC", "UN"};
+        for (std::size_t i = 0; i < state.channels.size(); ++i) {
+            const auto& ch = state.channels[i];
+            ESP_LOGI(kTag, "SVSTREAM slot=%lu channel=%s rms=%ld phase=%ld quality=%lu enabled=%u",
+                     static_cast<unsigned long>(slot_number), names[i],
+                     static_cast<long>(ch.rms_counts),
+                     static_cast<long>(ch.phase_millidegrees),
+                     static_cast<unsigned long>(ch.quality), ch.enabled ? 1U : 0U);
+        }
+        return;
+    }
+    if (std::strcmp(verb, "FREQ") == 0) {
+        std::uint32_t frequency{};
+        if (!parse_uint(strtok_r(nullptr, kDelimiters, &save), frequency) ||
+            !no_extra(&save)) { ESP_LOGE(kTag, "SVSTREAM FREQ <millihertz>"); return; }
+        state.frequency_millihz = frequency;
+    } else if (std::strcmp(verb, "SET") == 0) {
+        const int index = stream_channel(strtok_r(nullptr, kDelimiters, &save));
+        std::int32_t rms{}, phase{};
+        std::uint32_t quality{};
+        if (index < 0 ||
+            !parse_signed(strtok_r(nullptr, kDelimiters, &save), rms) ||
+            !parse_signed(strtok_r(nullptr, kDelimiters, &save), phase) ||
+            !parse_uint(strtok_r(nullptr, kDelimiters, &save), quality) ||
+            !no_extra(&save)) {
+            ESP_LOGE(kTag, "SVSTREAM SET <IA|IB|IC|IN|UA|UB|UC|UN> <rms> <phase_mdeg> <quality>");
+            return;
+        }
+        auto& channel = state.channels[static_cast<std::size_t>(index)];
+        channel.rms_counts = rms;
+        channel.phase_millidegrees = phase;
+        channel.quality = quality;
+    } else {
+        ESP_LOGE(kTag, "SVSTREAM unsupported verb; use SHOW/SET/FREQ");
+        return;
+    }
+    if (!g_mu_signals.publish(slot, state)) {
+        ESP_LOGE(kTag, "SVSTREAM rejected: invalid signal values or busy bank");
+        return;
+    }
+    ESP_LOGI(kTag, "SVSTREAM committed slot=%lu generation=%llu",
+             static_cast<unsigned long>(slot_number),
+             static_cast<unsigned long long>(g_mu_signals.generation(slot)));
 }
 
 void handle_multi_profile_command(char* arguments) noexcept {
