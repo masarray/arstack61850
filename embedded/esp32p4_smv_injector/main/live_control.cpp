@@ -65,6 +65,7 @@ SvLiveSignalBank g_signal_bank;
 SvScenarioTransaction g_scenario_txn;
 std::atomic<bool> g_running{false};
 std::atomic<bool> g_start_request{false};
+std::atomic<bool> g_physical_link_up{false};
 std::atomic<TaskHandle_t> g_publisher_task{nullptr};
 std::atomic<bool> g_control_heartbeat_seen{false};
 std::atomic<std::uint32_t> g_last_heartbeat_ms{0U};
