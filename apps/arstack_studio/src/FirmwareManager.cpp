@@ -266,7 +266,7 @@ bool FirmwareManager::loadManifest() {
         hasCapability(QStringLiteral("PROFILE")) &&
         hasCapability(QStringLiteral("PROFILE-BINARY-V1")) &&
         hasCapability(QStringLiteral("LIVE-SETPOINTS")) &&
-        hasCapability(QStringLiteral("SESSION-LEASE")) &&
+        hasCapability(QStringLiteral("SV-LAN-AUTONOMY-V1")) &&
         hasCapability(QStringLiteral("PTP-P2")) &&
         hasCapability(QStringLiteral("SMPSYNCH-AUTO"));
 

@@ -70,7 +70,7 @@ Item {
         if (stateKey === "running") return "SV transmitter running (board reported; wire still requires independent capture)"
         if (stateKey === "preparing") return "ESP32-P4 connected and verified; preparing injection profile"
         if (stateKey === "connecting") return "Searching for or verifying the serial connection"
-        return "No verified ESP32-P4 connection; offline edit is available"
+        return "Studio USB/COM offline. ESP32-P4 may still broadcast SV/PTP over LAN; output state is unknown until reconnect."
     }
 
     implicitHeight: 20

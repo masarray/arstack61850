@@ -166,6 +166,10 @@ void ar_ptp_lab_start(esp_eth_handle_t eth_handle);
 /** Request a clean stop of the PTP task without touching the SV hot path. */
 void ar_ptp_lab_stop(void);
 
+/** Physical Ethernet event: pause wire PTP and revoke READY while link is down.
+ * Internal EMAC clock remains alive; re-qualify from fresh TX on link recovery. */
+void ar_ptp_lab_set_ethernet_link_up(bool up);
+
 /** Return whether the selected PTP runtime is currently ready/running. */
 bool ar_ptp_lab_is_running(void);
 

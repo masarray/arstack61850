@@ -195,10 +195,10 @@ bool DeviceController::shutdown() {
     shuttingDown_ = true;
     pendingAutoDetect_ = false;
     pendingConnectPort_.clear();
-    // M3.B: Studio owns the SV output lease, never the board's persistent
-    // time authority. On USB/Studio shutdown request only SV STOP; stopping
-    // PTP here would destroy clock phase across a simple GUI disconnect.
-    // Explicit operator PTP STOP remains a separate verified command.
+    // Studio is the control/observer client, NOT the SV/PTP lifetime owner.
+    // Closing Studio, losing COM or a USB re-enumeration must never send STOP.
+    // Only an explicit operator Stop action or board link/transport fault may
+    // end an autonomous SV session. Keep PTP authority on the board.
     constexpr bool requestPtpStop = false;
     resetPtpStartup();
     resetScenarioStart();
@@ -212,7 +212,7 @@ bool DeviceController::shutdown() {
         return true;
     }
 
-    const bool requestSvStop = running_;
+    constexpr bool requestSvStop = false;
     if (QThread::currentThread() == &ioThread_) {
         ioWorker_->shutdown(requestSvStop, requestPtpStop);
         ioThread_.quit();
@@ -405,8 +405,8 @@ void DeviceController::connectWorkerSignals() {
     connect(ioWorker_, &DeviceIoWorker::commandTransmitted, this,
             [this](const quint64 generation, const QString& command, const bool quiet) {
         if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
-        // HEARTBEAT is a firmware output lease, not disposable chatter:
-        // preserve *transmitted* times to diagnose a 6-second watchdog STOP.
+        // HEARTBEAT now measures Studio/USB control health only. It cannot
+        // stop board-owned SV/PTP; preserve sent timestamps for diagnostics.
         if (command == QStringLiteral("HEARTBEAT"))
             appendLog(QStringLiteral("HB-TX"), QStringLiteral("HEARTBEAT host drained serial bytes"));
         else if (!quiet) appendLog(QStringLiteral("→"), command);
@@ -568,7 +568,7 @@ bool DeviceController::identitySupportsCurrentContract(
         QStringLiteral("PROFILE"),
         QStringLiteral("PROFILE-BINARY-V1"),
         QStringLiteral("LIVE-SETPOINTS"),
-        QStringLiteral("SESSION-LEASE"),
+        QStringLiteral("SV-LAN-AUTONOMY-V1"),
         QStringLiteral("PTP-P2"),
         QStringLiteral("SMPSYNCH-AUTO")};
     const QString wantedBuild = expectedBuildId.trimmed().toLower();
@@ -2088,6 +2088,86 @@ void DeviceController::processLine(const QString& rawLine) {
     if (line.isEmpty()) return;
     appendLog(QStringLiteral("←"), line);
 
+    // Read-only 4I+4V sync after reconnect: a complete eight-row message
+    // must match the verified boot and one bank generation, never just a
+    // partial line or values that happen to be cached in the UI.
+    static const QRegularExpression kBankBegin{
+        QStringLiteral("SVBANK BEGIN generation=(\\d+) boot=([0-9A-Fa-f]{16}) hz_millihz=(\\d+)")};
+    static const QRegularExpression kBankRow{
+        QStringLiteral("(IA|IB|IC|IN|UA|UB|UC|UN) rms_counts=(-?\\d+) phase_mdeg=(-?\\d+) quality=0x([0-9A-Fa-f]{8}) enabled=([01])")};
+    static const QRegularExpression kBankEnd{
+        QStringLiteral("SVBANK END generation=(\\d+) boot=([0-9A-Fa-f]{16})")};
+    const auto begin = kBankBegin.match(line);
+    if (begin.hasMatch()) {
+        pendingBoardSnapshot_ = false;
+        pendingBoardRows_.clear();
+        bool hzOk = false;
+        const auto mhz = begin.captured(3).toUInt(&hzOk);
+        if (deviceVerified_ && connected_ && hzOk && mhz <= 1000000U &&
+            begin.captured(2).compare(identity_.bootId, Qt::CaseInsensitive) == 0) {
+            pendingBoardGeneration_ = begin.captured(1);
+            pendingBoardBoot_ = begin.captured(2);
+            pendingBoardHzMilli_ = mhz;
+            pendingBoardSnapshot_ = true;
+        }
+        return;
+    }
+    const auto row = kBankRow.match(line);
+    if (pendingBoardSnapshot_ && row.hasMatch()) {
+        const QString key = row.captured(1);
+        bool countsOk = false, angleOk = false, qualityOk = false;
+        const qlonglong counts = row.captured(2).toLongLong(&countsOk);
+        const qlonglong angle = row.captured(3).toLongLong(&angleOk);
+        const quint32 quality = row.captured(4).toUInt(&qualityOk, 16);
+        if (!countsOk || !angleOk || !qualityOk ||
+            counts < std::numeric_limits<qint32>::min() ||
+            counts > std::numeric_limits<qint32>::max() ||
+            angle < std::numeric_limits<qint32>::min() ||
+            angle > std::numeric_limits<qint32>::max() ||
+            pendingBoardRows_.contains(key)) {
+            pendingBoardSnapshot_ = false;
+            pendingBoardRows_.clear();
+        } else {
+            pendingBoardRows_.insert(key, QVariantMap{
+                {QStringLiteral("counts"), counts},
+                {QStringLiteral("angleMdeg"), angle},
+                {QStringLiteral("quality"), static_cast<qulonglong>(quality)},
+                {QStringLiteral("enabled"), row.captured(5) == QStringLiteral("1")}
+            });
+        }
+        return;
+    }
+    const auto end = kBankEnd.match(line);
+    if (end.hasMatch()) {
+        if (pendingBoardSnapshot_ && pendingBoardRows_.size() == 8 &&
+            connected_ && deviceVerified_ &&
+            end.captured(1) == pendingBoardGeneration_ &&
+            end.captured(2).compare(pendingBoardBoot_, Qt::CaseInsensitive) == 0 &&
+            pendingBoardBoot_.compare(identity_.bootId, Qt::CaseInsensitive) == 0) {
+            QVariantList current, voltage;
+            for (const QString& id : {QStringLiteral("IA"), QStringLiteral("IB"),
+                 QStringLiteral("IC"), QStringLiteral("IN")})
+                current.push_back(pendingBoardRows_.value(id));
+            for (const QString& id : {QStringLiteral("UA"), QStringLiteral("UB"),
+                 QStringLiteral("UC"), QStringLiteral("UN")})
+                voltage.push_back(pendingBoardRows_.value(id));
+            const QVariantMap complete{
+                {QStringLiteral("boot"), pendingBoardBoot_},
+                {QStringLiteral("generation"), pendingBoardGeneration_},
+                {QStringLiteral("hz"), static_cast<double>(pendingBoardHzMilli_) / 1000.0},
+                {QStringLiteral("current"), current},
+                {QStringLiteral("voltage"), voltage}
+            };
+            if (boardScenario_ != complete) {
+                boardScenario_ = complete;
+                emit boardScenarioChanged();
+            }
+        }
+        pendingBoardSnapshot_ = false;
+        pendingBoardRows_.clear();
+        return;
+    }
+
     // Explicit on-board flight recorder response. Do not poll from the
     // UI render path or treat historical reports as new lock evidence.
     const auto flightPos = line.indexOf(QStringLiteral("SVSYNC "));
@@ -2577,6 +2657,15 @@ void DeviceController::processLine(const QString& rawLine) {
 }
 
 void DeviceController::resetTelemetry() {
+    pendingBoardSnapshot_ = false;
+    pendingBoardRows_.clear();
+    pendingBoardGeneration_.clear();
+    pendingBoardBoot_.clear();
+    pendingBoardHzMilli_ = 0U;
+    if (!boardScenario_.isEmpty()) {
+        boardScenario_.clear();
+        emit boardScenarioChanged();
+    }
     operatorStopPending_ = false;
     lastSvStopSeq_ = 0;
     const bool hadStopDetails = !svLastStopCause_.isEmpty() ||

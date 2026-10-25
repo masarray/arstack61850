@@ -120,7 +120,7 @@ jobs:
               $manifest.broadcastMirrorEnabled -ne $false) {
             throw 'FAT preview requires simulated Global GM BOOT + PTP-source autostart + measured SV phase/MAC evidence, never LOCAL-only firmware'
           }
-          $expectedCapabilities = @('SMV-4I4V', 'PROFILE', 'PROFILE-BINARY-V1', 'LIVE-SETPOINTS', 'SESSION-LEASE', 'PTP-P2', 'SMPSYNCH-AUTO')
+          $expectedCapabilities = @('SMV-4I4V', 'PROFILE', 'PROFILE-BINARY-V1', 'LIVE-SETPOINTS', 'SV-LAN-AUTONOMY-V1', 'PTP-P2', 'SMPSYNCH-AUTO')
           foreach ($capability in $expectedCapabilities) {
             if ($manifest.capabilities -notcontains $capability) { throw "PR firmware lacks capability: $capability" }
           }
@@ -142,16 +142,17 @@ jobs:
           $native = Join-Path $PWD 'build-studio-preview\Release\arstack_studio.exe'
           $logDir = Join-Path $env:RUNNER_TEMP 'studio-firmware-diagnostics'
           New-Item -Path $logDir -ItemType Directory -Force | Out-Null
-          $baselineStdErr = Join-Path $logDir 'baseline.stderr.log'
-          $baselineStdOut = Join-Path $logDir 'baseline.stdout.log'
-          $baselineContract = Start-Process -FilePath $legacyGui -ArgumentList '--check-firmware-contract' -Wait -PassThru -RedirectStandardError $baselineStdErr -RedirectStandardOutput $baselineStdOut
-          Write-Host "PUBLIC_BASELINE_FIRMWARE_CONTRACT_EXIT=$($baselineContract.ExitCode)"
-          Get-Content $baselineStdErr -ErrorAction SilentlyContinue
-          if ($baselineContract.ExitCode -ne 0) { throw 'Pinned public v0.1.1 GUI cannot validate its own firmware' }
+          # The frozen v0.1.1 archive is an SHA-pinned flasher/reference
+          # template source, NOT a supported autonomy firmware distribution.
+          # Its historical firmware manifest lacks the new capability and
+          # cross-checking it against this GUI would be a false CI failure.
+          # Verify ONLY the new exact-head GUI with its own manifest below.
           $nativeStdErr = Join-Path $logDir 'native.stderr.log'
           $nativeStdOut = Join-Path $logDir 'native.stdout.log'
+          # Exact paired firmware from THIS PR head; never the old release.
+          $env:ARSTACK_STUDIO_FIRMWARE_DIR = $newFirmware
           $firmwareContract = Start-Process -FilePath $native -ArgumentList '--check-firmware-contract' -Wait -PassThru -RedirectStandardError $nativeStdErr -RedirectStandardOutput $nativeStdOut
-          Write-Host "NATIVE_WITH_PUBLIC_BASELINE_FIRMWARE_CONTRACT_EXIT=$($firmwareContract.ExitCode)"
+          Write-Host "NATIVE_WITH_MATCHED_PREVIEW_FIRMWARE_CONTRACT_EXIT=$($firmwareContract.ExitCode)"
           Get-Content $nativeStdErr -ErrorAction SilentlyContinue
           if ($firmwareContract.ExitCode -ne 0) {
             $manifest = Get-Content -Raw (Join-Path $baseline 'firmware\firmware-manifest.json') | ConvertFrom-Json
