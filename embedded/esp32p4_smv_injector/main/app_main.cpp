@@ -175,6 +175,9 @@ struct TimingStats final {
     std::uint64_t mirror_ok{};
     std::uint64_t mirror_fail{};
     std::uint64_t missed_slots{};
+    std::uint32_t multi_batch_max_us{};
+    std::uint64_t multi_batch_overruns{};
+    std::uint64_t multi_batches{};
     std::int64_t lateness_sum_us{};
     std::int32_t lateness_min_us{std::numeric_limits<std::int32_t>::max()};
     std::int32_t lateness_max_us{std::numeric_limits<std::int32_t>::min()};
@@ -511,6 +514,10 @@ void merge_stats(TimingStats& local) noexcept {
     g_interval_stats.mirror_ok += local.mirror_ok;
     g_interval_stats.mirror_fail += local.mirror_fail;
     g_interval_stats.missed_slots += local.missed_slots;
+    g_interval_stats.multi_batch_max_us = std::max(
+        g_interval_stats.multi_batch_max_us, local.multi_batch_max_us);
+    g_interval_stats.multi_batch_overruns += local.multi_batch_overruns;
+    g_interval_stats.multi_batches += local.multi_batches;
     g_interval_stats.lateness_sum_us += local.lateness_sum_us;
     g_interval_stats.lateness_min_us = std::min(g_interval_stats.lateness_min_us, local.lateness_min_us);
     g_interval_stats.lateness_max_us = std::max(g_interval_stats.lateness_max_us, local.lateness_max_us);
@@ -528,6 +535,10 @@ void accumulate_stats(TimingStats& target, const TimingStats& source) noexcept {
     target.mirror_ok += source.mirror_ok;
     target.mirror_fail += source.mirror_fail;
     target.missed_slots += source.missed_slots;
+    target.multi_batch_max_us = std::max(
+        target.multi_batch_max_us, source.multi_batch_max_us);
+    target.multi_batch_overruns += source.multi_batch_overruns;
+    target.multi_batches += source.multi_batches;
     target.lateness_sum_us += source.lateness_sum_us;
     target.lateness_min_us = std::min(target.lateness_min_us, source.lateness_min_us);
     target.lateness_max_us = std::max(target.lateness_max_us, source.lateness_max_us);
@@ -1659,6 +1670,11 @@ void publisher_task(void* argument) {
             }
             patch_packet(
                 canonical, canonical_sample_count, sample_synchronization, row, signal_state);
+            // One timestamp BEFORE all three canonical EMAC submissions.
+            // Budget telemetry is folded into the existing 400-tick stats
+            // flush, never logged or malloc'ed on the real-time path.
+            const std::int64_t multi_batch_start_us =
+                multi_active ? esp_timer_get_time() : 0LL;
 #if AR_SV_TX_EGRESS_SUPPORTED
             // Every 2 seconds, replace normal SV TX for the real canonical
             // frame with descriptor-stamped TX. This reaches two valid
@@ -1881,6 +1897,14 @@ void publisher_task(void* argument) {
                     eth_handle, probe_multicast.data(), probe_multicast.size()));
             }
 #endif
+            if (multi_active) {
+                const std::int64_t elapsed = esp_timer_get_time() - multi_batch_start_us;
+                const auto bounded = static_cast<std::uint32_t>(
+                    std::clamp<std::int64_t>(elapsed, 0LL, 0xFFFFFFFFLL));
+                local.multi_batch_max_us = std::max(local.multi_batch_max_us, bounded);
+                ++local.multi_batches;
+                if (bounded > 250U) ++local.multi_batch_overruns;
+            }
         }
 
         update_local_timing(
@@ -2473,6 +2497,16 @@ void telemetry_task(void*) {
                  static_cast<long>(snapshot.lateness_max_us),
                  static_cast<unsigned>(snapshot.last_sample_count),
                  static_cast<unsigned long long>(snapshot.last_signal_generation));
+        if (snapshot.multi_batches != 0U) {
+            ESP_LOGI(kTag,
+                "MULTISV TX budget: batches=%llu max_3frame_submit=%luus "
+                "over_250us=%llu canonical_ok=%llu fail=%llu",
+                static_cast<unsigned long long>(snapshot.multi_batches),
+                static_cast<unsigned long>(snapshot.multi_batch_max_us),
+                static_cast<unsigned long long>(snapshot.multi_batch_overruns),
+                static_cast<unsigned long long>(snapshot.canonical_ok),
+                static_cast<unsigned long long>(snapshot.canonical_fail));
+        }
     }
 }
 
