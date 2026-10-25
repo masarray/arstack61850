@@ -3,6 +3,7 @@
 #include "live_control.hpp"
 #include "ethernet_port.h"
 #include "profile_control.hpp"
+#include "multi_profile_control.hpp"
 #include "smp_synch_lab.hpp"
 #include "ariec61850/sampled_values/live_signal_transaction.hpp"
 
@@ -254,6 +255,8 @@ void print_help() noexcept {
     ESP_LOGI(kTag, "  PTP POLICY <INTERNAL_GM_ONLY|AUTO_PREFER_EXTERNAL|EXTERNAL_ONLY|MONITOR_ONLY> (PTP+SV must be STOPPED)");
     ESP_LOGI(kTag, "  PTP CONFIG <domain> <transport> <vlan> <vid> <pcp> <announce_ms> <sync_ms> <pdelay> [bench_global_0_1 UTC_epoch_seconds]");
     ESP_LOGI(kTag, "GUI profile deployment uses bounded PROFILE subcommands while STOPPED.");
+    ESP_LOGI(kTag, "  MULTISV STATUS|SHOW|BEGIN <tx> <bytes>|CHUNK <tx> <offset> <hex>|VALIDATE <tx>|COMMIT <tx>|ABORT <tx>");
+    ESP_LOGI(kTag, "  MULTISV V2 is control-plane ONLY until M4-P0C2; it does not start three SV publishers.");
 }
 
 void print_identity() noexcept {
@@ -266,10 +269,10 @@ void print_identity() noexcept {
     const char* version = app != nullptr ? app->version : "unknown";
 #if CONFIG_AR_PTP_LAB_TX
     const char* capabilities =
-        "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-LAN-AUTONOMY-V1,SV-CONFIG-TXN-V1,PTP-P2,PTP-GM-BENCH-V1,PTP-POLICY-M3D-V1,SMPSYNCH-AUTO,PROFILE-BINARY-V1,PROFILE-REUSE-V1";
+        "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-LAN-AUTONOMY-V1,SV-CONFIG-TXN-V1,PTP-P2,PTP-GM-BENCH-V1,PTP-POLICY-M3D-V1,SMPSYNCH-AUTO,PROFILE-BINARY-V1,PROFILE-REUSE-V1,MULTISV-CONFIG-STAGING-V2";
 #else
     const char* capabilities =
-        "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-LAN-AUTONOMY-V1,SV-CONFIG-TXN-V1,PROFILE-BINARY-V1,PROFILE-REUSE-V1";
+        "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-LAN-AUTONOMY-V1,SV-CONFIG-TXN-V1,PROFILE-BINARY-V1,PROFILE-REUSE-V1,MULTISV-CONFIG-STAGING-V2";
 #endif
     ESP_LOGI(kTag,
              "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 device_id=%02X%02X%02X%02X%02X%02X firmware=%s build=%s boot_id=%016llX capabilities=%s",
@@ -815,6 +818,11 @@ void handle_line(char* line) noexcept {
             return;
         }
         print_help();
+        return;
+    }
+    if (std::strcmp(command, "MULTISV") == 0) {
+        g_scenario_txn.reset();
+        handle_multi_profile_command(save);
         return;
     }
     if (std::strcmp(command, "PROFILE") == 0) {
