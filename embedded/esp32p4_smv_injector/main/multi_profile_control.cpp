@@ -74,7 +74,7 @@ void upper(char* text) noexcept {
 
 void print_status() noexcept {
     ESP_LOGI(kTag,
-        "MULTISV STATUS staging=%u validated=%u transaction=%lu received=%lu expected=%lu last=%lu configured=%u generation=%llu hash=%016llX bytes=%lu output=INACTIVE_UNTIL_M4_P0C2",
+        "MULTISV STATUS staging=%u validated=%u transaction=%lu received=%lu expected=%lu last=%lu configured=%u generation=%llu hash=%016llX bytes=%lu output=OPT_IN_THREE_SV_TX_PREVIEW",
         g_multi.uploading() ? 1U : 0U,
         g_multi.validated() ? 1U : 0U,
         static_cast<unsigned long>(g_multi.transaction()),
@@ -84,7 +84,7 @@ void print_status() noexcept {
         g_multi.configured() ? 1U : 0U,
         static_cast<unsigned long long>(g_multi.generation()),
         static_cast<unsigned long long>(g_multi.committed_hash()),
-        static_cast<unsigned long>(g_multi.committed_bytes());
+        static_cast<unsigned long>(g_multi.committed_bytes()));
     ESP_LOGI(kTag, "MULTISV TXMODE selected=%u configured=%u (START uses selected roster; STOP ends TX)",
              g_multi_tx_selected.load(std::memory_order_acquire) ? 1U : 0U,
              g_multi.configured() ? 1U : 0U);
