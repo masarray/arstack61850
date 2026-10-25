@@ -405,8 +405,8 @@ void DeviceController::connectWorkerSignals() {
     connect(ioWorker_, &DeviceIoWorker::commandTransmitted, this,
             [this](const quint64 generation, const QString& command, const bool quiet) {
         if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
-        // HEARTBEAT is a firmware output lease, not disposable chatter:
-        // preserve *transmitted* times to diagnose a 6-second watchdog STOP.
+        // HEARTBEAT now measures Studio/USB control health only. It cannot
+        // stop board-owned SV/PTP; preserve sent timestamps for diagnostics.
         if (command == QStringLiteral("HEARTBEAT"))
             appendLog(QStringLiteral("HB-TX"), QStringLiteral("HEARTBEAT host drained serial bytes"));
         else if (!quiet) appendLog(QStringLiteral("→"), command);
