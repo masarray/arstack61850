@@ -765,6 +765,9 @@ void handle_line(char* line) noexcept {
             return;
         }
         profile_control_abort_staging();
+        // A V1 START invalidates any incomplete three-stream upload, but
+        // preserves a fully committed, inert M4 control-plane roster.
+        multi_profile_abort_staging();
         // Serialize against the asynchronous Ethernet DOWN callback. A
         // link-down that wins this short critical section cannot be undone
         // by a late USB START on the other CPU.
