@@ -6,6 +6,7 @@
 #include "esp_log.h"
 
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <cctype>
 #include <cstddef>
@@ -23,6 +24,9 @@ constexpr char kDelimiters[] = " \t\r\n";
 // One UART control-task owner; real-time publisher does NOT touch this bank
 // until P0C2 adds a separately synchronized activation protocol.
 MultiSvConfigStore g_multi{};
+// Selection changes only in STOPPED control-plane commands; the active
+// publisher reads the immutable committed roster once at START.
+std::atomic<bool> g_multi_tx_selected{false};
 
 void upper(char* text) noexcept {
     if (text == nullptr) return;
@@ -80,7 +84,10 @@ void print_status() noexcept {
         g_multi.configured() ? 1U : 0U,
         static_cast<unsigned long long>(g_multi.generation()),
         static_cast<unsigned long long>(g_multi.committed_hash()),
-        static_cast<unsigned long>(g_multi.committed_bytes()));
+        static_cast<unsigned long>(g_multi.committed_bytes());
+    ESP_LOGI(kTag, "MULTISV TXMODE selected=%u configured=%u (START uses selected roster; STOP ends TX)",
+             g_multi_tx_selected.load(std::memory_order_acquire) ? 1U : 0U,
+             g_multi.configured() ? 1U : 0U);
 }
 
 void print_roster() noexcept {
@@ -113,6 +120,15 @@ void print_roster() noexcept {
 
 void multi_profile_abort_staging() noexcept { g_multi.abort(); }
 
+const ar::iec61850::sampled_values::CompiledSvDeviceProfile*
+multi_profile_tx_roster_if_selected() noexcept {
+    if (!g_multi_tx_selected.load(std::memory_order_acquire) ||
+        !g_multi.configured()) return nullptr;
+    // COMMIT is only accepted while STOPPED, and START is parsed by this
+    // same serial command task; no writer can race a running publisher.
+    return g_multi.committed_profiles().data();
+}
+
 void handle_multi_profile_command(char* arguments) noexcept {
     char* save = nullptr;
     char* command = strtok_r(arguments, kDelimiters, &save);
@@ -129,6 +145,25 @@ void handle_multi_profile_command(char* arguments) noexcept {
         }
         if (!std::strcmp(command, "SHOW")) print_roster();
         else print_status();
+        return;
+    }
+
+    // Opt-in: generic legacy START remains single-stream unless SELECT
+    // explicitly arms a committed 3-SV roster. An incomplete transfer cannot
+    // affect the active mode, and SELECT never starts transmission itself.
+    if (!std::strcmp(command, "SELECT") || !std::strcmp(command, "DESELECT")) {
+        if (!no_extra(&save) || live_tx_running() || g_multi.uploading()) {
+            ESP_LOGE(kTag, "MULTISV SELECT rejected: STOP_SV_AND_UPLOAD_FIRST");
+            return;
+        }
+        if (!std::strcmp(command, "SELECT") && !g_multi.configured()) {
+            ESP_LOGE(kTag, "MULTISV SELECT rejected: no committed roster");
+            return;
+        }
+        const bool selected = !std::strcmp(command, "SELECT");
+        g_multi_tx_selected.store(selected, std::memory_order_release);
+        ESP_LOGI(kTag, "MULTISV TXMODE selected=%u; next verified START uses %s",
+                 selected ? 1U : 0U, selected ? "THREE_SV" : "LEGACY_ONE_SV");
         return;
     }
 
@@ -197,6 +232,9 @@ void handle_multi_profile_command(char* arguments) noexcept {
             ESP_LOGE(kTag, "MULTISV COMMIT rejected: VALIDATE required or transaction invalid");
             return;
         }
+        // A new committed profile set is never auto-activated by replacing
+        // the old roster. Require an explicit SELECT after each COMMIT.
+        g_multi_tx_selected.store(false, std::memory_order_release);
         ESP_LOGI(kTag,
             "MULTISV COMMITTED transaction=%lu generation=%llu hash=%016llX bytes=%lu output=INACTIVE_UNTIL_M4_P0C2",
             static_cast<unsigned long>(txn),
