@@ -31,7 +31,7 @@ std::vector<std::uint8_t> sample_v2_roster() {
         "tests/fixtures/scl/m4-three-9-2le-reference.scd");
     SvPublisherProfileCompileContext context;
     context.profile_family = SvProfileFamily::legacy_9_2le;
-    context.sample_counter_modulus = 4000U;
+    context.sample_counter_modulus = static_cast<std::uint16_t>(4000U);
     const auto compiled = M4ThreeSvRosterCompiler::compile(document, context);
     CHECK(compiled.ok());
     const auto& s = compiled.roster->streams;
