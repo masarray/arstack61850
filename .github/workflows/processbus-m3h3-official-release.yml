@@ -1,0 +1,156 @@
+name: Publish Official ARStack M3.H.3 Stable Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/processbus-m3h3-official-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: arstack-processbus-m3h3-official-stable
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Verify and promote M3.H.3 exact-byte package to official stable
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BETA_TAG: processbus-sim-m3h3-beta1-20261025
+      OFFICIAL_TAG: processbus-sim-m3h3-20261025
+      MERGED_SHA: 9d980e8f766f779a881e770894c09a05b37e42e2
+      SOURCE_SHA: 2231ac35fa13211b2b0c3b51243a7e352389559c
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gate source provenance and prevent release overwrite
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$MERGED_SHA" HEAD
+          git merge-base --is-ancestor "$SOURCE_SHA" "$MERGED_SHA"
+          test -s docs/releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md
+          if gh release view "$OFFICIAL_TAG" >/dev/null 2>&1 ||
+             git rev-parse --verify "refs/tags/$OFFICIAL_TAG" >/dev/null 2>&1; then
+            echo "Refusing to modify an existing immutable official tag" >&2
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$BETA_TAG" > beta-release.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/40165495478" > windows-run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/40165495452" > linux-run.json
+          python3 - <<'PY'
+          import json,os
+          sha=os.environ['SOURCE_SHA']
+          for n in ['windows-run.json','linux-run.json']:
+              r=json.load(open(n))
+              assert r['head_sha']==sha and r['status']=='completed' and r['conclusion']=='success',n
+          b=json.load(open('beta-release.json'))
+          assert b['tag_name']==os.environ['BETA_TAG'] and b['prerelease'] and not b['draft']
+          assert len(b['assets'])==7
+          assert b['target_commitish']==os.environ['MERGED_SHA']
+          print('PASS CI source and immutable beta identity')
+          PY
+
+      - name: Retrieve seven previously accepted public artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p beta-assets official-assets
+          gh release download "$BETA_TAG" --dir beta-assets
+
+      - name: Verify exact bytes, matched firmware, stable asset inventory and true PTP scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,io,json,os,pathlib,shutil,zipfile
+          beta=pathlib.Path('beta-assets')
+          out=pathlib.Path('official-assets')
+          expected={
+            'ARStack-Studio-Preview-win-x64-setup.exe':'b65db0ac4e6bb4f0f1b2c3a316aee8465177b6c2bb2916ee89b41c0ebe2fcc0f',
+            'ARStack-Studio-Preview-win-x64-portable.zip':'dfe2e8386861713a6e6fb9ddd21bf0c193f1de3f6cf5abddeda7244b8e4208fa',
+            'arstack-esp32p4-smv-0.1.1.bin':'b3a5142f863003c93efd26d8a4eb481710076dd166780b2c0c5e81dab3bb0ea1',
+            'firmware-manifest.json':'2efb27092b3524d8bc57ea6ce0e8cf415a3d948d153010a54f1e39088c4b83e2',
+            'ARStack-Studio-linux-x86_64.AppImage':'d12f962f853ec47425053057ddc09f553a10b268ccecae45d512a66c476f6048',
+            'ARStack-Studio-linux-x86_64.sha256':'23eae95c43cca9508025186fa47c074a887195ec74aa037fe23e51b7fa0f0995',
+            'SHA256SUMS.txt':'afc3a96d75dff8522b0b9e7caf16a104054ada395c43f4b2c0de8ea33c53490b'
+          }
+          release=json.loads(pathlib.Path('beta-release.json').read_text())
+          assets={x['name']:x for x in release['assets']}
+          assert set(assets)==set(expected),'Unexpected prerelease asset change'
+          for filename,digest in expected.items():
+              path=beta/filename
+              with path.open('rb') as fd: actual=hashlib.file_digest(fd,'sha256').hexdigest()
+              assert actual==digest,(filename,actual)
+              assert assets[filename].get('digest')=='sha256:'+digest, 'GitHub asset digest changed'
+              print('SHA VERIFIED',filename,actual)
+          manifest=json.loads((beta/'firmware-manifest.json').read_text())
+          assert manifest['sourceCommit']==os.environ['SOURCE_SHA']
+          assert manifest['sha256']==expected['arstack-esp32p4-smv-0.1.1.bin']
+          assert manifest['defaultPtpPolicy']=='INTERNAL_GM_ONLY'
+          assert manifest['globalGmTraceabilityPhysicallyProven'] is False
+          assert 'SV-LAN-AUTONOMY-V1' in manifest['capabilities']
+          with zipfile.ZipFile(beta/'ARStack-Studio-Preview-win-x64-portable.zip') as z:
+              assert z.read('firmware/firmware-manifest.json')==(beta/'firmware-manifest.json').read_bytes()
+              assert hashlib.sha256(z.read('firmware/arstack-esp32p4-smv-0.1.1.bin')).hexdigest()==manifest['sha256']
+              p=json.loads(z.read('PREVIEW-PROVENANCE.json'))
+              assert p['guiCommit']==p['firmwareSourceCommit']==os.environ['SOURCE_SHA']
+          rename={
+            'ARStack-Studio-Preview-win-x64-setup.exe':'ARStack-Studio-M3H3-win-x64-setup.exe',
+            'ARStack-Studio-Preview-win-x64-portable.zip':'ARStack-Studio-M3H3-win-x64-portable.zip',
+            'arstack-esp32p4-smv-0.1.1.bin':'ARStack-ESP32P4-M3H3-firmware.bin'
+          }
+          files=[n for n in expected if n!='SHA256SUMS.txt']
+          for n in files: shutil.copyfile(beta/n,out/rename.get(n,n))
+          sums=[]
+          for file in sorted(out.iterdir()):
+              with file.open('rb') as fd: digest=hashlib.file_digest(fd,'sha256').hexdigest()
+              sums.append(f'{digest}  {file.name}')
+          (out/'SHA256SUMS.txt').write_text('\n'.join(sums)+'\n')
+          notes=pathlib.Path('docs/releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md').read_text()
+          assert 'UNLOCKED' in notes and '1176.305628' in notes and 'Official Stable Lab Release' in notes
+          print('PASS exact-byte promotion, build/source firmware manifest, checksum inventory, factual clock evidence')
+          PY
+          (cd official-assets && sha256sum -c SHA256SUMS.txt)
+          test "$(find official-assets -maxdepth 1 -type f | wc -l)" -eq 7
+
+      - name: Create new official release with clean stable tag, no prerelease flag
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$OFFICIAL_TAG" --repo "$GITHUB_REPOSITORY" \
+            --target "$MERGED_SHA" \
+            --title "ARStack M3.H.3 — Official Stable Process Bus Simulator (Autonomous SV/PTP)" \
+            --notes-file docs/releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md \
+            --latest \
+            official-assets/ARStack-Studio-M3H3-win-x64-setup.exe \
+            official-assets/ARStack-Studio-M3H3-win-x64-portable.zip \
+            official-assets/ARStack-ESP32P4-M3H3-firmware.bin \
+            official-assets/firmware-manifest.json \
+            official-assets/ARStack-Studio-linux-x86_64.AppImage \
+            official-assets/ARStack-Studio-linux-x86_64.sha256 \
+            official-assets/SHA256SUMS.txt
+
+      - name: Audit published stable latest pointer and seven immutable release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/latest" > official-release.json
+          python3 - <<'PY'
+          import json,os
+          r=json.load(open('official-release.json'))
+          assert r['tag_name']==os.environ['OFFICIAL_TAG']
+          assert not r['draft'] and not r['prerelease']
+          assert r['target_commitish']==os.environ['MERGED_SHA']
+          assert len(r['assets'])==7
+          assert all((a.get('digest') or '').startswith('sha256:') for a in r['assets'])
+          print('PASS: official stable is /releases/latest and seven SHA-256 verified assets')
+          PY
