@@ -538,7 +538,8 @@ void disable_hardware_ptp(const esp_eth_handle_t eth_handle) noexcept {
 [[nodiscard]] bool send_frame(
     const esp_eth_handle_t eth_handle,
     std::vector<std::uint8_t>& frame) noexcept {
-    if (frame.empty()) return false;
+    if (frame.empty() || !g_ptp_physical_link_up.load(std::memory_order_acquire))
+        return false;
     const auto result = esp_eth_transmit(eth_handle, frame.data(), frame.size());
     if (result != ESP_OK) {
         if (result == ESP_ERR_INVALID_STATE)
@@ -554,7 +555,8 @@ void disable_hardware_ptp(const esp_eth_handle_t eth_handle) noexcept {
     const esp_eth_handle_t eth_handle,
     std::vector<std::uint8_t>& frame,
     PtpTimestamp& timestamp) noexcept {
-    if (frame.empty()) return false;
+    if (frame.empty() || !g_ptp_physical_link_up.load(std::memory_order_acquire))
+        return false;
     eth_mac_time_t tx_timestamp{};
     // ESP-IDF 5.5 forwards argc as the number of variadic arguments. The
     // ESP32-P4 EMAC implementation computes buf_num = argc / 2, therefore one
