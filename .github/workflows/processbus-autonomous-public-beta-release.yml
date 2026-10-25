@@ -1,0 +1,151 @@
+name: Publish Autonomous SV/PTP Public Beta M3.H.3
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/processbus-autonomous-public-beta-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: processbus-autonomous-m3h3-beta1-immutable
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish exact CI artifacts to public prerelease
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: '2231ac35fa13211b2b0c3b51243a7e352389559c'
+      MERGED_SHA: '9d980e8f766f779a881e770894c09a05b37e42e2'
+      TAG: 'processbus-sim-m3h3-beta1-20261025'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify immutable tag, merge ancestry, and 12/12 exact-head CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$MERGED_SHA" HEAD
+          git merge-base --is-ancestor "$SOURCE_SHA" "$MERGED_SHA"
+          test -s docs/releases/PROCESSBUS_AUTONOMOUS_M3H3_BETA1_20261025.md
+          if gh release view "$TAG" >/dev/null 2>&1 || git rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Refusing to overwrite an existing beta tag" >&2
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/40165495478" > win-run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/40165495452" > linux-run.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$SOURCE_SHA&per_page=50" > all-runs.json
+          python3 - <<'PY'
+          import json,os
+          sha=os.environ['SOURCE_SHA']
+          for filename in ['win-run.json','linux-run.json']:
+              run=json.load(open(filename))
+              assert run['head_sha']==sha and run['status']=='completed' and run['conclusion']=='success', filename
+          runs=json.load(open('all-runs.json'))['workflow_runs']
+          successes={r['name'] for r in runs if r['head_sha']==sha and r['conclusion']=='success'}
+          required={'C++ CI','ARStack Studio Qt','ARStack Studio Windows Lifecycle',
+                    'ESP32-P4 PTP Lab Profile','ESP32-P4 SMV Injector','Embedded Profile CI',
+                    'ARStack Studio Linux AppImage','Security and Evidence','CI Routing Policy',
+                    'Product Naming Guard','Public Documentation Navigation','ARStack Studio Native Preview'}
+          assert required.issubset(successes), f'Missing CI passes: {sorted(required-successes)}'
+          print('PASS exact-head 12/12 CI and source ancestry')
+          PY
+
+      - name: Download accepted Windows Setup EXE and portable package
+        uses: actions/download-artifact@v4
+        with:
+          name: arstack-studio-native-preview-win-x64-332-2231ac35fa13211b2b0c3b51243a7e352389559c
+          run-id: 40165495478
+          repository: masarray/arstack61850
+          github-token: ${{ github.token }}
+          path: artifact-win
+
+      - name: Download same-run ESP32-P4 firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: arstack-esp32p4-smv-firmware
+          run-id: 40165495478
+          repository: masarray/arstack61850
+          github-token: ${{ github.token }}
+          path: artifact-fw
+
+      - name: Download accepted Linux AppImage
+        uses: actions/download-artifact@v4
+        with:
+          name: arstack-studio-linux-x86_64
+          run-id: 40165495452
+          repository: masarray/arstack61850
+          github-token: ${{ github.token }}
+          path: artifact-linux
+
+      - name: Validate release assets, exact image pairing, and PTP evidence labeling
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,io,json,os,zipfile
+          sha=os.environ['SOURCE_SHA']
+          w=Path('artifact-win');f=Path('artifact-fw');l=Path('artifact-linux')
+          expected={
+            w/'ARStack-Studio-Preview-win-x64-setup.exe':'b65db0ac4e6bb4f0f1b2c3a316aee8465177b6c2bb2916ee89b41c0ebe2fcc0f',
+            w/'ARStack-Studio-Preview-win-x64-portable.zip':'dfe2e8386861713a6e6fb9ddd21bf0c193f1de3f6cf5abddeda7244b8e4208fa',
+            f/'arstack-esp32p4-smv-0.1.1.bin':'b3a5142f863003c93efd26d8a4eb481710076dd166780b2c0c5e81dab3bb0ea1',
+            f/'firmware-manifest.json':'2efb27092b3524d8bc57ea6ce0e8cf415a3d948d153010a54f1e39088c4b83e2',
+            l/'ARStack-Studio-linux-x86_64.AppImage':'d12f962f853ec47425053057ddc09f553a10b268ccecae45d512a66c476f6048'
+          }
+          for p,digest in expected.items():
+            assert p.is_file(),str(p)+' missing'
+            with p.open('rb') as h: actual=hashlib.file_digest(h,'sha256').hexdigest()
+            assert actual==digest,f'Hash mismatch: {p}: {actual}'
+          manifest=json.loads((f/'firmware-manifest.json').read_bytes())
+          assert manifest['sourceCommit']==sha and manifest['sha256']==expected[f/'arstack-esp32p4-smv-0.1.1.bin']
+          assert manifest['defaultPtpPolicy']=='INTERNAL_GM_ONLY'
+          assert manifest['globalGmTraceabilityPhysicallyProven'] is False
+          assert 'SV-LAN-AUTONOMY-V1' in manifest['capabilities']
+          with zipfile.ZipFile(w/'ARStack-Studio-Preview-win-x64-portable.zip') as z:
+            assert z.read('firmware/firmware-manifest.json')==(f/'firmware-manifest.json').read_bytes()
+            assert hashlib.sha256(z.read('firmware/arstack-esp32p4-smv-0.1.1.bin')).hexdigest()==manifest['sha256']
+            provenance=json.loads(z.read('PREVIEW-PROVENANCE.json'))
+            assert provenance['guiCommit']==sha and provenance['firmwareSourceCommit']==sha
+          expected_linux=(l/'ARStack-Studio-linux-x86_64.sha256').read_text().split()
+          assert expected_linux==[expected[l/'ARStack-Studio-linux-x86_64.AppImage'],'ARStack-Studio-linux-x86_64.AppImage']
+          notes=Path('docs/releases/PROCESSBUS_AUTONOMOUS_M3H3_BETA1_20261025.md').read_text()
+          assert 'UNLOCKED' in notes and '19 min 36 s' in notes
+          print('PASS immutable hashes, matching board firmware, honest PTP evidence')
+          PY
+          mkdir -p dist-release
+          cp artifact-win/ARStack-Studio-Preview-win-x64-setup.exe dist-release/
+          cp artifact-win/ARStack-Studio-Preview-win-x64-portable.zip dist-release/
+          cp artifact-fw/arstack-esp32p4-smv-0.1.1.bin dist-release/
+          cp artifact-fw/firmware-manifest.json dist-release/
+          cp artifact-linux/ARStack-Studio-linux-x86_64.AppImage dist-release/
+          cp artifact-linux/ARStack-Studio-linux-x86_64.sha256 dist-release/
+          (cd dist-release && sha256sum ARStack-Studio-Preview-win-x64-setup.exe ARStack-Studio-Preview-win-x64-portable.zip arstack-esp32p4-smv-0.1.1.bin firmware-manifest.json ARStack-Studio-linux-x86_64.AppImage ARStack-Studio-linux-x86_64.sha256 > SHA256SUMS.txt)
+          (cd dist-release && sha256sum -c SHA256SUMS.txt)
+
+      - name: Publish immutable GitHub public prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$MERGED_SHA" \
+            --title "ARStack M3.H.3 Beta 1 — Autonomous SV/PTP (19-minute lossless SV)" \
+            --notes-file docs/releases/PROCESSBUS_AUTONOMOUS_M3H3_BETA1_20261025.md --prerelease \
+            dist-release/ARStack-Studio-Preview-win-x64-setup.exe \
+            dist-release/ARStack-Studio-Preview-win-x64-portable.zip \
+            dist-release/arstack-esp32p4-smv-0.1.1.bin \
+            dist-release/firmware-manifest.json \
+            dist-release/ARStack-Studio-linux-x86_64.AppImage \
+            dist-release/ARStack-Studio-linux-x86_64.sha256 \
+            dist-release/SHA256SUMS.txt
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json url,assets,isPrerelease,tagName
