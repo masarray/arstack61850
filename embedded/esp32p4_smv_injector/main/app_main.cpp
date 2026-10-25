@@ -281,7 +281,11 @@ void eth_event_handler(void*, esp_event_base_t, const std::int32_t event_id, voi
         break;
     case ETHERNET_EVENT_DISCONNECTED:
         xEventGroupClearBits(g_link_events, kLinkUpBit);
-        ESP_LOGW(kTag, "Ethernet link down");
+#if CONFIG_AR_PTP_LAB_TX
+        // Nonblocking: request PTP task teardown; never hold ESP event loop.
+        ar_ptp_lab_request_link_down_stop();
+#endif
+        ESP_LOGW(kTag, "Ethernet link down; PTP stop requested; SV fail-closed link gate active");
         break;
     case ETHERNET_EVENT_START:
         ESP_LOGI(kTag, "Ethernet driver started");
