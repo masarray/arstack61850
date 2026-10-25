@@ -17,6 +17,8 @@ void live_control_initialize(
 
 void live_control_bind_publisher_task(TaskHandle_t task) noexcept;
 void live_control_force_stop() noexcept;
+// Physical PHY down is a real output safety boundary, unlike USB/COM loss.
+void live_control_stop_for_link_loss() noexcept;
 
 [[nodiscard]] ar::iec61850::sampled_values::SvTxFaultSnapshot
 live_tx_fault_snapshot() noexcept;
