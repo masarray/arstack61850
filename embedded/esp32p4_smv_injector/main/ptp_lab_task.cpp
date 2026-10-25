@@ -907,6 +907,18 @@ void ptp_lab_task(void* argument) {
     std::uint32_t consecutive_failures = 0U;
     PtpSourceReadinessGate source_readiness;
     while (!g_stop_requested.load(std::memory_order_acquire)) {
+        // Keep EMAC/PTP clock ownership through a PHY interruption, but
+        // NEVER attempt PTP transmission or advertise ready while link DOWN.
+        // Link recovery resumes the same timebase and must requalify using
+        // NEW real Announce and Sync/Follow_Up transmission evidence.
+        if (!g_ptp_physical_link_up.load(std::memory_order_acquire)) {
+            source_readiness.invalidate();
+            g_ptp_ready.store(false, std::memory_order_release);
+            g_ptp_last_announce_us.store(0LL, std::memory_order_release);
+            g_ptp_last_sync_pair_us.store(0LL, std::memory_order_release);
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(20));
+            continue;
+        }
         // A stalled/suspended SOURCE task must not carry yesterday's READY
         // into a fresh Announce+Sync. Accessors also perform this live check.
         if (g_ptp_ready.load(std::memory_order_acquire) &&
