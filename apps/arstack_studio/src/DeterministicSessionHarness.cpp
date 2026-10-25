@@ -168,7 +168,7 @@ private:
             QStringLiteral("PROFILE"),
             QStringLiteral("PROFILE-BINARY-V1"),
             QStringLiteral("LIVE-SETPOINTS"),
-            QStringLiteral("SESSION-LEASE"),
+            QStringLiteral("SV-LAN-AUTONOMY-V1"),
             QStringLiteral("PTP-P2"),
             QStringLiteral("SMPSYNCH-AUTO")};
         return result;
