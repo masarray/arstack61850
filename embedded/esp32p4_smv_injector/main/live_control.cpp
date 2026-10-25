@@ -523,6 +523,9 @@ void print_state() noexcept {
                  g_max_heartbeat_gap_ms.load(std::memory_order_acquire)),
              static_cast<unsigned long>(
                  g_slow_heartbeat_events.load(std::memory_order_acquire)));
+    ESP_LOGI(kTag, "SVLAN owner=BOARD physical_link=%s output=%s studio_control=OPTIONAL",
+             g_physical_link_up.load(std::memory_order_acquire) ? "UP" : "DOWN",
+             g_running.load(std::memory_order_acquire) ? "RUNNING" : "STOPPED");
     // This is sticky historical TRANSPORT evidence, not the current STOP
     // condition. A restarted publisher may be RUNNING while last_stop_seq>0.
     const auto tx = live_tx_fault_snapshot();
