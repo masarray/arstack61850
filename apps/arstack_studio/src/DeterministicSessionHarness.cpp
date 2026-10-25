@@ -168,7 +168,7 @@ private:
             QStringLiteral("PROFILE"),
             QStringLiteral("PROFILE-BINARY-V1"),
             QStringLiteral("LIVE-SETPOINTS"),
-            QStringLiteral("SESSION-LEASE"),
+            QStringLiteral("SV-LAN-AUTONOMY-V1"),
             QStringLiteral("PTP-P2"),
             QStringLiteral("SMPSYNCH-AUTO")};
         return result;
@@ -1659,7 +1659,7 @@ private:
             "firmware=0.1.1 build=0123456789abcdef "
             "boot_id=FEDCBA9876543210 "
             "capabilities=SMV-4I4V,PROFILE,PROFILE-BINARY-V1,"
-            "PROFILE-REUSE-V1,LIVE-SETPOINTS,SESSION-LEASE,PTP-P2,SMPSYNCH-AUTO");
+            "PROFILE-REUSE-V1,LIVE-SETPOINTS,SV-LAN-AUTONOMY-V1,PTP-P2,SMPSYNCH-AUTO");
         device.processLine(replacement);
         return device.bootId() == QStringLiteral("FEDCBA9876543210") &&
             device.deviceVerified() &&
