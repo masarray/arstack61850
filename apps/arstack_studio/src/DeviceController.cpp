@@ -2379,7 +2379,13 @@ void DeviceController::processLine(const QString& rawLine) {
             profileArmed_ = false;
             profileWasReused_ = false;
             profileDeploying_ = false;
-            setRunning(false);
+            // A foreign board is a connection/identity fault, not an SV TX
+            // fault on the previously verified boot. Reset telemetry without
+            // fabricating a RUNNING -> STOPPED incident.
+            const bool wasRunning = running_;
+            running_ = false;
+            resetTelemetry();
+            if (wasRunning) emit runningChanged();
             emit profileStateChanged();
             setError(QStringLiteral(
                 "Different ESP32-P4 identity appeared on the active serial session; "
@@ -2398,7 +2404,13 @@ void DeviceController::processLine(const QString& rawLine) {
             profileArmed_ = false;
             profileWasReused_ = false;
             profileDeploying_ = false;
-            setRunning(false);
+            // A newly detected boot is a connection lifecycle transition,
+            // not a canonical transmit fault. The previous board RAM stop
+            // sequence is no longer valid for this boot epoch.
+            const bool wasRunning = running_;
+            running_ = false;
+            resetTelemetry();
+            if (wasRunning) emit runningChanged();
             resetPtpState();
             appendLog(QStringLiteral("!"), QStringLiteral(
                 "Firmware reboot detected on the same COM port; old profile and START revoked."));
