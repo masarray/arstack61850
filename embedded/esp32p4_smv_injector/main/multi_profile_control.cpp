@@ -18,7 +18,7 @@
 namespace ar::esp32p4::smv {
 namespace {
 constexpr char kTag[] = "ar_smv_multi";
-constexpr char kDelimiters[] = " \\t\\r\\n";
+constexpr char kDelimiters[] = " \t\r\n";
 
 // One UART control-task owner; real-time publisher does NOT touch this bank
 // until P0C2 adds a separately synchronized activation protocol.
