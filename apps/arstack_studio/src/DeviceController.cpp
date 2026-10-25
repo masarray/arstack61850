@@ -195,10 +195,9 @@ bool DeviceController::shutdown() {
     shuttingDown_ = true;
     pendingAutoDetect_ = false;
     pendingConnectPort_.clear();
-    // M3.B: Studio owns the SV output lease, never the board's persistent
-    // time authority. On USB/Studio shutdown request only SV STOP; stopping
-    // PTP here would destroy clock phase across a simple GUI disconnect.
-    // Explicit operator PTP STOP remains a separate verified command.
+    // USB/Studio process lifetime is not the ESP32-P4's publisher lifetime.
+    // Closing the GUI does not imply SV STOP or PTP STOP: those are explicit
+    // operator commands. Disconnect/reconnect only refreshes live readback.
     constexpr bool requestPtpStop = false;
     resetPtpStartup();
     resetScenarioStart();
@@ -407,8 +406,8 @@ void DeviceController::connectWorkerSignals() {
     connect(ioWorker_, &DeviceIoWorker::commandTransmitted, this,
             [this](const quint64 generation, const QString& command, const bool quiet) {
         if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
-        // HEARTBEAT is a firmware output lease, not disposable chatter:
-        // preserve *transmitted* times to diagnose a 6-second watchdog STOP.
+        // HEARTBEAT monitors the USB control session, not SV/PTP continuity.
+        // Keep transmitted timestamps for diagnostics without creating a STOP.
         if (command == QStringLiteral("HEARTBEAT"))
             appendLog(QStringLiteral("HB-TX"), QStringLiteral("HEARTBEAT host drained serial bytes"));
         else if (!quiet) appendLog(QStringLiteral("→"), command);
