@@ -943,6 +943,11 @@ void live_control_bind_publisher_task(const TaskHandle_t task) noexcept {
     g_publisher_task.store(task, std::memory_order_release);
 }
 
+void live_control_set_ethernet_link(const bool up) noexcept {
+    g_physical_link_up.store(up, std::memory_order_release);
+    if (!up) live_control_stop_for_link_loss();
+}
+
 void live_control_stop_for_link_loss() noexcept {
     const bool was_running = g_running.exchange(false, std::memory_order_acq_rel);
     g_start_request.store(false, std::memory_order_release);
