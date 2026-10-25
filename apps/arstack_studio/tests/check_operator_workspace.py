@@ -433,7 +433,8 @@ def main() -> None:
             and "signalRow.mapFromItem(field, field.width, field.height)" in matrix,
             "context menu must align to the editor with compact deterministic geometry")
     assert "text: \"Generated setpoint · not independent on-wire proof\"" not in preview
-    assert "No ESP32 board detected · Preview mode only" in main_qml
+    assert "BoardConnectionIndicator {" in main_qml
+    assert '"DISCONNECTED"' in source("BoardConnectionIndicator.qml")
     require("Layout.preferredHeight: 57" in main_qml
             and "SplitView.maximumHeight: 265" not in main_qml
             and 'Math.max(170, (workspaceSplit.height - 9) / 2)' in main_qml,
