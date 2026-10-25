@@ -37,6 +37,58 @@ ApplicationWindow {
         interval: 400
         onTriggered: scenarioSettings.lastScenario = JSON.stringify(root.scenarioSnapshot())
     }
+    function adoptRunningBoardScenario(snapshot) {
+        if (!device.deviceVerified || !device.running ||
+            device.scenarioApplying || reconnectScenarioRevision < 0 ||
+            reconnectScenarioRevision !== scenarioRevision ||
+            restoringScenario || !snapshot || snapshot.boot !== device.bootId ||
+            !Array.isArray(snapshot.current) || snapshot.current.length !== 4 ||
+            !Array.isArray(snapshot.voltage) || snapshot.voltage.length !== 4)
+            return
+        if (typeof snapshot.hz !== "number" || !validFrequency(snapshot.hz))
+            return
+        var groups = [snapshot.current, snapshot.voltage]
+        var scales = [currentScale, voltageScale]
+        for (var group = 0; group < 2; ++group) {
+            for (var i = 0; i < 4; ++i) {
+                var channel = groups[group][i]
+                if (!channel || typeof channel.counts !== "number" ||
+                    typeof channel.angleMdeg !== "number" ||
+                    typeof channel.quality !== "number" ||
+                    typeof channel.enabled !== "boolean" ||
+                    !isFinite(channel.counts) || !isFinite(channel.angleMdeg) ||
+                    !isFinite(channel.quality))
+                    return
+            }
+        }
+        restoringScenario = true
+        for (var g = 0; g < 2; ++g) {
+            var model = g === 0 ? currentModel : voltageModel
+            for (var row = 0; row < 4; ++row) {
+                var b = groups[g][row]
+                model.setProperty(row, "magnitude", b.counts / scales[g])
+                model.setProperty(row, "phase", b.angleMdeg / 1000.0)
+                model.setProperty(row, "quality", b.quality)
+                model.setProperty(row, "enabled", b.enabled)
+            }
+        }
+        signalFrequency = snapshot.hz
+        previousAcFrequency = signalFrequency > 0 ? signalFrequency : 50
+        frequencyField.text = signalFrequency.toFixed(3)
+        // Board phase angles are authoritative, not the locally persisted
+        // three-phase editor coupling preference.
+        phaseLink = false
+        selectSignal(activeGroup, activeRow)
+        refreshPreview()
+        restoringScenario = false
+        autoLiveQueuedRevision = -1
+        autoLiveApplyTimer.stop()
+        pendingApply = false
+        reconnectScenarioRevision = -1
+        // Reconnection is a read-only adoption, NEVER a CFG, START or STOP.
+        root.showMessage("4I+4V values synchronized from the running ESP32-P4.", false)
+    }
+
     function scenarioSnapshot() {
         function values(model) {
             var rows = []
@@ -161,6 +213,10 @@ ApplicationWindow {
     property int scenarioRevision: 0
     property int liveSubmissionRevision: -1
     property int autoLiveQueuedRevision: -1
+    // Captured when the newly verified board boots/connects. If the operator
+    // edits any control before the full board readback arrives, do not replace
+    // their pending draft with stale serial evidence.
+    property int reconnectScenarioRevision: -1
     // Session-only operator intent. Never persist across application launches:
     // an explicit PTP ON can be restored after a firmware reflash/reconnect
     // without introducing an uncontrolled power-on publisher.
@@ -265,11 +321,16 @@ ApplicationWindow {
                 "). Open diagnostics for the current-board TX error.", true)
         }
         function onDeviceVerifiedChanged() {
+            root.reconnectScenarioRevision = device.deviceVerified
+                ? root.scenarioRevision : -1
             root.pendingApply = true
             root.liveSubmissionRevision = -1
             root.autoLiveQueuedRevision = -1
             autoLiveApplyTimer.stop()
             root.offlinePreviewRunning = false
+        }
+        function onBoardScenarioChanged() {
+            root.adoptRunningBoardScenario(device.boardScenario)
         }
         function onRunningChanged() {
             // An operator STOP or a firmware fault cancels unsent live edits.
