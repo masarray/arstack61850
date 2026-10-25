@@ -256,7 +256,8 @@ void print_help() noexcept {
     ESP_LOGI(kTag, "  PTP CONFIG <domain> <transport> <vlan> <vid> <pcp> <announce_ms> <sync_ms> <pdelay> [bench_global_0_1 UTC_epoch_seconds]");
     ESP_LOGI(kTag, "GUI profile deployment uses bounded PROFILE subcommands while STOPPED.");
     ESP_LOGI(kTag, "  MULTISV STATUS|SHOW|BEGIN <tx> <bytes>|CHUNK <tx> <offset> <hex>|VALIDATE <tx>|COMMIT <tx>|ABORT <tx>");
-    ESP_LOGI(kTag, "  MULTISV V2 is control-plane ONLY until M4-P0C2; it does not start three SV publishers.");
+    ESP_LOGI(kTag, "  MULTISV SELECT|DESELECT (STOPPED; verified START uses chosen roster)");
+    ESP_LOGI(kTag, "  MULTISV TX preview: explicit SELECT then existing validated CFG+START; 3x4kHz TX, shared sample clock; no independent per-MU live setpoints yet.");
 }
 
 void print_identity() noexcept {
@@ -269,7 +270,7 @@ void print_identity() noexcept {
     const char* version = app != nullptr ? app->version : "unknown";
 #if CONFIG_AR_PTP_LAB_TX
     const char* capabilities =
-        "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-LAN-AUTONOMY-V1,SV-CONFIG-TXN-V1,PTP-P2,PTP-GM-BENCH-V1,PTP-POLICY-M3D-V1,SMPSYNCH-AUTO,PROFILE-BINARY-V1,PROFILE-REUSE-V1,MULTISV-CONFIG-STAGING-V2";
+        "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-LAN-AUTONOMY-V1,SV-CONFIG-TXN-V1,PTP-P2,PTP-GM-BENCH-V1,PTP-POLICY-M3D-V1,SMPSYNCH-AUTO,PROFILE-BINARY-V1,PROFILE-REUSE-V1,MULTISV-CONFIG-STAGING-V2,MULTISV-TX-LAB-PREVIEW";
 #else
     const char* capabilities =
         "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-LAN-AUTONOMY-V1,SV-CONFIG-TXN-V1,PROFILE-BINARY-V1,PROFILE-REUSE-V1,MULTISV-CONFIG-STAGING-V2";
