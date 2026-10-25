@@ -697,6 +697,13 @@ void handle_line(char* line) noexcept {
         g_scenario_txn.consume_start();
         g_start_request.store(true, std::memory_order_release);
         g_running.store(true, std::memory_order_release);
+        // PHY-down racing with the START command must not leave RUNNING
+        // latched after the link-loss callback has already observed STOPPED.
+        if (!g_physical_link_up.load(std::memory_order_acquire)) {
+            live_control_stop_for_link_loss();
+            ESP_LOGE(kTag, "START rejected: Ethernet link fell during arm");
+            return;
+        }
         wake_publisher();
         ESP_LOGI(kTag, "START accepted: profile armed token=%llu hash=%016llX, phase and smpCnt reset at first sample boundary",
                  static_cast<unsigned long long>(token), static_cast<unsigned long long>(hash));
