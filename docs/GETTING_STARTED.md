@@ -18,7 +18,7 @@ You can install and explore the desktop software before purchasing or connecting
 2. Download the **Windows Setup EXE**. Choose the Portable ZIP if you prefer not to install.
 3. Open ARStack Studio.
 
-The setup includes the desktop dependencies and **matching board firmware**.
+M3.H.3 official Setup includes desktop dependencies and **matching board firmware**. Flash only the image bundled with the same release; older Studio/firmware versions are not interchangeable.
 
 ## Step 2 — Connect the ESP32-P4
 
@@ -46,7 +46,7 @@ Installing a newer Windows application does **not** update the board firmware au
 5. Press **Start**. The ESP32-P4 sends the real-time SV stream directly from its Ethernet hardware.
 6. Press **Stop** when finished. PTP SOURCE can remain active across SV STOP/START.
 
-The published M3.H reference profile sends 4 current and 4 voltage values at 4,000 SV frames per second.
+The official M3.H.3 lab profile sends 4 current and 4 voltage values at nominal 4,000 SV frames per second. SV is generated on the powered ESP32-P4; closing Studio leaves it running until operator STOP, an Ethernet down/failure, or loss of board power. On reopening, Studio adopts the board state rather than restarting SV.
 
 ## Step 5 — View your Ethernet traffic
 
@@ -69,4 +69,4 @@ Check the [installation guide](INSTALL.md) or [support guide](../SUPPORT.md). Fo
 
 Want to publish observations from another IEC 61850 tool or device? See the [community testing guide](COMMUNITY_TESTING.md).
 
-For measured M3.H packet evidence and the exact firmware pairing, see the [release technical record](releases/PROCESS_BUS_SIMULATOR_M3H_PUBLIC_20261024.md).
+For the official M3.H.3 stable lab edition, 4,705,090-frame independent capture results, and precise internal-PTP-vs-external-lock limitation, see the [M3.H.3 technical record](releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md).
