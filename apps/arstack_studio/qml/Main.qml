@@ -42,8 +42,8 @@ ApplicationWindow {
             device.scenarioApplying || reconnectScenarioRevision < 0 ||
             reconnectScenarioRevision !== scenarioRevision ||
             restoringScenario || !snapshot || snapshot.boot !== device.bootId ||
-            !Array.isArray(snapshot.current) || snapshot.current.length !== 4 ||
-            !Array.isArray(snapshot.voltage) || snapshot.voltage.length !== 4)
+            !snapshot.current || snapshot.current.length !== 4 ||
+            !snapshot.voltage || snapshot.voltage.length !== 4)
             return
         if (typeof snapshot.hz !== "number" || !validFrequency(snapshot.hz))
             return
