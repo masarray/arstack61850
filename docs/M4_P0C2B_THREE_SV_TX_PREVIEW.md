@@ -8,6 +8,7 @@ One ESP32-P4 uses its **existing GPTimer publisher task, EMAC transmit path, PTP
 
 - MU1 is the canonical publisher's usual `PacketTemplate` and `SvFixedPointSineEngine`.
 - MU2 and MU3 each have an **independently prebuilt packet buffer, separate DDS engine and separate snapshotted signal state**. Packet templates are built once at START, outside the 4kHz hot path.
+- **Memory/DSP optimization:** replaced every 16 KiB per-engine `4096 × int32` sine table with one **1,025-entry Q30 quarter-wave ROM table (~4 KiB shared)**. Each DDS engine now owns only a phase accumulator (4 bytes). Three publisher engines free approximately **48 KiB of per-instance RAM** and avoid three runtime `sin()` table generations; a 4096-point host parity test allows at most 1 Q30 LSB difference.
 - Each stream's encoded destination multicast MAC, `svID`, VLAN and APPID are taken unchanged from the independently validated V2 profile (including the reference SCD's same APPID `0x4000`).
 - Each tick's three frames use the **same** `smpCnt` and one existing `smpSynch` decision; the M4 shared-grid planner checks common slot count/epoch and revokes group TX on phase/session inconsistency. There is one physical TX queue, so packets leave sequentially.
 - Firmware measures every three-frame EMAC submission batch without formatting logs in the hot path, recording **maximum submit duration** and **batches over the 250 µs deadline** in the existing periodic timing report. These are instrumentation outputs; no fabricated throughput numbers.
