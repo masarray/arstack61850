@@ -548,6 +548,12 @@ void print_state() noexcept {
              static_cast<long>(tx.stop_first_error),
              static_cast<long>(tx.stop_last_error),
              tx.stop_link_up ? 1U : 0U);
+    // Bounded coherent 8-channel snapshot for reconnecting Studio. BEGIN and
+    // END share the same immutable bank generation and boot epoch; no write.
+    ESP_LOGI(kTag, "SVBANK BEGIN generation=%llu boot=%016llX hz_millihz=%u",
+             static_cast<unsigned long long>(state.generation),
+             static_cast<unsigned long long>(g_boot_id),
+             static_cast<unsigned>(state.frequency_millihz));
     for (std::size_t index = 0U; index < state.channels.size(); ++index) {
         const auto& channel = state.channels[index];
         ESP_LOGI(kTag,
@@ -559,6 +565,9 @@ void print_state() noexcept {
                  static_cast<unsigned long>(channel.quality),
                  channel.enabled ? 1U : 0U);
     }
+    ESP_LOGI(kTag, "SVBANK END generation=%llu boot=%016llX",
+             static_cast<unsigned long long>(state.generation),
+             static_cast<unsigned long long>(g_boot_id));
 }
 
 bool publish_state(const SvLiveSignalState& state) noexcept {
