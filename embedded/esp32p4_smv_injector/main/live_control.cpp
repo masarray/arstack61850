@@ -60,6 +60,7 @@ const char* sv_stop_cause_name(const SvStopCause cause) noexcept {
         case SvStopCause::operator_request: return "OPERATOR_STOP";
         case SvStopCause::lease_expired: return "LEASE_EXPIRED";
         case SvStopCause::runtime_fault: return "RUNTIME_FAULT";
+        case SvStopCause::ethernet_link_down: return "ETHERNET_LINK_DOWN";
         default: return "NONE";
     }
 }
@@ -1008,6 +1009,19 @@ void live_control_initialize(
 
 void live_control_bind_publisher_task(const TaskHandle_t task) noexcept {
     g_publisher_task.store(task, std::memory_order_release);
+}
+
+void live_control_ethernet_link_down_stop() noexcept {
+    // Called only on a real ETH_EVENT DISCONNECTED edge. USB/Studio status
+    // never reaches this path. Fail closed immediately rather than waiting
+    // for 400 consecutive failures on the SV TX hot path.
+    const bool was_running = g_running.exchange(false, std::memory_order_acq_rel);
+    if (!was_running) return;
+    g_start_request.store(false, std::memory_order_release);
+    clear_control_session();
+    record_sv_stop(SvStopCause::ethernet_link_down, 0U);
+    wake_publisher();
+    ESP_LOGW(kTag, "Ethernet PHY link lost: SV STOP enforced, operator START required after recovery");
 }
 
 void live_control_force_stop() noexcept {
