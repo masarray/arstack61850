@@ -144,14 +144,19 @@ jobs:
           New-Item -Path $logDir -ItemType Directory -Force | Out-Null
           $baselineStdErr = Join-Path $logDir 'baseline.stderr.log'
           $baselineStdOut = Join-Path $logDir 'baseline.stdout.log'
+          # A historical public GUI must verify its OWN historical firmware.
+          # New SV-LAN-AUTONOMY-V1 firmware is incompatible by design.
+          $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $baseline 'firmware'
           $baselineContract = Start-Process -FilePath $legacyGui -ArgumentList '--check-firmware-contract' -Wait -PassThru -RedirectStandardError $baselineStdErr -RedirectStandardOutput $baselineStdOut
           Write-Host "PUBLIC_BASELINE_FIRMWARE_CONTRACT_EXIT=$($baselineContract.ExitCode)"
           Get-Content $baselineStdErr -ErrorAction SilentlyContinue
           if ($baselineContract.ExitCode -ne 0) { throw 'Pinned public v0.1.1 GUI cannot validate its own firmware' }
           $nativeStdErr = Join-Path $logDir 'native.stderr.log'
           $nativeStdOut = Join-Path $logDir 'native.stdout.log'
+          # Exact paired firmware from THIS PR head; never the old release.
+          $env:ARSTACK_STUDIO_FIRMWARE_DIR = $newFirmware
           $firmwareContract = Start-Process -FilePath $native -ArgumentList '--check-firmware-contract' -Wait -PassThru -RedirectStandardError $nativeStdErr -RedirectStandardOutput $nativeStdOut
-          Write-Host "NATIVE_WITH_PUBLIC_BASELINE_FIRMWARE_CONTRACT_EXIT=$($firmwareContract.ExitCode)"
+          Write-Host "NATIVE_WITH_MATCHED_PREVIEW_FIRMWARE_CONTRACT_EXIT=$($firmwareContract.ExitCode)"
           Get-Content $nativeStdErr -ErrorAction SilentlyContinue
           if ($firmwareContract.ExitCode -ne 0) {
             $manifest = Get-Content -Raw (Join-Path $baseline 'firmware\firmware-manifest.json') | ConvertFrom-Json
