@@ -32,6 +32,9 @@ assert "consecutive_canonical_tx_failures >= kTransportFailureStopThreshold" in 
 assert "g_stop_requested.store(true" in ptp
 assert "void ar_ptp_lab_request_link_down_stop(void)" in facade
 assert "ar_ptp_boot_supervisor_operator_override();" in facade
+assert "g_link_fault_generation.fetch_add(" in facade
+assert "admitted_link_generation !=" in facade
+assert "g_role_control.request_stop_and_try_acquire()" in facade
 assert "ptp_receiver_request_link_down_stop();" in facade
 assert "ar_ptp_source_request_link_down_stop();" in facade
 assert "void ptp_receiver_request_link_down_stop() noexcept" in receiver
