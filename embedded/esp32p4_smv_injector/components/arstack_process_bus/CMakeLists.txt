@@ -8,6 +8,7 @@ idf_component_register(
         "${ARSTACK_ROOT}/src/sampled_values/pdu_codec.cpp"
         "${ARSTACK_ROOT}/src/sampled_values/frame_codec.cpp"
         "${ARSTACK_ROOT}/src/sampled_values/compiled_device_profile.cpp"
+        "${ARSTACK_ROOT}/src/sampled_values/m4_three_sv_binary.cpp"
         "${ARSTACK_ROOT}/src/time_sync/ptp.cpp"
     INCLUDE_DIRS
         "${ARSTACK_ROOT}/include")
