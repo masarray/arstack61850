@@ -48,13 +48,12 @@ constexpr std::string_view kTokenDelimiters{" \t\r\n"};
 constexpr std::uint32_t kSlowHeartbeatGapMs = 2000U;
 
 enum class SvStopCause : std::uint32_t {
-    none = 0U, operator_request, lease_expired, runtime_fault, ethernet_link_down
+    none = 0U, operator_request, runtime_fault, ethernet_link_down
 };
 
 const char* sv_stop_cause_name(const SvStopCause cause) noexcept {
     switch (cause) {
         case SvStopCause::operator_request: return "OPERATOR_STOP";
-        case SvStopCause::lease_expired: return "LEASE_EXPIRED";
         case SvStopCause::runtime_fault: return "RUNTIME_FAULT";
         case SvStopCause::ethernet_link_down: return "ETHERNET_LINK_DOWN";
         default: return "NONE";
@@ -75,7 +74,7 @@ std::atomic<SvStopCause> g_last_sv_stop_cause{SvStopCause::none};
 std::atomic<std::uint32_t> g_sv_stop_seq{0U};
 std::atomic<std::uint32_t> g_last_sv_stop_ms{0U};
 std::atomic<std::uint32_t> g_sv_stop_heartbeat_age_ms{0U};
-portMUX_TYPE g_control_lease_mux = portMUX_INITIALIZER_UNLOCKED;
+portMUX_TYPE g_heartbeat_mux = portMUX_INITIALIZER_UNLOCKED;
 std::uint64_t g_boot_id{0U};
 
 void wake_publisher() noexcept {
@@ -99,17 +98,17 @@ void record_sv_stop(const SvStopCause cause, const std::uint32_t age_ms) noexcep
     g_sv_stop_seq.fetch_add(1U, std::memory_order_acq_rel);
 }
 
-void clear_control_session() noexcept {
-    portENTER_CRITICAL(&g_control_lease_mux);
+void reset_serial_heartbeat_diagnostics() noexcept {
+    portENTER_CRITICAL(&g_heartbeat_mux);
     g_control_heartbeat_seen.store(false, std::memory_order_release);
     g_last_heartbeat_ms.store(0U, std::memory_order_release);
-    portEXIT_CRITICAL(&g_control_lease_mux);
+    portEXIT_CRITICAL(&g_heartbeat_mux);
 }
 
 // Deliberately NO callback/timer based on host heartbeat. The board's
 // realtime operation must not depend on Studio process or USB health.
 void record_control_heartbeat() noexcept {
-    portENTER_CRITICAL(&g_control_lease_mux);
+    portENTER_CRITICAL(&g_heartbeat_mux);
     const std::uint32_t now_ms = monotonic_ms();
     if (g_control_heartbeat_seen.load(std::memory_order_relaxed)) {
         const std::uint32_t gap_ms = now_ms -
@@ -121,7 +120,7 @@ void record_control_heartbeat() noexcept {
     }
     g_last_heartbeat_ms.store(now_ms, std::memory_order_release);
     g_control_heartbeat_seen.store(true, std::memory_order_release);
-    portEXIT_CRITICAL(&g_control_lease_mux);
+    portEXIT_CRITICAL(&g_heartbeat_mux);
     // No esp_timer_stop/start from this control task, and no lease renewal
     // after the watchdog has already revoked the RUNNING session.
 }
@@ -932,7 +931,7 @@ void live_control_initialize(
     g_scenario_txn.reset();
     g_running.store(false, std::memory_order_release);
     g_start_request.store(false, std::memory_order_release);
-    clear_control_session();
+    reset_serial_heartbeat_diagnostics();
     g_max_heartbeat_gap_ms.store(0U, std::memory_order_release);
     g_slow_heartbeat_events.store(0U, std::memory_order_release);
     g_last_sv_stop_cause.store(SvStopCause::none, std::memory_order_release);
@@ -971,7 +970,8 @@ void live_control_stop_for_link_loss() noexcept {
 void live_control_force_stop() noexcept {
     const bool was_running = g_running.exchange(false, std::memory_order_acq_rel);
     g_start_request.store(false, std::memory_order_release);
-    clear_control_session();
+    // Preserve the optional USB heartbeat diagnostic even if the Ethernet
+    // publisher fails: the root cause must not be misreported as COM loss.
     if (was_running) record_sv_stop(SvStopCause::runtime_fault, 0U);
     wake_publisher();
     ESP_LOGW(kTag, "STOP accepted: SV transmission suppressed by fail-closed runtime");
