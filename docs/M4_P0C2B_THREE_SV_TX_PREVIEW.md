@@ -10,6 +10,7 @@ One ESP32-P4 uses its **existing GPTimer publisher task, EMAC transmit path, PTP
 - MU2 and MU3 each have an **independently prebuilt packet buffer, separate DDS engine and separate snapshotted signal state**. Packet templates are built once at START, outside the 4kHz hot path.
 - Each stream's encoded destination multicast MAC, `svID`, VLAN and APPID are taken unchanged from the independently validated V2 profile (including the reference SCD's same APPID `0x4000`).
 - Each tick's three frames use the **same** `smpCnt` and one existing `smpSynch` decision; the M4 shared-grid planner checks common slot count/epoch and revokes group TX on phase/session inconsistency. There is one physical TX queue, so packets leave sequentially.
+- Firmware measures every three-frame EMAC submission batch without formatting logs in the hot path, recording **maximum submit duration** and **batches over the 250 µs deadline** in the existing periodic timing report. These are instrumentation outputs; no fabricated throughput numbers.
 - `pending_ticks>1` advances the phase engines by missed slots and skips stale frames; each canonical send participates in the existing bounded Ethernet failure / fail-closed logic.
 - Diagnostic mirrors/probes are disabled in three-SV mode, instead of multiplying debug traffic by three.
 
