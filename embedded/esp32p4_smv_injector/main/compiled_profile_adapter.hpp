@@ -19,14 +19,10 @@ enum class BinaryRuntimeProfileStatus : std::uint8_t {
 
 // Device capability is narrower than host SCL validity. Do not reinterpret
 // unsupported wire fields or invent an alternative active profile model.
-[[nodiscard]] inline BinaryRuntimeProfileStatus decode_binary_runtime_profile(
-    const std::span<const std::uint8_t> bytes,
+[[nodiscard]] inline BinaryRuntimeProfileStatus map_compiled_runtime_profile(
+    const ar::iec61850::sampled_values::CompiledSvDeviceProfile& decoded,
     RuntimePublisherProfile& output) noexcept {
     using namespace ar::iec61850::sampled_values;
-    CompiledSvDeviceProfile decoded{};
-    if (!SvDeviceProfileBinaryCodec::decode(bytes, decoded).success()) {
-        return BinaryRuntimeProfileStatus::invalid_envelope;
-    }
     if ((decoded.profile_family != SvProfileFamily::iec61850_9_2 &&
          decoded.profile_family != SvProfileFamily::legacy_9_2le) ||
         (decoded.sampling_basis != SvSampleMode::samples_per_second &&
@@ -86,6 +82,19 @@ enum class BinaryRuntimeProfileStatus : std::uint8_t {
     // Generation is assigned exclusively by runtime_profile_commit().
     output = candidate;
     return BinaryRuntimeProfileStatus::ok;
+}
+
+// The existing single-profile V1 decoder delegates to the same capability
+// gate as M4; never create a separate, weaker "three-stream" mapper.
+[[nodiscard]] inline BinaryRuntimeProfileStatus decode_binary_runtime_profile(
+    const std::span<const std::uint8_t> bytes,
+    RuntimePublisherProfile& output) noexcept {
+    using namespace ar::iec61850::sampled_values;
+    CompiledSvDeviceProfile decoded{};
+    if (!SvDeviceProfileBinaryCodec::decode(bytes, decoded).success()) {
+        return BinaryRuntimeProfileStatus::invalid_envelope;
+    }
+    return map_compiled_runtime_profile(decoded, output);
 }
 
 } // namespace ar::esp32p4::smv
