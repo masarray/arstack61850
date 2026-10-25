@@ -593,28 +593,33 @@ def main() -> None:
             'ptpRuntimeRunningSeen_' in device_control_cpp and
             'if (!ptpRuntimeRoleSeen_ || !ptpRuntimeRunningSeen_' in device_control_cpp,
             "PTP errors must originate on board and two-order runtime proofs must be joined")
-    # Control-session lease is a safety authority, not a QML watchdog or
-    # clock qualification. One boot-lifetime periodic timer eliminates the
-    # old racing one-shot stop/rearm from the ESP console and timer callback.
+    # Explicit STOP and physical link-down own SV lifetime. A lost COM
+    # heartbeat is diagnostic-only; no 4Hz timeout may disable SV output.
     life_header = (STUDIO / "src/DeviceController.hpp").read_text(encoding="utf-8")
     life_firmware = (STUDIO.parents[1] / "embedded/esp32p4_smv_injector/main/live_control.cpp").read_text(encoding="utf-8")
+    life_app = (STUDIO.parents[1] / "embedded/esp32p4_smv_injector/main/app_main.cpp").read_text(encoding="utf-8")
     life_qml = source("WorkflowBar.qml")
-    require("esp_timer_start_periodic(" in life_firmware
-            and "kControlWatchdogPeriodUs = 250000ULL" in life_firmware
-            and "void enforce_control_lease() noexcept" in life_firmware
-            and "g_control_lease_mux" in life_firmware
-            and "esp_timer_start_once(" not in life_firmware
-            and "SVLIFE state=%s stop_cause=%s" in life_firmware
-            and "SvStopCause::lease_expired" in life_firmware
-            and "SvStopCause::runtime_fault" in life_firmware
-            and "Q_PROPERTY(QString svStopReason READ svStopReason NOTIFY svStopReasonChanged)" in life_header
-            and "ribbon.unexpectedSvStop" in life_qml
-            and "BoardConnectionIndicator {" in source("Main.qml")
-            and "svUnexpectedStopObserved" in life_qml
-            and "svUnexpectedStopObserved" in device_control_cpp
-            and "function onSvStopReasonChanged()" in source("Main.qml"),
-            "SV output must fail-closed on measured heartbeat loss, preserve board STOP cause, "
-            "and never show misleading green READY after an unrequested stop")
+    ptp_task = (STUDIO.parents[1] / "embedded/esp32p4_smv_injector/main/ptp_lab_task.cpp").read_text(encoding="utf-8")
+    require('SV-LAN-AUTONOMY-V1' in life_firmware
+            and 'SV-LAN-AUTONOMY-V1' in controller
+            and 'START rejected: physical Ethernet link DOWN' in life_firmware
+            and 'live_control_set_ethernet_link(false)' in life_app
+            and 'live_control_stop_for_link_loss() noexcept' in life_firmware
+            and 'SvStopCause::ethernet_link_down' in life_firmware
+            and 'Control session lease expired' not in life_firmware
+            and 'enforce_control_lease' not in life_firmware
+            and 'arm_control_lease_if_fresh' not in life_firmware
+            and 'SVLIFE state=%s stop_cause=%s' in life_firmware
+            and 'SvStopCause::runtime_fault' in life_firmware
+            and 'g_ptp_physical_link_up' in ptp_task
+            and 'ar_ptp_lab_set_ethernet_link_up(false)' in life_app
+            and 'Q_PROPERTY(QString svStopReason READ svStopReason NOTIFY svStopReasonChanged)' in life_header
+            and 'ribbon.unexpectedSvStop' in life_qml
+            and 'BoardConnectionIndicator {' in source('Main.qml')
+            and 'svUnexpectedStopObserved' in life_qml
+            and 'svUnexpectedStopObserved' in device_control_cpp
+            and 'function onSvStopReasonChanged()' in source('Main.qml'),
+            'Autonomous LAN SV/PTP must survive lost Studio and stop only on explicit STOP, PHY down or runtime fault')
 
     # The bottom-left board indicator must reflect physical serial/identity
     # readiness, not a persisted SVLIFE fault from the previous session.
