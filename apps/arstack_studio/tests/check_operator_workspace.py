@@ -159,12 +159,12 @@ def main() -> None:
             "running 4I4V edits must auto-apply once after commit without STOP/START, "
             "not on each keystroke, and queue the newest revision while ACK pending")
     controller = (STUDIO / "src/DeviceController.cpp").read_text(encoding="utf-8")
-    # M3.B: the ESP owns PTP across USB/Studio exit; the host may withdraw
-    # its 4I4V output lease but must never silently send PTP STOP.
+    # Autonomous board publishes SV/PTP across USB or Studio exit.
+    # Only an explicit operator STOP may withdraw a running publisher.
     require("constexpr bool requestPtpStop = false;" in controller
-            and "const bool requestSvStop = running_;" in controller
+            and "const bool requestSvStop = false;" in controller
             and "ioWorker_->shutdown(requestSvStop, requestPtpStop);" in controller,
-            "Studio session retirement must stop SV without killing always-on PTP")
+            "Studio session retirement must not stop either board-owned SV or PTP")
     require("logUpdateTimer_.setInterval(100)" in controller
             and "if (!logUpdateTimer_.isActive()) logUpdateTimer_.start();" in controller,
             "serial log QML notification must be coalesced to avoid GUI stutter")
@@ -593,9 +593,8 @@ def main() -> None:
             'ptpRuntimeRunningSeen_' in device_control_cpp and
             'if (!ptpRuntimeRoleSeen_ || !ptpRuntimeRunningSeen_' in device_control_cpp,
             "PTP errors must originate on board and two-order runtime proofs must be joined")
-    # Control-session lease is a safety authority, not a QML watchdog or
-    # clock qualification. One boot-lifetime periodic timer eliminates the
-    # old racing one-shot stop/rearm from the ESP console and timer callback.
+    # USB heartbeat is now diagnostic only; the ESP remains responsible for
+    # ongoing SV/PTP. Keep the timer, but it may not STOP a live publisher.
     life_header = (STUDIO / "src/DeviceController.hpp").read_text(encoding="utf-8")
     life_firmware = (STUDIO.parents[1] / "embedded/esp32p4_smv_injector/main/live_control.cpp").read_text(encoding="utf-8")
     life_qml = source("WorkflowBar.qml")
@@ -603,6 +602,10 @@ def main() -> None:
             and "kControlWatchdogPeriodUs = 250000ULL" in life_firmware
             and "void enforce_control_lease() noexcept" in life_firmware
             and "g_control_lease_mux" in life_firmware
+            and "g_running.exchange(false" not in life_firmware.split(
+                "void enforce_control_lease() noexcept", 1)[1].split(
+                "void control_lease_timer_callback", 1)[0]
+            and "const bool requestSvStop = false;" in controller
             and "esp_timer_start_once(" not in life_firmware
             and "SVLIFE state=%s stop_cause=%s" in life_firmware
             and "SvStopCause::lease_expired" in life_firmware
@@ -613,8 +616,7 @@ def main() -> None:
             and "svUnexpectedStopObserved" in life_qml
             and "svUnexpectedStopObserved" in device_control_cpp
             and "function onSvStopReasonChanged()" in source("Main.qml"),
-            "SV output must fail-closed on measured heartbeat loss, preserve board STOP cause, "
-            "and never show misleading green READY after an unrequested stop")
+            "USB heartbeat must not stop board output, and real board faults must stay visible")
 
     # The bottom-left board indicator must reflect physical serial/identity
     # readiness, not a persisted SVLIFE fault from the previous session.
