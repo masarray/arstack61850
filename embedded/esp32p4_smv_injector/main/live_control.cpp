@@ -824,6 +824,11 @@ void handle_line(char* line) noexcept {
         print_help();
         return;
     }
+    if (std::strcmp(command, "SVSTREAM") == 0) {
+        g_scenario_txn.reset();
+        handle_svstream_command(save);
+        return;
+    }
     if (std::strcmp(command, "MULTISV") == 0) {
         g_scenario_txn.reset();
         handle_multi_profile_command(save);
