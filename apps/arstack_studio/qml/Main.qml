@@ -229,6 +229,9 @@ ApplicationWindow {
     readonly property bool canStart: workflowBar.session ? workflowBar.session.startReady : false
     readonly property string toastMessage: transientMessage
     readonly property bool toastError: transientError
+    // One toast per real unsolicited stop edge, not per historical SVLIFE
+    // readback or additional TX-fault detail arriving during SHOW.
+    property double lastNotifiedSvStopIncident: 0
 
     SclProfileModel { id: sclProfiles }
     DeviceController { id: device }
@@ -247,12 +250,18 @@ ApplicationWindow {
                 root.showMessage(device.lastError, true)
         }
         function onSvStopReasonChanged() {
-            if (!device.running && device.svStopReason !== "" &&
-                device.svStopReason !== "AWAITING_BOARD_CAUSE") {
-                root.showMessage(
-                    "ESP32-P4 stopped SV: " + device.svStopReason +
-                    ". PTP state is independent. Open Copy diagnostics.", true)
-            }
+            // SVLIFE reports the previous stop even when the board is healthy
+            // and idle after reconnect. Toast only a new in-session fault.
+            if (!device.deviceVerified || device.running ||
+                !device.svUnexpectedStopObserved ||
+                device.svStopReason === "" ||
+                device.svStopReason === "AWAITING_BOARD_CAUSE" ||
+                device.svUnexpectedStopIncident <= root.lastNotifiedSvStopIncident)
+                return
+            root.lastNotifiedSvStopIncident = device.svUnexpectedStopIncident
+            root.showMessage(
+                "SV stopped unexpectedly (" + device.svStopReason +
+                "). Open diagnostics for the current-board TX error.", true)
         }
         function onDeviceVerifiedChanged() {
             root.pendingApply = true
@@ -934,17 +943,15 @@ ApplicationWindow {
             anchors.rightMargin: 12
             spacing: 8
 
-            Label {
-                text: !device.deviceVerified
-                    ? "No ESP32 board detected · Preview mode only"
-                    : device.portName + " · ESP32-P4 · " + workflowBar.displayState
-                color: workflowBar.unexpectedSvStop ? studioTheme.red
-                     : device.deviceVerified ? studioTheme.textSoft : studioTheme.muted
-                Layout.maximumWidth: root.compactLayout ? 255 : 410
-                elide: Text.ElideRight
-                font.family: root.uiFont
-                font.pixelSize: 9
-                font.weight: workflowBar.unexpectedSvStop ? Font.DemiBold : Font.Medium
+            BoardConnectionIndicator {
+                id: boardConnection
+                device: device
+                session: workflowBar.session
+                theme: studioTheme
+                uiFont: root.uiFont
+                compact: root.compactLayout
+                Layout.preferredWidth: implicitWidth
+                Layout.preferredHeight: implicitHeight
             }
             Rectangle { width: 1; height: 12; color: studioTheme.lineSoft }
             Label {

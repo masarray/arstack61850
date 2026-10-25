@@ -53,6 +53,8 @@ class DeviceController : public QObject {
     Q_PROPERTY(bool running READ running NOTIFY runningChanged)
     Q_PROPERTY(QString svStopReason READ svStopReason NOTIFY svStopReasonChanged)
     Q_PROPERTY(QString svLastStopCause READ svLastStopCause NOTIFY svStopReasonChanged)
+    Q_PROPERTY(bool svUnexpectedStopObserved READ svUnexpectedStopObserved NOTIFY svStopReasonChanged)
+    Q_PROPERTY(quint64 svUnexpectedStopIncident READ svUnexpectedStopIncident NOTIFY svStopReasonChanged)
     Q_PROPERTY(QString svTxFaultDetail READ svTxFaultDetail NOTIFY svStopReasonChanged)
     Q_PROPERTY(bool scenarioApplying READ scenarioApplying NOTIFY scenarioStateChanged)
     Q_PROPERTY(QString portName READ portName NOTIFY connectedChanged)
@@ -152,8 +154,10 @@ public:
     [[nodiscard]] bool running() const noexcept;
     [[nodiscard]] QString svStopReason() const { return svStopReason_; }
     [[nodiscard]] QString svLastStopCause() const { return svLastStopCause_; }
+    [[nodiscard]] bool svUnexpectedStopObserved() const noexcept { return svUnexpectedStopObserved_; }
+    [[nodiscard]] quint64 svUnexpectedStopIncident() const noexcept { return svUnexpectedStopIncident_; }
     [[nodiscard]] QString svTxFaultDetail() const {
-        return svTxFaultSeq_ != 0U && svTxFaultSeq_ == lastSvStopSeq_
+        return svUnexpectedStopObserved_ && svTxFaultSeq_ != 0U && svTxFaultSeq_ == lastSvStopSeq_
             ? svTxFaultDetail_ : QString{};
     }
     [[nodiscard]] bool scenarioApplying() const noexcept;
@@ -456,6 +460,10 @@ private:
     bool operatorStopPending_{false};
     QString svStopReason_;
     QString svLastStopCause_;
+    // Only an observed unexpected RUNNING -> STOPPED edge in this Studio
+    // connection may turn persisted board stop history into an active alarm.
+    bool svUnexpectedStopObserved_{false};
+    quint64 svUnexpectedStopIncident_{0}; // monotonically increasing within this UI instance
     quint64 lastSvStopSeq_{0};
     quint64 svTxFaultSeq_{0};
     QString svTxFaultDetail_;

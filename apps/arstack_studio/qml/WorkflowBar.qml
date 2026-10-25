@@ -275,7 +275,8 @@ SurfacePanel {
     // The board-reported reason is distinct from the physical PTP role.
     readonly property bool unexpectedSvStop: Boolean(
         ribbon.device && ribbon.device.deviceVerified &&
-        !ribbon.device.running && ribbon.device.svStopReason.length > 0 &&
+        !ribbon.device.running && ribbon.device.svUnexpectedStopObserved &&
+        ribbon.device.svStopReason.length > 0 &&
         !ribbon.startQueued)
     readonly property string displayState: {
         if (ribbon.injectionRunning && smartSession.state !== "RUNNING")
