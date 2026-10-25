@@ -453,6 +453,7 @@ private:
     QString signalGeneration_{QStringLiteral("—")};
     QVariantMap boardScenario_;
     QVariantMap pendingBoardRows_;
+    QVariantMap pendingBoardCt_;
     QString pendingBoardGeneration_;
     QString pendingBoardBoot_;
     quint32 pendingBoardHzMilli_{0U};
