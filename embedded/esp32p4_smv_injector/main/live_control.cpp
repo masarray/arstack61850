@@ -41,18 +41,14 @@ constexpr char kTag[] = "ar_smv_ctrl";
 constexpr std::array<std::string_view, 8> kChannelNames{
     "IA", "IB", "IC", "IN", "UA", "UB", "UC", "UN"};
 constexpr std::string_view kTokenDelimiters{" \t\r\n"};
-// A 700-ms host heartbeat is coalesced through a serial command queue.
-// A 2.5-second lease caused unnecessary SV STOP during transient Windows USB
-// stalls. Allow several missed scheduling slots, but still fail CLOSED after
-// six seconds without a real device-consumed heartbeat.
-constexpr std::uint32_t kControlLeaseTimeoutMs = 6000U;
+// The serial console is a non-authoritative observation/control plane.
+// Its heartbeat measures UI/USB health but MUST NEVER own a publisher lease.
+// Only explicit STOP, physical Ethernet link loss, or true runtime TX faults
+// can stop an already started autonomous SV session.
 constexpr std::uint32_t kSlowHeartbeatGapMs = 2000U;
-// Fixed-rate watchdog never stops/rearms from console heartbeat and timer
-// callback concurrently. An expired lease is detected in <=timeout+250ms.
-constexpr std::uint64_t kControlWatchdogPeriodUs = 250000ULL;
 
 enum class SvStopCause : std::uint32_t {
-    none = 0U, operator_request, lease_expired, runtime_fault
+    none = 0U, operator_request, lease_expired, runtime_fault, ethernet_link_down
 };
 
 const char* sv_stop_cause_name(const SvStopCause cause) noexcept {
@@ -60,6 +56,7 @@ const char* sv_stop_cause_name(const SvStopCause cause) noexcept {
         case SvStopCause::operator_request: return "OPERATOR_STOP";
         case SvStopCause::lease_expired: return "LEASE_EXPIRED";
         case SvStopCause::runtime_fault: return "RUNTIME_FAULT";
+        case SvStopCause::ethernet_link_down: return "ETHERNET_LINK_DOWN";
         default: return "NONE";
     }
 }
@@ -70,17 +67,14 @@ std::atomic<bool> g_running{false};
 std::atomic<bool> g_start_request{false};
 std::atomic<TaskHandle_t> g_publisher_task{nullptr};
 std::atomic<bool> g_control_heartbeat_seen{false};
-std::atomic<bool> g_control_lease_active{false};
 std::atomic<std::uint32_t> g_last_heartbeat_ms{0U};
 std::atomic<std::uint32_t> g_max_heartbeat_gap_ms{0U};
 std::atomic<std::uint32_t> g_slow_heartbeat_events{0U};
-std::atomic<bool> g_control_watchdog_ready{false};
 std::atomic<SvStopCause> g_last_sv_stop_cause{SvStopCause::none};
 std::atomic<std::uint32_t> g_sv_stop_seq{0U};
 std::atomic<std::uint32_t> g_last_sv_stop_ms{0U};
 std::atomic<std::uint32_t> g_sv_stop_heartbeat_age_ms{0U};
 portMUX_TYPE g_control_lease_mux = portMUX_INITIALIZER_UNLOCKED;
-esp_timer_handle_t g_control_lease_timer{nullptr};
 std::uint64_t g_boot_id{0U};
 
 void wake_publisher() noexcept {
@@ -95,13 +89,6 @@ std::uint32_t monotonic_ms() noexcept {
         static_cast<std::uint64_t>(esp_timer_get_time()) / 1000ULL);
 }
 
-bool heartbeat_is_fresh() noexcept {
-    if (!g_control_heartbeat_seen.load(std::memory_order_acquire)) return false;
-    const auto now = monotonic_ms();
-    const auto last = g_last_heartbeat_ms.load(std::memory_order_acquire);
-    return static_cast<std::uint32_t>(now - last) <= kControlLeaseTimeoutMs;
-}
-
 // Preserve stop provenance in board RAM even if serial output scrolls away.
 // SHOW reports the same reason after the operator has restarted the publisher.
 void record_sv_stop(const SvStopCause cause, const std::uint32_t age_ms) noexcept {
@@ -111,55 +98,15 @@ void record_sv_stop(const SvStopCause cause, const std::uint32_t age_ms) noexcep
     g_sv_stop_seq.fetch_add(1U, std::memory_order_acq_rel);
 }
 
-void disarm_control_lease() noexcept {
-    // The 4 Hz watchdog keeps running for the board lifetime. Disarm only
-    // the OUTPUT lease, so no concurrent timer restart/stop race exists.
-    portENTER_CRITICAL(&g_control_lease_mux);
-    g_control_lease_active.store(false, std::memory_order_release);
-    portEXIT_CRITICAL(&g_control_lease_mux);
-}
-
 void clear_control_session() noexcept {
     portENTER_CRITICAL(&g_control_lease_mux);
-    g_control_lease_active.store(false, std::memory_order_release);
     g_control_heartbeat_seen.store(false, std::memory_order_release);
     g_last_heartbeat_ms.store(0U, std::memory_order_release);
     portEXIT_CRITICAL(&g_control_lease_mux);
 }
 
-// A control lease is NOT a PTP clock lease. The board must stop publishing
-// when the Studio connection actually disappears; loss of PTP qualification
-// only deasserts smpSynch and does not silently stop the SV publisher.
-void enforce_control_lease() noexcept {
-    std::uint32_t expired_age_ms = 0U;
-    bool expired = false;
-    portENTER_CRITICAL(&g_control_lease_mux);
-    if (g_running.load(std::memory_order_acquire) &&
-        g_control_lease_active.load(std::memory_order_acquire)) {
-        const auto now = monotonic_ms();
-        const auto last = g_last_heartbeat_ms.load(std::memory_order_acquire);
-        const auto elapsed = static_cast<std::uint32_t>(now - last);
-        if (elapsed >= kControlLeaseTimeoutMs) {
-            g_control_lease_active.store(false, std::memory_order_release);
-            g_start_request.store(false, std::memory_order_release);
-            expired = g_running.exchange(false, std::memory_order_acq_rel);
-            expired_age_ms = elapsed;
-            if (expired) record_sv_stop(SvStopCause::lease_expired, elapsed);
-        }
-    }
-    portEXIT_CRITICAL(&g_control_lease_mux);
-    if (expired) {
-        wake_publisher();
-        ESP_LOGW(kTag,
-                 "Control session lease expired after %lu ms; SV transmission stopped",
-                 static_cast<unsigned long>(expired_age_ms));
-    }
-}
-
-void control_lease_timer_callback(void*) noexcept {
-    enforce_control_lease(); // 4 Hz bounded age check; NEVER rearm the timer.
-}
-
+// Deliberately NO callback/timer based on host heartbeat. The board's
+// realtime operation must not depend on Studio process or USB health.
 void record_control_heartbeat() noexcept {
     portENTER_CRITICAL(&g_control_lease_mux);
     const std::uint32_t now_ms = monotonic_ms();
@@ -176,22 +123,6 @@ void record_control_heartbeat() noexcept {
     portEXIT_CRITICAL(&g_control_lease_mux);
     // No esp_timer_stop/start from this control task, and no lease renewal
     // after the watchdog has already revoked the RUNNING session.
-}
-
-bool arm_control_lease_if_fresh() noexcept {
-    if (!g_control_watchdog_ready.load(std::memory_order_acquire)) return false;
-    bool fresh = false;
-    portENTER_CRITICAL(&g_control_lease_mux);
-    if (g_control_heartbeat_seen.load(std::memory_order_acquire)) {
-        const auto elapsed = static_cast<std::uint32_t>(
-            monotonic_ms() -
-            g_last_heartbeat_ms.load(std::memory_order_acquire));
-        fresh = elapsed < kControlLeaseTimeoutMs;
-        if (fresh)
-            g_control_lease_active.store(true, std::memory_order_release);
-    }
-    portEXIT_CRITICAL(&g_control_lease_mux);
-    return fresh;
 }
 
 void uppercase_ascii(char* text) noexcept {
@@ -281,13 +212,15 @@ void print_identity() noexcept {
     const esp_app_desc_t* app = esp_app_get_description();
     const char* version = app != nullptr ? app->version : "unknown";
 #if CONFIG_AR_PTP_LAB_TX
-    const char* capabilities = g_control_lease_timer != nullptr
-        ? "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE,SV-CONFIG-TXN-V1,PTP-P2,PTP-GM-BENCH-V1,PTP-POLICY-M3D-V1,SMPSYNCH-AUTO,PROFILE-BINARY-V1,PROFILE-REUSE-V1"
-        : "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-CONFIG-TXN-V1,PTP-P2,PTP-GM-BENCH-V1,PTP-POLICY-M3D-V1,SMPSYNCH-AUTO,PROFILE-BINARY-V1,PROFILE-REUSE-V1";
+#if CONFIG_AR_PTP_LAB_TX
+    const char* capabilities =
+        "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-LAN-AUTONOMY-V1,SV-CONFIG-TXN-V1,"
+        "PTP-P2,PTP-GM-BENCH-V1,PTP-POLICY-M3D-V1,SMPSYNCH-AUTO,"
+        "PROFILE-BINARY-V1,PROFILE-REUSE-V1";
 #else
-    const char* capabilities = g_control_lease_timer != nullptr
-        ? "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SESSION-LEASE,SV-CONFIG-TXN-V1,PROFILE-BINARY-V1,PROFILE-REUSE-V1"
-        : "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-CONFIG-TXN-V1,PROFILE-BINARY-V1,PROFILE-REUSE-V1";
+    const char* capabilities =
+        "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-LAN-AUTONOMY-V1,"
+        "SV-CONFIG-TXN-V1,PROFILE-BINARY-V1,PROFILE-REUSE-V1";
 #endif
     ESP_LOGI(kTag,
              "ARSTACK identity product=SMV-INJECTOR target=ESP32-P4 protocol=1 device_id=%02X%02X%02X%02X%02X%02X firmware=%s build=%s boot_id=%016llX capabilities=%s",
@@ -585,8 +518,7 @@ void print_state() noexcept {
              static_cast<unsigned long>(g_sv_stop_heartbeat_age_ms.load(std::memory_order_acquire)),
              static_cast<unsigned long>(hb_seen ? now_ms - hb_last : 0U),
              hb_seen ? 1U : 0U,
-             static_cast<unsigned long>(kControlLeaseTimeoutMs),
-             g_control_watchdog_ready.load(std::memory_order_acquire) ? 1U : 0U,
+             0UL, 0U,
              static_cast<unsigned long>(
                  g_max_heartbeat_gap_ms.load(std::memory_order_acquire)),
              static_cast<unsigned long>(
@@ -755,10 +687,8 @@ void handle_line(char* line) noexcept {
             ESP_LOGE(kTag, "START rejected: CFG commit/readback token or boot invalid");
             return;
         }
-        if (!arm_control_lease_if_fresh()) {
-            ESP_LOGE(kTag, "START rejected: Studio control-session lease is unavailable");
-            return;
-        }
+        // START is an explicit verified transaction. No USB heartbeat is
+        // required to keep it alive once armed.
         profile_control_abort_staging();
         g_scenario_txn.consume_start();
         g_start_request.store(true, std::memory_order_release);
@@ -775,7 +705,6 @@ void handle_line(char* line) noexcept {
         }
         const bool was_running = g_running.exchange(false, std::memory_order_acq_rel);
         g_scenario_txn.reset();
-        disarm_control_lease();
         if (was_running) record_sv_stop(SvStopCause::operator_request, 0U);
         wake_publisher();
         ESP_LOGI(kTag, "STOP accepted: SV transmission suppressed");
@@ -1002,30 +931,22 @@ void live_control_initialize(
     g_boot_id = (random_high << 32U) | random_low;
     if (g_boot_id == 0U) g_boot_id = 1U;
 
-    if (g_control_lease_timer == nullptr) {
-        esp_timer_create_args_t timer_args{};
-        timer_args.callback = &control_lease_timer_callback;
-        timer_args.name = "ar_ctrl_lease";
-        esp_err_t result = esp_timer_create(&timer_args, &g_control_lease_timer);
-        if (result == ESP_OK) {
-            result = esp_timer_start_periodic(
-                g_control_lease_timer, kControlWatchdogPeriodUs);
-        }
-        if (result != ESP_OK) {
-            if (g_control_lease_timer != nullptr) {
-                static_cast<void>(esp_timer_delete(g_control_lease_timer));
-                g_control_lease_timer = nullptr;
-            }
-            ESP_LOGE(kTag, "Unable to start periodic control lease watchdog: %d",
-                     static_cast<int>(result));
-        }
-        g_control_watchdog_ready.store(
-            g_control_lease_timer != nullptr, std::memory_order_release);
-    }
+    // There is intentionally no USB/Studio lease watchdog. Ethernet and
+    // canonical TX health remain fail-closed under the publisher task.
 }
 
 void live_control_bind_publisher_task(const TaskHandle_t task) noexcept {
     g_publisher_task.store(task, std::memory_order_release);
+}
+
+void live_control_stop_for_link_loss() noexcept {
+    const bool was_running = g_running.exchange(false, std::memory_order_acq_rel);
+    g_start_request.store(false, std::memory_order_release);
+    if (was_running) {
+        record_sv_stop(SvStopCause::ethernet_link_down, 0U);
+        wake_publisher();
+        ESP_LOGW(kTag, "SV output STOPPED: physical Ethernet link DOWN (rearm requires explicit START)");
+    }
 }
 
 void live_control_force_stop() noexcept {
