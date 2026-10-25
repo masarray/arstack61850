@@ -1884,7 +1884,7 @@ private:
         auto& d = fixture.device;
         const QString boot = d.bootId();
         d.processLine(QStringLiteral(
-            "SVBANK BEGIN generation=13 boot=%1 hz_millihz=50000").arg(boot));
+            "SVBANK BEGIN generation=13 boot=%1 hz_millihz=50000 ct_enabled=1 ct_dc_permille=300 ct_harmonic_permille=280 ct_order=2 ct_clip_permille=600").arg(boot));
         const QStringList rows{
             QStringLiteral("IA rms_counts=1200 phase_mdeg=30000 quality=0x00000000 enabled=1"),
             QStringLiteral("IB rms_counts=500 phase_mdeg=-120000 quality=0x00000000 enabled=1"),
@@ -1899,26 +1899,32 @@ private:
         d.processLine(QStringLiteral("SVBANK END generation=13 boot=%1").arg(boot));
         if (!d.boardScenario().isEmpty()) return false; // incomplete snapshot
         d.processLine(QStringLiteral(
-            "SVBANK BEGIN generation=13 boot=%1 hz_millihz=50000").arg(boot));
+            "SVBANK BEGIN generation=13 boot=%1 hz_millihz=50000 ct_enabled=1 ct_dc_permille=300 ct_harmonic_permille=280 ct_order=2 ct_clip_permille=600").arg(boot));
         for (const QString& row : rows) d.processLine(row);
         d.processLine(QStringLiteral(
             "SVBANK END generation=14 boot=%1").arg(boot));
         if (!d.boardScenario().isEmpty()) return false; // wrong generation
         d.processLine(QStringLiteral(
-            "SVBANK BEGIN generation=13 boot=FEDCBA9876543210 hz_millihz=50000"));
+            "SVBANK BEGIN generation=13 boot=FEDCBA9876543210 hz_millihz=50000 ct_enabled=1 ct_dc_permille=300 ct_harmonic_permille=280 ct_order=2 ct_clip_permille=600"));
         for (const QString& row : rows) d.processLine(row);
         d.processLine(QStringLiteral(
             "SVBANK END generation=13 boot=FEDCBA9876543210"));
         if (!d.boardScenario().isEmpty()) return false; // foreign boot
 
         d.processLine(QStringLiteral(
-            "SVBANK BEGIN generation=13 boot=%1 hz_millihz=50000").arg(boot));
+            "SVBANK BEGIN generation=13 boot=%1 hz_millihz=50000 ct_enabled=1 ct_dc_permille=300 ct_harmonic_permille=280 ct_order=2 ct_clip_permille=600").arg(boot));
         for (const QString& row : rows) d.processLine(row);
         d.processLine(QStringLiteral("SVBANK END generation=13 boot=%1").arg(boot));
         const auto data = d.boardScenario();
         if (data.value(QStringLiteral("boot")).toString() != boot ||
             data.value(QStringLiteral("generation")).toString() != QStringLiteral("13") ||
             data.value(QStringLiteral("hz")).toDouble() != 50.0) return false;
+        const auto ct = data.value(QStringLiteral("ct")).toMap();
+        if (ct.value(QStringLiteral("enabled")).toBool() != true ||
+            ct.value(QStringLiteral("dc")).toDouble() != 30.0 ||
+            ct.value(QStringLiteral("harmonic")).toDouble() != 28.0 ||
+            ct.value(QStringLiteral("order")).toInt() != 2 ||
+            ct.value(QStringLiteral("clip")).toDouble() != 60.0) return false;
         const auto currents = data.value(QStringLiteral("current")).toList();
         const auto voltages = data.value(QStringLiteral("voltage")).toList();
         if (currents.size() != 4 || voltages.size() != 4 ||
