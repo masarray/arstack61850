@@ -490,11 +490,9 @@ void DeviceIoWorker::queuePrioritySvStop() {
 }
 
 void DeviceIoWorker::queuePriorityHeartbeat() {
-    // The 6-second firmware control lease must not be starved by a saturated
-    // 64-command queue or an exclusive profile CFG transaction. A single
-    // coalesced keepalive uses the same QSerialPort owner and normal pacing;
-    // it never bypasses a pending safety STOP or interrupts an active write.
-    // A disconnected/stalled serial port still fails closed in firmware.
+    // HEARTBEAT is control-path telemetry only, not an SV output lease.
+    // One coalesced diagnostic heartbeat uses normal serial pacing and never
+    // bypasses pending explicit STOP; USB failure cannot stop LAN publishing.
     if (!(writeActive_ && activeCommand_.text == QStringLiteral("HEARTBEAT")))
         heartbeatPending_ = true;
     pumpWriteQueue();
