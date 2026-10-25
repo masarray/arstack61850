@@ -51,6 +51,7 @@ add_library(ariec61850_core
     src/sampled_values/frame_codec.cpp
     src/sampled_values/compiled_device_profile.cpp
     src/sampled_values/m4_three_sv_roster.cpp
+    src/sampled_values/m4_three_sv_binary.cpp
     src/sampled_values/quality.cpp
     src/sampled_values/payload_inspector.cpp
     src/sampled_values/sample_counter.cpp
@@ -323,6 +324,16 @@ if(ARIEC61850_BUILD_TESTS)
     ariec61850_apply_sanitizers(ariec61850_m4_three_sv_roster_tests)
     add_test(NAME ariec61850_m4_three_sv_roster_tests
              COMMAND ariec61850_m4_three_sv_roster_tests)
+
+    add_executable(ariec61850_m4_three_sv_binary_tests tests/test_m4_three_sv_binary.cpp)
+    target_link_libraries(ariec61850_m4_three_sv_binary_tests PRIVATE ARIEC61850::core)
+    target_compile_definitions(ariec61850_m4_three_sv_binary_tests PRIVATE
+        ARIEC61850_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_features(ariec61850_m4_three_sv_binary_tests PRIVATE cxx_std_20)
+    ariec61850_apply_warnings(ariec61850_m4_three_sv_binary_tests)
+    ariec61850_apply_sanitizers(ariec61850_m4_three_sv_binary_tests)
+    add_test(NAME ariec61850_m4_three_sv_binary_tests
+             COMMAND ariec61850_m4_three_sv_binary_tests)
 
     add_executable(ariec61850_simulation_tests tests/test_simulation.cpp)
     target_link_libraries(ariec61850_simulation_tests PRIVATE ARIEC61850::core)
