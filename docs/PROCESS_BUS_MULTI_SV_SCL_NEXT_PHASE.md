@@ -1,5 +1,7 @@
 # ARStack Process Bus Simulator — Next Phase: Multi-SV + SCL-Driven Merging Unit
 
+**Implementation authority:** [ARD M4 — Exactly Three SCD-Driven SV Streams / Shared PTP / One Studio](ARD_M4_THREE_SV_SCL_SHARED_PTP_STUDIO.md) · [Tracking issue #333](https://github.com/masarray/arstack61850/issues/333) · [Uploaded SCD expected stream manifest](../tests/fixtures/scl/m4_3sv_uploaded_scd_expected.json). The M4.0 first delivery is deliberately **exactly 3 × 4I+4V / 4000 fps with a common PTP grid**, not an arbitrary stream count; make the engine bounded and extensible for later profiles.
+
 **Product direction (25 October 2026):** engineer-first, low-cost IEC 61850 process-bus traffic simulation using one ESP32-P4 and ARStack Studio. Current official baseline is **M3.H.3**, a single active 4I+4V SV publisher profile with internal PTP SOURCE traffic and autonomous operation when Studio closes.
 
 **Primary user outcome:** Open an SCD/CID/IID/SCL file, select multiple Merging Unit SV streams, preview their engineering identities and values, then publish the supported streams **concurrently from one ESP32-P4** to an isolated test LAN. An engineer can connect a relay/BCU or software analyzer and adjust scenarios without purchasing a bank of physical MUs or a GPS clock just to get test traffic. Subscriber behavior is device/configuration-dependent: compare APPID, destination MAC, VLAN, svID, DataSet and subscriber configuration as part of normal engineering use.
