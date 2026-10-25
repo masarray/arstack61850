@@ -27,6 +27,16 @@
 - Regression covers reproducible binary round-trip, small buffers, corrupted payload, invalid version/length, full-identity collision and unsupported stream rate. GCC/Clang/MSVC PASS on reviewed content: https://github.com/masarray/arstack61850/actions/runs/40184749369.
 - Retained both pre-existing M3.H.3 released firmware and the V1 single-stream ABI, with no firmware behavior changes.
 
+## UPDATE — 26 October 2026: P0C1 firmware control plane merged
+
+**P0C1 DONE:** [PR #336](https://github.com/masarray/arstack61850/pull/336), commit `e35c09fe3263d31d1d6d4804f9795417c3b3460e`. ESP32-P4 now has `MULTISV STATUS/SHOW/BEGIN/CHUNK/VALIDATE/COMMIT/ABORT` using bounded static V2 storage, complete three-stream validation, atomic control-plane commit/readback, transfer replay safeguards, and unchanged V1 commands. Firmware advertises **`MULTISV-CONFIG-STAGING-V2`**, deliberately **not** triple-TX capability. [Protocol](M4_P0C1_MULTISV_FIRMWARE_PROTOCOL.md). All nine PR workflows passed before merge.
+
+**P0C2A IN REVIEW:** [PR #338](https://github.com/masarray/arstack61850/pull/338) adds reusable fixed-capacity `M4ThreeSvGridPlanner`: one caller-supplied qualified PTP epoch, one 4000Hz absolute tick, up to three ordered frame descriptors with identical same-slot `smpCnt`/`smpSynch`, independently enabled slots and group-wide invalidation on PTP generation discontinuity; a new CTest asserts 12,000 scheduled canonical frames/s at ideal ticks and no replay on missed ticks. **This is a CPU-only planner, not yet wired to GPTimer/EMAC packet TX.** Merge only after relevant CI success.
+
+**NEXT CODING OWNER: P0C2B.** Refactor `app_main.cpp` transmitter to consume the three committed profiles through a coherent activation handoff, allocate three independent waveform engines / live banks / prebuilt packets, use one GPTimer/PTP clock owner, and emit three distinct SV frames per qualified sample tick. Quantify actual TX latency; current firmware cannot yet emit 3 simultaneous SCD-derived streams. Follow with isolated controls P0D and MU pagination P0E.
+
+---
+
 ## NOT DONE — do not claim otherwise
 
 - **P0C ESP32-P4 firmware** does not yet accept the V2 binary envelope, publish three different SV packets per 250-us sample slot or use a committed `SvStreamRuntime[3]` array.
