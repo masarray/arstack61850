@@ -282,7 +282,7 @@ SurfacePanel {
         if (ribbon.injectionRunning && smartSession.state !== "RUNNING")
             return "SV still running · Studio session warning"
         if (ribbon.unexpectedSvStop) {
-            if (ribbon.device.svStopReason === "LEASE_EXPIRED") return "SV stopped · USB control lease expired"
+            if (ribbon.device.svStopReason === "ETHERNET_LINK_DOWN") return "SV stopped · Ethernet LAN disconnected"\n            if (ribbon.device.svStopReason === "LEASE_EXPIRED") return "SV stopped · USB control lease expired"
             if (ribbon.device.svStopReason === "RUNTIME_FAULT")
                 return ribbon.device.svTxFaultDetail.length > 0
                     ? "SV stopped · " + ribbon.device.svTxFaultDetail
