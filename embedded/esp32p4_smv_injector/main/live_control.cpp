@@ -687,8 +687,12 @@ void handle_line(char* line) noexcept {
             ESP_LOGE(kTag, "START rejected: CFG commit/readback token or boot invalid");
             return;
         }
-        // START is an explicit verified transaction. No USB heartbeat is
-        // required to keep it alive once armed.
+        // START requires physical link, not GUI presence or heartbeats.
+        // A later link-down event revokes the session atomically.
+        if (!g_physical_link_up.load(std::memory_order_acquire)) {
+            ESP_LOGE(kTag, "START rejected: physical Ethernet link DOWN");
+            return;
+        }
         profile_control_abort_staging();
         g_scenario_txn.consume_start();
         g_start_request.store(true, std::memory_order_release);
