@@ -1001,7 +1001,9 @@ void live_control_initialize(
     g_scenario_txn.reset();
     g_running.store(false, std::memory_order_release);
     g_start_request.store(false, std::memory_order_release);
-    g_physical_link_up.store(false, std::memory_order_release);
+    // Ethernet driver starts before this control task initializes. Its LINK UP
+    // event can already have arrived: do not overwrite the physical PHY state
+    // with a stale "boot default DOWN" at this point.
     clear_control_session();
     g_max_heartbeat_gap_ms.store(0U, std::memory_order_release);
     g_slow_heartbeat_events.store(0U, std::memory_order_release);
