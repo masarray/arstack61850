@@ -69,6 +69,8 @@ public:
             {"control lease heartbeat coalesces outside saturated exclusive queue", heartbeatKeepsBoundedSafetySlotUnderExclusiveLoad()},
             {"board fail-safe STOP is not mislabelled as operator STOP ACK", forcedFirmwareStopRetainsCauseAndIsNotOperatorAck()},
             {"latched board STOP cause overrides READY and survives console truncation", boardStopCausePersistsUntilVerifiedRestart()},
+            {"old board SV fault at startup is diagnostic history, not an active alarm", historicSvStopDoesNotTriggerStartupAlarm()},
+            {"live SV fault has one active incident and manual STOP stays quiet", liveSvStopIsNewIncidentOnly()},
             {"PTP STOP requires firmware ACK and stopped readback", ptpStopConfirmationCannotBeGuessed()},
             {"PTP STOP timeout blocks restart pending manual recovery", ptpUnverifiedStopBlocksRestart()},
             {"App teardown must stop PTP without SV output", ptpOnlyShutdownIntent()},
@@ -1120,6 +1122,91 @@ private:
                                worker.svStopPending_;
         worker.queuePrioritySvStop();
         return cancelled && worker.svStopPending_ && worker.commandQueue_.isEmpty();
+    }
+
+    static bool historicSvStopDoesNotTriggerStartupAlarm() {
+        Fixture f;
+        if (!f.profileReady) return false;
+        seedVerified(f, identity(), QStringLiteral("COM15"), false);
+        auto& d = f.device;
+        d.processLine(QStringLiteral(
+            "SVLIFE state=STOPPED stop_cause=RUNTIME_FAULT stop_seq=7 "
+            "stop_uptime_ms=1308494 hb_seen=1"));
+        if (d.svLastStopCause() != QStringLiteral("RUNTIME_FAULT") ||
+            !d.svStopReason().isEmpty() || d.svUnexpectedStopObserved() ||
+            d.svUnexpectedStopIncident() != 0U) return false;
+
+        // First SHOW after reconnect may contain the last TX error and/or
+        // trailing serial log lines from before the current Studio session.
+        d.processLine(QStringLiteral(
+            "SVTXFAULT state=STOPPED svlife_stop_seq=7 burst_now=0 "
+            "last_stop_seq=3 last_stop_first_error=263 last_stop_last_error=263 "
+            "last_stop_link_up=1"));
+        d.processLine(QStringLiteral("SV transport fault: 400 consecutive TX failures"));
+        d.processLine(QStringLiteral(
+            "STOP accepted: SV transmission suppressed by fail-closed runtime"));
+        d.processLine(QStringLiteral(
+            "state=STOPPED generation=5 signal_frequency=50000 mHz"));
+        return !d.running() && !d.svUnexpectedStopObserved() &&
+            d.svUnexpectedStopIncident() == 0U &&
+            d.svStopReason().isEmpty() &&
+            d.svTxFaultDetail().isEmpty() &&
+            d.svLastStopCause() == QStringLiteral("RUNTIME_FAULT") &&
+            f.session.state() == QStringLiteral("READY");
+    }
+
+    static bool liveSvStopIsNewIncidentOnly() {
+        Fixture f;
+        if (!f.profileReady) return false;
+        seedVerified(f, identity(), QStringLiteral("COM15"), false);
+        auto& d = f.device;
+        d.processLine(QStringLiteral(
+            "SVLIFE state=STOPPED stop_cause=RUNTIME_FAULT stop_seq=3"));
+        if (d.svUnexpectedStopObserved()) return false;
+
+        // This RUNNING state is seen during the current verified session,
+        // then the board stops without an operator STOP request.
+        d.setRunning(true);
+        d.processLine(QStringLiteral(
+            "state=STOPPED generation=8 signal_frequency=50000 mHz"));
+        if (d.running() || !d.svUnexpectedStopObserved() ||
+            d.svStopReason() != QStringLiteral("AWAITING_BOARD_CAUSE") ||
+            d.svUnexpectedStopIncident() != 1U) return false;
+        d.processLine(QStringLiteral(
+            "SVLIFE state=STOPPED stop_cause=RUNTIME_FAULT stop_seq=4"));
+        d.processLine(QStringLiteral(
+            "SVTXFAULT state=STOPPED svlife_stop_seq=4 burst_now=0 "
+            "last_stop_seq=1 last_stop_first_error=263 last_stop_last_error=263 "
+            "last_stop_link_up=1"));
+        if (d.svStopReason() != QStringLiteral("RUNTIME_FAULT") ||
+            !d.svTxFaultDetail().contains(QStringLiteral("TIMEOUT")) ||
+            d.svUnexpectedStopIncident() != 1U) return false;
+        d.processLine(QStringLiteral(
+            "SVLIFE state=STOPPED stop_cause=RUNTIME_FAULT stop_seq=4"));
+        if (d.svUnexpectedStopIncident() != 1U) return false;
+
+        // An actual subsequent successful START clears the presentation, not
+        // the board's sticky last-stop cause. Operator STOP is not an incident.
+        d.setRunning(true);
+        if (d.svUnexpectedStopObserved() || !d.svStopReason().isEmpty() ||
+            !d.svTxFaultDetail().isEmpty() ||
+            d.svLastStopCause() != QStringLiteral("RUNTIME_FAULT")) return false;
+        d.operatorStopPending_ = true;
+        d.setRunning(false);
+        d.processLine(QStringLiteral(
+            "SVLIFE state=STOPPED stop_cause=OPERATOR_STOP stop_seq=5"));
+        if (d.svUnexpectedStopObserved() || !d.svStopReason().isEmpty() ||
+            d.svUnexpectedStopIncident() != 1U) return false;
+
+        // Even if a new COM session sees the same old fault record, it must
+        // not create a new alarm. The next genuine stop increments the ID.
+        d.resetTelemetry();
+        d.processLine(QStringLiteral(
+            "SVLIFE state=STOPPED stop_cause=RUNTIME_FAULT stop_seq=5"));
+        if (d.svUnexpectedStopObserved() || !d.svStopReason().isEmpty()) return false;
+        d.setRunning(true);
+        d.setRunning(false);
+        return d.svUnexpectedStopObserved() && d.svUnexpectedStopIncident() == 2U;
     }
 
     static bool boardStopCausePersistsUntilVerifiedRestart() {
