@@ -22,6 +22,7 @@ class SclProfileModel : public QAbstractListModel {
     Q_PROPERTY(QVariantMap selectedProfile READ selectedProfile NOTIFY selectedProfileChanged)
     Q_PROPERTY(bool hasProfiles READ hasProfiles NOTIFY sourceChanged)
     Q_PROPERTY(bool referenceTemplateActive READ referenceTemplateActive NOTIFY sourceChanged)
+    Q_PROPERTY(bool m4DraftSupported READ m4DraftSupported NOTIFY sourceChanged)
 
 public:
     enum Roles {
@@ -55,6 +56,8 @@ public:
     [[nodiscard]] QVariantMap selectedProfile() const;
     [[nodiscard]] bool hasProfiles() const noexcept;
     [[nodiscard]] bool referenceTemplateActive() const noexcept;
+    [[nodiscard]] bool m4DraftSupported() const noexcept;
+    Q_INVOKABLE QVariantList m4RosterRows() const;
 
     Q_INVOKABLE bool loadFile(const QUrl& fileUrl);
     Q_INVOKABLE bool loadReferenceTemplate();
