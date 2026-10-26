@@ -204,6 +204,33 @@ int SclProfileModel::selectedIndex() const noexcept { return selectedIndex_; }
 bool SclProfileModel::hasProfiles() const noexcept { return !rows_.empty(); }
 bool SclProfileModel::referenceTemplateActive() const noexcept { return referenceTemplateActive_; }
 
+bool SclProfileModel::m4DraftSupported() const noexcept {
+    if (rows_.size() != 3U) return false;
+    for (const auto& row : rows_) {
+        if (!row.errors.isEmpty() || !row.profile.has_value() ||
+            row.compatibilityClass != QStringLiteral("A")) return false;
+        const auto& p = *row.profile;
+        const auto hz = p.timing.exact_frame_rate_hz();
+        if (!hz.has_value() || *hz != 4000U ||
+            !p.sample_counter_modulus.has_value() ||
+            *p.sample_counter_modulus != 4000U ||
+            p.payload_size_bytes != 64U) return false;
+    }
+    return true;
+}
+
+QVariantList SclProfileModel::m4RosterRows() const {
+    QVariantList roster;
+    if (!m4DraftSupported()) return roster;
+    for (const auto& row : rows_) {
+        auto item = profileToVariantMap(*row.profile);
+        item.insert(QStringLiteral("ied"), row.ied);
+        item.insert(QStringLiteral("controlBlockReference"), row.controlBlockReference);
+        roster.push_back(item);
+    }
+    return roster;
+}
+
 QVariantMap SclProfileModel::selectedProfile() const {
     if (selectedIndex_ < 0 || selectedIndex_ >= rowCount()) return {};
     const auto& row = rows_[static_cast<std::size_t>(selectedIndex_)];
