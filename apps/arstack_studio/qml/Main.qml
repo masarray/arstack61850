@@ -1024,7 +1024,7 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+B"; enabled: !workflowBar.startQueued; onActivated: root.balanced() }
     Shortcut { sequence: "Ctrl+0"; enabled: !workflowBar.startQueued; onActivated: root.zeroAll() }
     Shortcut { sequence: "F5"; enabled: workflowBar.session && !workflowBar.injectionRunning && !workflowBar.startQueued; onActivated: workflowBar.requestStart() }
-    Shortcut { sequence: "F6"; enabled: workflowBar.session && (workflowBar.injectionRunning || workflowBar.startQueued); onActivated: workflowBar.requestStop() }
+    Shortcut { sequence: "F6"; enabled: workflowBar.session && (workflowBar.injectionRunning || workflowBar.startQueued || device.m4Deploying); onActivated: workflowBar.requestStop() }
 
     Dialog {
         id: diagnosticsDialog
