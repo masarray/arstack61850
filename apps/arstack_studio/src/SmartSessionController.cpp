@@ -165,6 +165,7 @@ QString SmartSessionController::state() const { return state_; }
 QString SmartSessionController::statusText() const { return statusText_; }
 bool SmartSessionController::startReady() const noexcept { return startReady_; }
 bool SmartSessionController::canDeployProfile() const noexcept {
+    if (m4Mode_) return false;
     if (!deviceControlAvailable() || profiles_ == nullptr || device_->running() || device_->profileDeploying()) {
         return false;
     }
@@ -172,8 +173,19 @@ bool SmartSessionController::canDeployProfile() const noexcept {
     return profile.value(QStringLiteral("compatibilityClass")).toString() == QStringLiteral("A") &&
         profile.value(QStringLiteral("deviceSupport")).toString() == QStringLiteral("ready");
 }
+bool SmartSessionController::canDeployMultiSv() const noexcept {
+    return deviceControlAvailable() && profiles_ != nullptr &&
+        profiles_->m4DraftSupported() && !device_->running() &&
+        !device_->profileDeploying() && !device_->m4Deploying() &&
+        !device_->scenarioApplying() && !device_->ptpStarting() &&
+        profileSyncStage_ != ProfileSyncStage::deploying &&
+        device_->capabilities().contains(QStringLiteral("MULTISV-CONFIG-STAGING-V2"),
+            Qt::CaseInsensitive) &&
+        device_->capabilities().contains(QStringLiteral("MULTISV-TX-LAB-PREVIEW"),
+            Qt::CaseInsensitive);
+}
 bool SmartSessionController::liveControlReady() const noexcept {
-    return deviceControlAvailable() && !device_->profileDeploying() &&
+    return !m4Mode_ && deviceControlAvailable() && !device_->profileDeploying() &&
         (startReady_ || device_->running());
 }
 bool SmartSessionController::engineeringEditable() const noexcept {
@@ -337,11 +349,12 @@ bool SmartSessionController::requestStart() {
 }
 
 bool SmartSessionController::requestStartWithScenario(const QVariantMap& scenario) {
-    if (!startReady_ || !deviceControlAvailable() || device_ == nullptr || device_->running()) return false;
+    if (m4Mode_ || !startReady_ || !deviceControlAvailable() || device_ == nullptr || device_->running()) return false;
     return device_->startWithScenario(scenario);
 }
 
 bool SmartSessionController::requestApplyLiveScenario(const QVariantMap& scenario) {
+    if (m4Mode_) return false;
     // Never silently replay a locally restored draft after reconnect. This
     // path is entered only by the explicit operator Apply Live intent.
     if (!liveControlReady() || device_ == nullptr || !device_->running() ||
@@ -353,7 +366,7 @@ bool SmartSessionController::requestStop() {
     if (device_ == nullptr) return false;
     // STOP is a cancellation authority even before SV RUNNING telemetry: an
     // ACKed staging transaction may still be advancing toward START.
-    if (!device_->running() && !device_->scenarioApplying()) return true;
+    if (!device_->running() && !device_->scenarioApplying() && !device_->m4Deploying()) return true;
     if (portOwner_ != PortOwner::deviceSession || updateRequested_) return false;
     return device_->stop();
 }
@@ -404,6 +417,17 @@ bool SmartSessionController::requestDisconnect() {
     if (device_->running()) return false;
     device_->disconnectPort();
     return true;
+}
+
+bool SmartSessionController::requestDeployMultiSv() {
+    if (!canDeployMultiSv()) return false;
+    // Atomic supervisor admission: stop V1 retries before granting the
+    // single DeviceIoWorker's queue to the M4 transaction state machine.
+    resetProfileSync(false);
+    m4Mode_ = true;
+    const bool started = device_->deployMultiSv(profiles_->m4ConfigurationBinary());
+    reconcile();
+    return started;
 }
 
 bool SmartSessionController::requestProfileSync() {
@@ -808,6 +832,9 @@ void SmartSessionController::reconnectDeviceSignals() {
     });
     connect(device_, &DeviceController::profileStateChanged, this, [this] {
         handleProfileStateChanged();
+        reconcile();
+    });
+    connect(device_, &DeviceController::m4DeploymentChanged, this, [this] {
         reconcile();
     });
     connect(device_, &DeviceController::profileDeploymentProgress, this, [this] {
@@ -1397,6 +1424,21 @@ void SmartSessionController::reconcile() {
                 .arg(versionText),
             false,
             true);
+        return;
+    }
+
+    // M4 operator intent MUST suppress the legacy automatic V1 PROFILE
+    // sync/start path. A matched ARM3 upload is a roster proof, not proof
+    // that three per-MU live waveform scenarios have been applied.
+    if (m4Mode_) {
+        const QString phase = device_->m4Deploying()
+            ? QStringLiteral("M4 DEPLOYING")
+            : device_->m4Ready() ? QStringLiteral("M4 ROSTER VERIFIED")
+                                 : QStringLiteral("M4 DEPLOY NOT VERIFIED");
+        const QString message = device_->m4Ready()
+            ? QStringLiteral("Three firmware SV identities verified. START remains blocked until per-MU scenario/readback is integrated.")
+            : device_->m4DeploymentStatus();
+        setPresentation(phase, message, false, false);
         return;
     }
 

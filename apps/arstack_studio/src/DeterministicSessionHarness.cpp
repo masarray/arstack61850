@@ -57,6 +57,8 @@ public:
             {"PTP LINK_DOWN is classified early; MAC INVALID_STATE keeps STOP verification", ptpPhysicalEthernetPreflightAndMacFailure()},
             {"PTP rejected config never starts", ptpGuidedRejectedConfigStops()},
             {"PTP STOP cancels pending start after verified readback", ptpGuidedStopCancelsStart()},
+            {"M4 roster never authorizes V1 START or automatic profile sync", m4RosterIsolationAndV1StartGuard()},
+            {"M4 upload STOP revokes transaction proof before serial STOP", m4StopCancelsUpload()},
             {"legacy bare SV START refuses stale eight-channel state", legacyBareStartFailsClosed()},
             {"SV commit ACK/readback START chain is generation bound", svTransactionAckChain()},
             {"SV stale ACK and mismatched firmware readback fail closed", svTransactionNegativeAcks()},
@@ -2019,6 +2021,57 @@ private:
             report.contains(QStringLiteral("Configured publisher fps: 4000")) &&
             report.contains(QStringLiteral("Exact bundled build match: NOT VERIFIED")) &&
             report.contains(QStringLiteral("Firmware protocol compatible: UNKNOWN"));
+    }
+
+    static bool m4RosterIsolationAndV1StartGuard() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
+        auto& device = fixture.device;
+        auto& session = fixture.session;
+
+        // Explicit V1/M4 mode isolation: no implicit PROFILE transaction,
+        // START or live edit can issue legacy commands after M4 selection.
+        session.m4Mode_ = true;
+        device.m4Ready_ = true;
+        device.m4DeployedHash_ = QStringLiteral("0011223344556677");
+        session.needsProfileSync_ = true;
+        session.reconcile();
+        const bool isolated = !session.startReady() &&
+            !session.canDeployProfile() &&
+            !session.liveControlReady() &&
+            session.state() == QStringLiteral("M4 ROSTER VERIFIED") &&
+            !session.requestStartWithScenario({}) &&
+            !session.requestApplyLiveScenario({}) &&
+            !device.startWithScenario({}) &&
+            !device.deployProfile({}) &&
+            session.needsProfileSync_ && !device.profileDeploying();
+        return isolated;
+    }
+
+    static bool m4StopCancelsUpload() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
+        auto& device = fixture.device;
+        auto& session = fixture.session;
+        session.m4Mode_ = true;
+        device.m4Ready_ = false;
+        device.m4Deploying_ = true;
+        device.m4SessionGeneration_ = device.sessionGeneration_;
+        device.m4InFlightCommand_ = QStringLiteral("MULTISV CHUNK 42 0 0102");
+        device.m4AckTimer_.start(5000);
+        // An explicit STOP is a reserved priority command. The device
+        // transaction is invalidated synchronously before any worker write.
+        static_cast<void>(device.stop());
+        const bool cancelled = !device.m4Deploying_ && !device.m4Ready_ &&
+            !device.m4AckTimer_.isActive() &&
+            device.m4InFlightCommand_.isEmpty() &&
+            device.m4DeploymentStatus().contains(QStringLiteral("STOP"));
+        // The profile synchronizer must NOT revive the old V1 profile.
+        session.reconcile();
+        return cancelled && !session.startReady() &&
+            session.state() == QStringLiteral("M4 DEPLOY NOT VERIFIED");
     }
 
     static bool workerTeardownCompletes() {
