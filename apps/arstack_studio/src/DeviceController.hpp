@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "M4MultiSvUploadTransaction.hpp"
 #include <QByteArray>
+#include <QElapsedTimer>
 #include <cstdint>
 #include <QObject>
 #include <QStringList>
@@ -72,6 +74,10 @@ class DeviceController : public QObject {
     Q_PROPERTY(bool profileArmed READ profileArmed NOTIFY profileStateChanged)
     Q_PROPERTY(bool profileWasReused READ profileWasReused NOTIFY profileStateChanged)
     Q_PROPERTY(bool profileDeploying READ profileDeploying NOTIFY profileStateChanged)
+    Q_PROPERTY(bool m4Deploying READ m4Deploying NOTIFY m4DeploymentChanged)
+    Q_PROPERTY(bool m4Ready READ m4Ready NOTIFY m4DeploymentChanged)
+    Q_PROPERTY(QString m4DeploymentStatus READ m4DeploymentStatus NOTIFY m4DeploymentChanged)
+    Q_PROPERTY(QString m4DeployedHash READ m4DeployedHash NOTIFY m4DeploymentChanged)
     Q_PROPERTY(bool ptpAvailable READ ptpAvailable NOTIFY ptpStateChanged)
     Q_PROPERTY(bool ptpRunning READ ptpRunning NOTIFY ptpStateChanged)
     Q_PROPERTY(bool ptpStarting READ ptpStarting NOTIFY ptpStateChanged)
@@ -177,6 +183,10 @@ public:
     [[nodiscard]] bool profileArmed() const noexcept;
     [[nodiscard]] bool profileWasReused() const noexcept { return profileWasReused_; }
     [[nodiscard]] bool profileDeploying() const noexcept;
+    [[nodiscard]] bool m4Deploying() const noexcept { return m4Deploying_; }
+    [[nodiscard]] bool m4Ready() const noexcept { return m4Ready_; }
+    [[nodiscard]] QString m4DeploymentStatus() const { return m4Status_; }
+    [[nodiscard]] QString m4DeployedHash() const { return m4DeployedHash_; }
     [[nodiscard]] QString profileDeploymentProgressSummary() const;
     [[nodiscard]] bool ptpAvailable() const noexcept;
     [[nodiscard]] bool ptpRunning() const noexcept;
@@ -274,6 +284,8 @@ public:
     bool setQuality(const QString& signalId, quint32 quality);
     bool setCtSaturation(bool enabled, double dcOffsetPercent, double harmonicPercent, int harmonicOrder, double clipPercent);
     virtual bool deployProfile(const QVariantMap& profile);
+    // Exclusive SCD-based, operator-initiated M4 transaction, not V1 auto sync.
+    bool deployMultiSv(const QByteArray& arm3);
 
     void abandonProfileDeployment();
 
@@ -338,6 +350,7 @@ signals:
     void boardScenarioChanged();
     void profileStateChanged();
     void profileDeploymentProgress();
+    void m4DeploymentChanged();
     void ptpStateChanged();
     void deviceMessage(const QString& message);
     void scenarioStateChanged();
@@ -418,6 +431,9 @@ private:
     bool sendNextBinaryProfileChunk();
     void resetBinaryProfileTransfer();
     void failBinaryProfileDeployment(const QString& message);
+    bool dispatchNextM4();
+    bool processM4Line(const QString& line);
+    void cancelM4(const QString& reason, bool clearReady = true);
     void failScenarioStart(const QString& message);
     bool submitScenario(const QVariantMap& scenario, bool starting);
     void resetScenarioStart() noexcept;
@@ -483,6 +499,15 @@ private:
     bool profileArmed_{false};
     bool profileWasReused_{false};
     bool profileDeploying_{false};
+    M4MultiSvUploadTransaction m4Upload_;
+    QTimer m4AckTimer_;
+    QElapsedTimer m4TotalClock_;
+    QString m4InFlightCommand_;
+    QString m4Status_{QStringLiteral("M4 not deployed")};
+    QString m4DeployedHash_;
+    quint64 m4SessionGeneration_{0};
+    bool m4Deploying_{false};
+    bool m4Ready_{false};
     // One coalesced readback of each kind; no second serial writer or retry loop.
     bool deferredShow_{false};
     bool deferredProfileShow_{false};

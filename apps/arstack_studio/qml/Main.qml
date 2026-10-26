@@ -374,7 +374,7 @@ ApplicationWindow {
         scenarioSettings.lastScenario = JSON.stringify(root.scenarioSnapshot())
         autoLiveApplyTimer.stop()
         autoLiveQueuedRevision = -1
-        showMessage("Three MU draft pages ready. Device deploy is not enabled yet.", false)
+        showMessage("Three MU pages ready. Use Deploy 3 MU for verified firmware roster upload; START remains gated.", false)
     }
     function m4SelectPage(slot) {
         if (!m4Pages.active || slot === m4Pages.selectedSlot) return
@@ -1024,7 +1024,7 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+B"; enabled: !workflowBar.startQueued; onActivated: root.balanced() }
     Shortcut { sequence: "Ctrl+0"; enabled: !workflowBar.startQueued; onActivated: root.zeroAll() }
     Shortcut { sequence: "F5"; enabled: workflowBar.session && !workflowBar.injectionRunning && !workflowBar.startQueued; onActivated: workflowBar.requestStart() }
-    Shortcut { sequence: "F6"; enabled: workflowBar.session && (workflowBar.injectionRunning || workflowBar.startQueued); onActivated: workflowBar.requestStop() }
+    Shortcut { sequence: "F6"; enabled: workflowBar.session && (workflowBar.injectionRunning || workflowBar.startQueued || device.m4Deploying); onActivated: workflowBar.requestStop() }
 
     Dialog {
         id: diagnosticsDialog
@@ -1371,10 +1371,32 @@ ApplicationWindow {
             Item { Layout.fillWidth: true }
             Label {
                 visible: m4Pages.active
-                text: "DRAFT ONLY · NOT DEPLOYED"
-                color: studioTheme.amber
+                text: device.m4Deploying ? "UPLOADING · VERIFIED ACK REQUIRED"
+                     : device.m4Ready && device.m4DeployedHash === sclProfiles.m4ConfigurationHash
+                     ? "3 MU ROSTER VERIFIED · START GATED" : "DRAFT · NOT DEPLOYED"
+                color: device.m4Ready && device.m4DeployedHash === sclProfiles.m4ConfigurationHash
+                    ? studioTheme.green : studioTheme.amber
                 font.family: root.uiFont
                 font.pixelSize: 9
+            }
+            Button {
+                visible: m4Pages.active
+                enabled: m4Pages.active && workflowBar.session && workflowBar.session.canDeployMultiSv &&
+                         !device.m4Deploying && !workflowBar.startQueued
+                text: device.m4Deploying ? "Uploading…" : "Deploy 3 MU"
+                font.family: root.uiFont
+                font.pixelSize: 10
+                onClicked: {
+                    if (!root.commitFrequencyEditor() ||
+                        !currentMatrix.flushPendingEdits() ||
+                        !voltageMatrix.flushPendingEdits()) return
+                    if (m4Pages.active)
+                        m4Pages.saveCurrent(root.startScenarioSnapshot(false))
+                    const accepted = workflowBar.session && workflowBar.session.requestDeployMultiSv()
+                    root.showMessage(accepted
+                        ? "Uploading ARM3. Board hash, all 3 MAC/svID/VLAN identities and SELECT ACK will be checked."
+                        : "M4 deploy blocked. Check stopped board, firmware capability, or diagnostics.", !accepted)
+                }
             }
             Button {
                 text: m4Pages.active ? "Close MU pages" : "Open MU pages"
