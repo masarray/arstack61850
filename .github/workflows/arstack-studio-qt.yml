@@ -81,7 +81,7 @@ jobs:
         shell: powershell
         run: |
           cmake --build build-arstack-studio --config Release `
-            --target arstack_session_harness arstack_clipboard_harness arstack_windows_ownership_harness arstack_m4_pages_harness --parallel
+            --target arstack_session_harness arstack_clipboard_harness arstack_windows_ownership_harness arstack_m4_pages_harness arstack_m4_compile_harness --parallel
 
       - name: S8A deterministic session harness on Windows
         timeout-minutes: 1
@@ -105,6 +105,13 @@ jobs:
           $exe = Join-Path $PWD 'build-arstack-studio\Release\arstack_m4_pages_harness.exe'
           & $exe
           if ($LASTEXITCODE -ne 0) { throw "M4 native stream-page state regression failed: $LASTEXITCODE" }
+
+      - name: M4 real SCD to ARM3 V2 compiler regression (Windows)
+        timeout-minutes: 1
+        shell: powershell
+        run: |
+          & "$PWD\\build-arstack-studio\\Release\\arstack_m4_compile_harness.exe"
+          if ($LASTEXITCODE -ne 0) { throw "M4 SCD ARM3 compiler regression failed: $LASTEXITCODE" }
 
       - name: Native Windows clipboard roundtrip regression
         timeout-minutes: 1
@@ -234,12 +241,16 @@ jobs:
         run: |
           set -o pipefail
           cmake --build build-arstack-studio \
-            --target arstack_studio arstack_session_harness arstack_capture_harness arstack_clipboard_harness arstack_m4_pages_harness --parallel 2 \
+            --target arstack_studio arstack_session_harness arstack_capture_harness arstack_clipboard_harness arstack_m4_pages_harness arstack_m4_compile_harness --parallel 2 \
             2>&1 | tee /tmp/arstack-studio-build.log
 
       - name: M4 three independent GUI pages regression
         shell: bash
         run: ./build-arstack-studio/arstack_m4_pages_harness
+
+      - name: M4 real SCD to ARM3 V2 compiler regression (Linux)
+        shell: bash
+        run: ./build-arstack-studio/arstack_m4_compile_harness
 
       - name: 4I+4V reference template regression
         shell: bash

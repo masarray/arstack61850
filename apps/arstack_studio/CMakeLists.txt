@@ -221,6 +221,24 @@ qt_add_executable(arstack_m4_pages_harness
 target_link_libraries(arstack_m4_pages_harness PRIVATE Qt6::Core)
 target_compile_features(arstack_m4_pages_harness PRIVATE cxx_std_20)
 
+# Exercise the actual production SclProfileModel, not a parallel XML decoder.
+# The canonical ARM3 envelope is compiled once from the three exact SCD rows,
+# preserving per-stream VLAN overrides and the firmware identity hash.
+qt_add_executable(arstack_m4_compile_harness
+    src/M4SclCompileHarness.cpp
+    src/SclProfileModel.cpp
+    src/SclProfileModel.hpp
+)
+target_link_libraries(arstack_m4_compile_harness PRIVATE
+    Qt6::Core
+    ARIEC61850::core
+)
+target_compile_definitions(arstack_m4_compile_harness PRIVATE
+    ARIEC61850_SOURCE_DIR="${CMAKE_CURRENT_LIST_DIR}/../.."
+)
+target_compile_features(arstack_m4_compile_harness PRIVATE cxx_std_20)
+
+
 # Opt-in Windows engineering preview identity; OFF for all stable builds.
 option(ARSTACK_STUDIO_ENGINEERING_PREVIEW "Mark this Studio build as an isolated preview" OFF)
 if(ARSTACK_STUDIO_ENGINEERING_PREVIEW)
