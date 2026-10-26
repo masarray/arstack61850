@@ -1296,12 +1296,9 @@ void publisher_task(void* argument) {
                     live_control_force_stop();
                     continue;
                 }
-                const auto base_signal = live_signal_snapshot();
                 for (std::size_t slot = 0U; slot < multi_extra_signals.size(); ++slot) {
-                    // Physical per-MU live edits arrive with P0D; until then
-                    // separate immutable initial copies prevent shared state
-                    // mutation and each MU has an independent phase engine.
-                    multi_extra_signals[slot] = base_signal;
+                    multi_extra_signals[slot] =
+                        ar::esp32p4::smv::multi_profile_signal_snapshot(slot + 1U);
                     multi_extra_engines[slot].reset_phase();
                 }
                 multi_tick_index = 0U;
@@ -1547,7 +1544,15 @@ void publisher_task(void* argument) {
 #endif
         }
 
-        const auto signal_state = live_signal_snapshot();
+        const auto signal_state = multi_active
+            ? ar::esp32p4::smv::multi_profile_signal_snapshot(0U)
+            : live_signal_snapshot();
+        if (multi_active) {
+            for (std::size_t slot = 0U; slot < multi_extra_signals.size(); ++slot) {
+                multi_extra_signals[slot] =
+                    ar::esp32p4::smv::multi_profile_signal_snapshot(slot + 1U);
+            }
+        }
         if (pending_ticks > 1U) {
 #if AR_SV_PTP_PHASE_SUPPORTED
             // A skipped frame breaks canonical timeline evidence, even if
