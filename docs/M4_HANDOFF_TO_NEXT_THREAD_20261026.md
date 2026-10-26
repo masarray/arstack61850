@@ -6,7 +6,22 @@
 **Tracking:** https://github.com/masarray/arstack61850/issues/333  
 **Engineering architecture:** [ARD M4](ARD_M4_THREE_SV_SCL_SHARED_PTP_STUDIO.md)  
 **Latest official stable release:** `processbus-sim-m3h3-20261025` (**do not overwrite released assets**)  
-**Main HEAD at handoff inspection:** `7ee7ad39d76f8072b7940f438143049549b21bb6`.
+**Main HEAD at 2026-10-26 P0E2A checkpoint:** `310be156e5e71a496ae65639d8374d075235de06`. Always verify HEAD again.
+
+## LIVE 2026-10-26 checkpoint — supersedes older P0E status below
+
+**Latest verified main:** `310be156e5e71a496ae65639d8374d075235de06` after **P0E1 PR #343 merged** (squash `6de01f3ccf6bde396c0c48a85ceec6d465cc6c9f`) and **P0E2A PR #344 merged** (squash `310be156e5e71a496ae65639d8374d075235de06`). All executed PR-head checks for #343/#344 SUCCESS; release upload step skipped. P0D2 #341 and P0D3 #342 were already merged before these.
+
+- **DONE P0E1:** one native Qt/QML Studio with three independent draft MU pages, common Table/Waveform/Phasor surfaces and per-MU value/quality/frequency/phase/waveform isolation. Addressed Codex legacy persistence and frequency-tab-loss findings; native Windows/Linux preview regression passed. Still deliberately **DRAFT ONLY** until real deployment.
+- **DONE P0E2A:** real `SclProfileModel` now compiles the three engineer-selected SCD/9-2LE profiles into one canonical CRC-checked `ARM3 V2` binary, with firmware-equivalent full-envelope 64-bit hash, all MAC/APPID/svID/VLAN identities intact. Compile is cached on SCD/profile changes; invalid source/duplicate identities clear the deployable binary. Linux/Windows Qt and matched native-preview regression passed, including MU2 VLAN isolation, deterministic encode and invalidation. [PR #344](https://github.com/masarray/arstack61850/pull/344).
+- **IN PR P0E2B:** [#345](https://github.com/masarray/arstack61850/pull/345), branch `feat/m4-p0e2b-ack-gated-uploader`, latest inspected head `2d42a09beade084ed704101638d6eee052ff395d`, **OPEN / NOT MERGED**. Production-linked host `M4MultiSvUploadTransaction` emits one command only after matching firmware ACK: `STATUS / ABORT / BEGIN / bounded 48B CHUNK / VALIDATE / COMMIT / SHOW / SELECT`. Requires exact full commit hash, generation, size and **three exact SHOW stream identities** before SELECT; rejects reboot/transaction mismatch. Linux Qt, Windows Qt, ESP32 firmware, and other listed executed checks PASS; paired Windows native preview was still in progress at this write. Original Codex P1 harness TXMODE informational-line bug fixed (`a71d3794`, diagnostic `2d42a09b`); review thread resolved. Recheck final PR HEAD/CI before merge.
+- **PENDING P0E2C:** integrate the P0E2B state machine into the **existing one** `DeviceController` / `DeviceIoWorker` serial authority with boot/session ownership, ACK timeout, cancellation, status/readback/SELECT confirmation and real Studio deploy UI. DO NOT simply bulk-enqueue MULTISV commands. Preserve V1 PROFILE/START and M3.H.3 assets. Only enable M4 START after the board confirms all 3 identities and selected roster, using verified board-owned START semantics without silent legacy deselect.
+- **PENDING P0E3:** bind 3 independent full-scenario SVSTREAM transactions and firmware readback to the three GUI draft/live states; reconnect must first adopt board state without overwriting an independently running board. Retain independent slot control on the same 250-us/PTP grid.
+- **PENDING P0F:** paired ESP32-P4 firmware + Studio release candidate and **physical** independent NIC/Wireshark capture proving 3×4,000 canonical SV frames/s, common smpCnt/PTP grid, exact three SCD identities, TX overrun/drop/skew and Ethernet budget. CI does not prove wire performance.
+
+**Priority for next thread:** verify #345 exact-head CI/review, repair and merge only if all required gates pass; then implement actual P0E2C transport/GUI deployment and P0E3 per-MU readback. Do not redo merged #343/#344, do not claim physical 12kfps. Official M3.H.3 stable release remains immutable.
+
+---
 
 ## 0. Latest verified continuation checkpoint (2026-10-26; supersedes historical sections 2–4)
 
