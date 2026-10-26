@@ -59,6 +59,7 @@ public:
             {"PTP STOP cancels pending start after verified readback", ptpGuidedStopCancelsStart()},
             {"M4 roster never authorizes V1 START or automatic profile sync", m4RosterIsolationAndV1StartGuard()},
             {"M4 upload STOP revokes transaction proof before serial STOP", m4StopCancelsUpload()},
+            {"M4 per-MU CFG STOP aborts serial queue without V1 START", m4PerMuScenarioStopGuard()},
             {"legacy bare SV START refuses stale eight-channel state", legacyBareStartFailsClosed()},
             {"SV commit ACK/readback START chain is generation bound", svTransactionAckChain()},
             {"SV stale ACK and mismatched firmware readback fail closed", svTransactionNegativeAcks()},
@@ -2072,6 +2073,28 @@ private:
         session.reconcile();
         return cancelled && !session.startReady() &&
             session.state() == QStringLiteral("M4 DEPLOY NOT VERIFIED");
+    }
+
+    static bool m4PerMuScenarioStopGuard() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
+        auto& d = fixture.device;
+        auto& session = fixture.session;
+        session.m4Mode_ = true;
+        d.m4Ready_ = true;
+        d.m4ScenarioApplying_ = true;
+        d.m4ScenarioSession_ = d.sessionGeneration_;
+        d.m4ScenarioTimer_.start(5000);
+        session.reconcile();
+        if (session.startReady() || session.liveControlReady() ||
+            session.state() != QStringLiteral("M4 APPLYING MU BANKS")) return false;
+        static_cast<void>(session.requestStop());
+        return !d.m4ScenarioApplying_ && !d.m4ScenariosVerified_ &&
+            !d.m4ScenarioTimer_.isActive() &&
+            d.m4ScenarioStatus().contains(QStringLiteral("STOP")) &&
+            !session.requestStartWithScenario({}) &&
+            session.state() == QStringLiteral("M4 ROSTER VERIFIED");
     }
 
     static bool workerTeardownCompletes() {

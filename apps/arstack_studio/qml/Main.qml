@@ -1024,7 +1024,7 @@ ApplicationWindow {
     Shortcut { sequence: "Ctrl+B"; enabled: !workflowBar.startQueued; onActivated: root.balanced() }
     Shortcut { sequence: "Ctrl+0"; enabled: !workflowBar.startQueued; onActivated: root.zeroAll() }
     Shortcut { sequence: "F5"; enabled: workflowBar.session && !workflowBar.injectionRunning && !workflowBar.startQueued; onActivated: workflowBar.requestStart() }
-    Shortcut { sequence: "F6"; enabled: workflowBar.session && (workflowBar.injectionRunning || workflowBar.startQueued || device.m4Deploying); onActivated: workflowBar.requestStop() }
+    Shortcut { sequence: "F6"; enabled: workflowBar.session && (workflowBar.injectionRunning || workflowBar.startQueued || device.m4Deploying || device.m4ScenarioApplying); onActivated: workflowBar.requestStop() }
 
     Dialog {
         id: diagnosticsDialog
@@ -1371,7 +1371,9 @@ ApplicationWindow {
             Item { Layout.fillWidth: true }
             Label {
                 visible: m4Pages.active
-                text: device.m4Deploying ? "UPLOADING · VERIFIED ACK REQUIRED"
+                text: device.m4ScenarioApplying ? "APPLYING · MU BANK READBACK REQUIRED"
+                     : device.m4ScenariosVerified && device.m4DeployedHash === sclProfiles.m4ConfigurationHash ? "3/3 MU BANKS VERIFIED · START GATED"
+                     : device.m4Deploying ? "UPLOADING · VERIFIED ACK REQUIRED"
                      : device.m4Ready && device.m4DeployedHash === sclProfiles.m4ConfigurationHash
                      ? "3 MU ROSTER VERIFIED · START GATED" : "DRAFT · NOT DEPLOYED"
                 color: device.m4Ready && device.m4DeployedHash === sclProfiles.m4ConfigurationHash
@@ -1382,7 +1384,7 @@ ApplicationWindow {
             Button {
                 visible: m4Pages.active
                 enabled: m4Pages.active && workflowBar.session && workflowBar.session.canDeployMultiSv &&
-                         !device.m4Deploying && !workflowBar.startQueued
+                         !device.m4Deploying && !device.m4ScenarioApplying && !workflowBar.startQueued
                 text: device.m4Deploying ? "Uploading…" : "Deploy 3 MU"
                 font.family: root.uiFont
                 font.pixelSize: 10
@@ -1399,6 +1401,27 @@ ApplicationWindow {
                 }
             }
             Button {
+                visible: m4Pages.active
+                enabled: m4Pages.active && workflowBar.session &&
+                         workflowBar.session.canApplyMultiSvScenarios &&
+                         !workflowBar.startQueued
+                text: device.m4ScenarioApplying ? "Applying…" : "Apply 3 MU"
+                font.family: root.uiFont
+                font.pixelSize: 10
+                onClicked: {
+                    if (!root.commitFrequencyEditor() ||
+                        !currentMatrix.flushPendingEdits() ||
+                        !voltageMatrix.flushPendingEdits()) return
+                    if (!m4Pages.saveCurrent(root.startScenarioSnapshot(false))) return
+                    const drafts = [m4Pages.draftFor(0), m4Pages.draftFor(1), m4Pages.draftFor(2)]
+                    const accepted = workflowBar.session.requestApplyMultiSvScenarios(drafts)
+                    root.showMessage(accepted
+                        ? "Applying 3 isolated MU signal banks with firmware COMMIT and READBACK."
+                        : "Apply rejected: verify current SCD roster and all three scenario drafts.", !accepted)
+                }
+            }
+            Button {
+                enabled: !device.m4Deploying && !device.m4ScenarioApplying
                 text: m4Pages.active ? "Close MU pages" : "Open MU pages"
                 font.family: root.uiFont
                 font.pixelSize: 10

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "M4MultiSvUploadTransaction.hpp"
+#include "M4ThreeMuScenarioApply.hpp"
 #include "SclProfileModel.hpp"
 
 #include <QCoreApplication>
@@ -139,6 +140,93 @@ void negativeCases(const QByteArray& image) {
     check(x.stage() == M4MultiSvUploadTransaction::Stage::failed,
           "boot change invalidates the transaction");
 }
+
+QVariantMap nominalMu(double hz) {
+    QVariantList current, voltage;
+    for (int i=0; i<4; ++i) {
+        const double phase = (i == 1 ? -120.0 : i == 2 ? 120.0 : 0.0);
+        current.push_back(QVariant{QVariantList{1.0 + 0.1 * i, phase, true, qulonglong{0}}});
+        voltage.push_back(QVariant{QVariantList{57.74, phase, true, qulonglong{0}}});
+    }
+    return QVariantMap{
+        {QStringLiteral("hz"), hz},
+        {QStringLiteral("currentScale"), 100000.0},
+        {QStringLiteral("voltageScale"), 100.0},
+        {QStringLiteral("current"), current},
+        {QStringLiteral("voltage"), voltage},
+        {QStringLiteral("ct"), QVariantMap{
+            {QStringLiteral("enabled"), false},
+            {QStringLiteral("dc"), 0.0},
+            {QStringLiteral("harmonic"), 0.0},
+            {QStringLiteral("order"), 2},
+            {QStringLiteral("clip"), 100.0}}}
+    };
+}
+QStringList applyStep(M4ThreeMuScenarioApply& x, int slot) {
+    const auto batch = x.takeCommands();
+    check(batch.size() == 12, "fixed 12-command staged MU transaction");
+    const QString lead = QStringLiteral("SVSTREAM %1 CFG ").arg(slot);
+    check(batch.first().startsWith(lead + QStringLiteral("BEGIN ")) &&
+          batch.at(1).startsWith(lead + QStringLiteral("FREQ ")) &&
+          batch.at(10).startsWith(lead + QStringLiteral("SHAPE ")) &&
+          batch.last().startsWith(lead + QStringLiteral("COMMIT ")),
+          "bounded slot-qualified staged CFG");
+    check(x.takeCommands().isEmpty(), "no double-dispatch before COMMIT");
+    return batch;
+}
+void testThreeMuScenarioApply() {
+    QVariantList drafts{nominalMu(50.0), nominalMu(60.0), nominalMu(0.0)};
+    M4ThreeMuScenarioApply tx;
+    auto invalid = drafts;
+    auto third = invalid.at(2).toMap();
+    third[QStringLiteral("current")] = QVariantList{};
+    invalid[2] = third;
+    check(!tx.start(invalid, kBoot), "validate ALL 3 before any serial dispatch");
+    check(tx.takeCommands().isEmpty(), "invalid MU3 must not stage MU1");
+    check(tx.start(drafts, kBoot), "three valid isolated MU snapshots");
+    for (int slot=1; slot<=3; ++slot) {
+        const auto batch = applyStep(tx, slot);
+        const QString token = batch.first().section(QLatin1Char(' '), 4, 4);
+        const QString hash = batch.last().section(QLatin1Char(' '), 5, 5);
+        check(!tx.receive(QStringLiteral("SVSTREAM CFG STAGED slot=%1 verb=FREQ").arg(slot), kBoot),
+              "generic staged line does not bypass COMMIT");
+        const QString committed = QStringLiteral(
+            "SVSTREAM CFG COMMITTED slot=%1 token=%2 hash=%3 generation=%4")
+            .arg(slot).arg(token).arg(hash).arg(slot + 5);
+        check(tx.receive(committed, kBoot), "exact MU COMMIT");
+        const auto readback = tx.takeCommands();
+        check(readback.size() == 1 &&
+              readback.first() == QStringLiteral("SVSTREAM %1 CFG READBACK %2").arg(slot).arg(token),
+              "independent firmware READBACK after COMMIT");
+        check(!tx.receive(QStringLiteral("SVSTREAM CFG STAGED slot=%1 verb=SET").arg(slot), kBoot),
+              "readback cannot be satisfied by SET ACK");
+        check(tx.receive(QStringLiteral("SVSTREAM CFG READBACK slot=%1 token=%2 hash=%3 generation=%4")
+              .arg(slot).arg(token).arg(hash).arg(slot + 5), kBoot),
+              "exact slot-bound readback");
+        check(tx.verifiedSlots() == slot, "one verified MU per complete bank");
+    }
+    check(tx.verified() && tx.generation(0) == 6 &&
+          tx.generation(1) == 7 && tx.generation(2) == 8,
+          "three independently committed MCU generations");
+    M4ThreeMuScenarioApply rejected;
+    check(rejected.start(drafts, kBoot), "negative fixture started");
+    const auto first = applyStep(rejected, 1);
+    const auto token = first.first().section(QLatin1Char(' '), 4, 4);
+    check(rejected.receive(QStringLiteral(
+          "SVSTREAM CFG COMMITTED slot=1 token=%1 hash=DEADBEEF generation=6").arg(token), kBoot),
+          "mismatched commit classified");
+    check(!rejected.verified() &&
+          rejected.stage() == M4ThreeMuScenarioApply::Stage::failed,
+          "wrong hash cannot advance MU2");
+    M4ThreeMuScenarioApply reboot;
+    check(reboot.start(drafts, kBoot), "boot test staged");
+    static_cast<void>(applyStep(reboot, 1));
+    check(reboot.receive(QStringLiteral("SVSTREAM CFG COMMITTED slot=1"),
+          QStringLiteral("0000000000000000")) &&
+          reboot.stage() == M4ThreeMuScenarioApply::Stage::failed,
+          "firmware reboot invalidates all MU proof");
+}
+
 } // namespace
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
@@ -146,7 +234,8 @@ int main(int argc, char** argv) {
         const auto image = fixtureEnvelope();
         happyPath(image);
         negativeCases(image);
-        qInfo("PASS: ACK-driven M4 48B chunks, BEGIN/VALIDATE/COMMIT/SHOW/SELECT, "
+        testThreeMuScenarioApply();
+        qInfo("PASS: 3-MU canonical scenario preflight/COMMIT/READBACK, and ACK-driven M4 48B chunks, BEGIN/VALIDATE/COMMIT/SHOW/SELECT, "
               "full hash and three-MU readback, stale transaction and boot-fault guards");
         return 0;
     } catch (const std::exception& e) {

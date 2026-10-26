@@ -23,6 +23,7 @@ class SmartSessionController : public QObject {
     Q_PROPERTY(bool startReady READ startReady NOTIFY stateChanged)
     Q_PROPERTY(bool canDeployProfile READ canDeployProfile NOTIFY stateChanged)
     Q_PROPERTY(bool canDeployMultiSv READ canDeployMultiSv NOTIFY stateChanged)
+    Q_PROPERTY(bool canApplyMultiSvScenarios READ canApplyMultiSvScenarios NOTIFY stateChanged)
     Q_PROPERTY(bool liveControlReady READ liveControlReady NOTIFY stateChanged)
     Q_PROPERTY(bool engineeringEditable READ engineeringEditable NOTIFY stateChanged)
     Q_PROPERTY(bool firmwareUpdateRequired READ firmwareUpdateRequired NOTIFY stateChanged)
@@ -79,6 +80,7 @@ public:
     [[nodiscard]] bool startReady() const noexcept;
     [[nodiscard]] bool canDeployProfile() const noexcept;
     [[nodiscard]] bool canDeployMultiSv() const noexcept;
+    [[nodiscard]] bool canApplyMultiSvScenarios() const noexcept;
     [[nodiscard]] bool liveControlReady() const noexcept;
     [[nodiscard]] bool engineeringEditable() const noexcept;
     [[nodiscard]] bool firmwareUpdateRequired() const noexcept;
@@ -191,6 +193,7 @@ public:
     Q_INVOKABLE bool requestDisconnect();
     Q_INVOKABLE bool requestProfileSync();
     Q_INVOKABLE bool requestDeployMultiSv();
+    Q_INVOKABLE bool requestApplyMultiSvScenarios(const QVariantList& drafts);
     Q_INVOKABLE bool requestSetFrequency(double hz);
     Q_INVOKABLE bool requestSetSignal(
         const QString& signalId,

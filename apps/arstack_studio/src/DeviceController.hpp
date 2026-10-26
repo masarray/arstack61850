@@ -2,6 +2,7 @@
 #pragma once
 
 #include "M4MultiSvUploadTransaction.hpp"
+#include "M4ThreeMuScenarioApply.hpp"
 #include <QByteArray>
 #include <QElapsedTimer>
 #include <cstdint>
@@ -78,6 +79,9 @@ class DeviceController : public QObject {
     Q_PROPERTY(bool m4Ready READ m4Ready NOTIFY m4DeploymentChanged)
     Q_PROPERTY(QString m4DeploymentStatus READ m4DeploymentStatus NOTIFY m4DeploymentChanged)
     Q_PROPERTY(QString m4DeployedHash READ m4DeployedHash NOTIFY m4DeploymentChanged)
+    Q_PROPERTY(bool m4ScenarioApplying READ m4ScenarioApplying NOTIFY m4DeploymentChanged)
+    Q_PROPERTY(bool m4ScenariosVerified READ m4ScenariosVerified NOTIFY m4DeploymentChanged)
+    Q_PROPERTY(QString m4ScenarioStatus READ m4ScenarioStatus NOTIFY m4DeploymentChanged)
     Q_PROPERTY(bool ptpAvailable READ ptpAvailable NOTIFY ptpStateChanged)
     Q_PROPERTY(bool ptpRunning READ ptpRunning NOTIFY ptpStateChanged)
     Q_PROPERTY(bool ptpStarting READ ptpStarting NOTIFY ptpStateChanged)
@@ -187,6 +191,9 @@ public:
     [[nodiscard]] bool m4Ready() const noexcept { return m4Ready_; }
     [[nodiscard]] QString m4DeploymentStatus() const { return m4Status_; }
     [[nodiscard]] QString m4DeployedHash() const { return m4DeployedHash_; }
+    [[nodiscard]] bool m4ScenarioApplying() const noexcept { return m4ScenarioApplying_; }
+    [[nodiscard]] bool m4ScenariosVerified() const noexcept { return m4ScenariosVerified_; }
+    [[nodiscard]] QString m4ScenarioStatus() const { return m4ScenarioStatus_; }
     [[nodiscard]] QString profileDeploymentProgressSummary() const;
     [[nodiscard]] bool ptpAvailable() const noexcept;
     [[nodiscard]] bool ptpRunning() const noexcept;
@@ -286,6 +293,7 @@ public:
     virtual bool deployProfile(const QVariantMap& profile);
     // Exclusive SCD-based, operator-initiated M4 transaction, not V1 auto sync.
     bool deployMultiSv(const QByteArray& arm3);
+    bool applyMultiSvScenarios(const QVariantList& drafts);
 
     void abandonProfileDeployment();
 
@@ -434,6 +442,9 @@ private:
     bool dispatchNextM4();
     bool processM4Line(const QString& line);
     void cancelM4(const QString& reason, bool clearReady = true);
+    void cancelM4Scenarios(const QString& reason);
+    bool dispatchM4ScenarioStep();
+    bool processM4ScenarioLine(const QString& line);
     void failScenarioStart(const QString& message);
     bool submitScenario(const QVariantMap& scenario, bool starting);
     void resetScenarioStart() noexcept;
@@ -508,6 +519,14 @@ private:
     quint64 m4SessionGeneration_{0};
     bool m4Deploying_{false};
     bool m4Ready_{false};
+    M4ThreeMuScenarioApply m4Scenarios_;
+    QTimer m4ScenarioTimer_;
+    QElapsedTimer m4ScenarioClock_;
+    QString m4ScenarioStatus_{QStringLiteral("Three MU scenarios not applied")};
+    quint64 m4ScenarioSession_{0};
+    bool m4ScenarioApplying_{false};
+    bool m4ScenariosVerified_{false};
+    bool m4ScenarioDispatching_{false};
     // One coalesced readback of each kind; no second serial writer or retry loop.
     bool deferredShow_{false};
     bool deferredProfileShow_{false};

@@ -177,6 +177,7 @@ bool SmartSessionController::canDeployMultiSv() const noexcept {
     return deviceControlAvailable() && profiles_ != nullptr &&
         profiles_->m4DraftSupported() && !device_->running() &&
         !device_->profileDeploying() && !device_->m4Deploying() &&
+        !device_->m4ScenarioApplying() &&
         !device_->scenarioApplying() && !device_->ptpStarting() &&
         profileSyncStage_ != ProfileSyncStage::deploying &&
         device_->capabilities().contains(QStringLiteral("MULTISV-CONFIG-STAGING-V2"),
@@ -184,12 +185,21 @@ bool SmartSessionController::canDeployMultiSv() const noexcept {
         device_->capabilities().contains(QStringLiteral("MULTISV-TX-LAB-PREVIEW"),
             Qt::CaseInsensitive);
 }
+bool SmartSessionController::canApplyMultiSvScenarios() const noexcept {
+    return m4Mode_ && deviceControlAvailable() && profiles_ != nullptr &&
+        device_->m4Ready() && !device_->m4Deploying() &&
+        !device_->m4ScenarioApplying() && !device_->running() &&
+        !device_->scenarioApplying() && !device_->ptpStarting() &&
+        profiles_->m4DraftSupported() &&
+        device_->m4DeployedHash() == profiles_->m4ConfigurationHash();
+}
 bool SmartSessionController::liveControlReady() const noexcept {
     return !m4Mode_ && deviceControlAvailable() && !device_->profileDeploying() &&
         (startReady_ || device_->running());
 }
 bool SmartSessionController::engineeringEditable() const noexcept {
-    return device_ != nullptr && !device_->running() && !updateRequested_ &&
+    return device_ != nullptr && !device_->running() && !device_->m4Deploying() &&
+        !device_->m4ScenarioApplying() && !updateRequested_ &&
         portOwner_ != PortOwner::firmwareTool && (firmware_ == nullptr || !firmware_->busy());
 }
 bool SmartSessionController::firmwareUpdateRequired() const noexcept { return firmwareUpdateRequired_; }
@@ -366,7 +376,8 @@ bool SmartSessionController::requestStop() {
     if (device_ == nullptr) return false;
     // STOP is a cancellation authority even before SV RUNNING telemetry: an
     // ACKed staging transaction may still be advancing toward START.
-    if (!device_->running() && !device_->scenarioApplying() && !device_->m4Deploying()) return true;
+    if (!device_->running() && !device_->scenarioApplying() &&
+        !device_->m4Deploying() && !device_->m4ScenarioApplying()) return true;
     if (portOwner_ != PortOwner::deviceSession || updateRequested_) return false;
     return device_->stop();
 }
@@ -426,6 +437,13 @@ bool SmartSessionController::requestDeployMultiSv() {
     resetProfileSync(false);
     m4Mode_ = true;
     const bool started = device_->deployMultiSv(profiles_->m4ConfigurationBinary());
+    reconcile();
+    return started;
+}
+
+bool SmartSessionController::requestApplyMultiSvScenarios(const QVariantList& drafts) {
+    if (!canApplyMultiSvScenarios() || drafts.size() != 3) return false;
+    const bool started = device_->applyMultiSvScenarios(drafts);
     reconcile();
     return started;
 }
@@ -1062,6 +1080,11 @@ QString SmartSessionController::diagnosticsText() const {
         add(QStringLiteral("Firmware protocol compatible"), !device_->deviceVerified()
             ? QStringLiteral("UNKNOWN (identity not verified)")
             : firmwareIsCompatible() ? QStringLiteral("yes") : QStringLiteral("no"));
+        add(QStringLiteral("M4 roster verified"), device_->m4Ready() ? QStringLiteral("yes") : QStringLiteral("no"));
+        add(QStringLiteral("M4 deployed identity hash"), device_->m4DeployedHash());
+        add(QStringLiteral("M4 roster upload"), device_->m4DeploymentStatus());
+        add(QStringLiteral("M4 3-bank readback"), device_->m4ScenarioStatus());
+        add(QStringLiteral("M4 all scenarios verified"), device_->m4ScenariosVerified() ? QStringLiteral("yes") : QStringLiteral("no"));
         add(QStringLiteral("Profile generation"), device_->profileGeneration());
         add(QStringLiteral("Profile armed"), device_->profileArmed() ? QStringLiteral("yes") : QStringLiteral("no"));
         add(QStringLiteral("SMV running"), device_->running() ? QStringLiteral("yes") : QStringLiteral("no"));
@@ -1433,10 +1456,14 @@ void SmartSessionController::reconcile() {
     if (m4Mode_) {
         const QString phase = device_->m4Deploying()
             ? QStringLiteral("M4 DEPLOYING")
+            : device_->m4ScenarioApplying() ? QStringLiteral("M4 APPLYING MU BANKS")
+            : device_->m4ScenariosVerified() ? QStringLiteral("M4 3/3 MU VERIFIED")
             : device_->m4Ready() ? QStringLiteral("M4 ROSTER VERIFIED")
                                  : QStringLiteral("M4 DEPLOY NOT VERIFIED");
-        const QString message = device_->m4Ready()
-            ? QStringLiteral("Three firmware SV identities verified. START remains blocked until per-MU scenario/readback is integrated.")
+        const QString message = device_->m4ScenarioApplying() || device_->m4ScenariosVerified()
+            ? device_->m4ScenarioStatus()
+            : device_->m4Ready()
+            ? QStringLiteral("Three firmware SV identities verified; apply all 3 MU scenarios next. START remains blocked.")
             : device_->m4DeploymentStatus();
         setPresentation(phase, message, false, false);
         return;
