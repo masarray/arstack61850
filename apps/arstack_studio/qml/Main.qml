@@ -746,6 +746,7 @@ ApplicationWindow {
     }
 
     function sendSignal(group, row) {
+        if (m4Pages.active) return false
         if (!workflowBar.session || !workflowBar.session.liveControlReady) return true
         var signal = groupModel(group).get(row)
         return workflowBar.session.requestSetSignal(
@@ -912,7 +913,7 @@ ApplicationWindow {
         ctSaturationEnabled = enabled
         refreshPreview()
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
+        if (!m4Pages.active && workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
             workflowBar.session.requestSetCtSaturation(enabled, ctDcOffsetPercent,
                                                        ctHarmonicPercent, ctHarmonicOrder, ctClipPercent)
         showMessage(enabled
@@ -983,7 +984,7 @@ ApplicationWindow {
         selectSignal(activeGroup, activeRow)
         refreshPreview()
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply) applyAllSignals()
+        if (!m4Pages.active && workflowBar.session && workflowBar.session.liveControlReady && !pendingApply) applyAllSignals()
     }
 
     function zeroAll() {
@@ -994,7 +995,7 @@ ApplicationWindow {
         selectSignal(activeGroup, activeRow)
         refreshPreview()
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
+        if (!m4Pages.active && workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
             workflowBar.session.requestZero()
     }
 
@@ -1003,7 +1004,7 @@ ApplicationWindow {
         groupModel(activeGroup).setProperty(activeRow, "quality", unsignedValue)
         activeQuality = unsignedValue
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
+        if (!m4Pages.active && workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
             workflowBar.session.requestSetQuality(activeSignal, unsignedValue)
     }
 
