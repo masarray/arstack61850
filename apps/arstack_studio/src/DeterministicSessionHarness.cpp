@@ -2082,6 +2082,11 @@ private:
         seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
         auto& d = fixture.device;
         auto& session = fixture.session;
+        // The deterministic seed models a verified board but not always the
+        // asynchronous DeviceIoWorker::ready event. Model a fully ready
+        // serial owner explicitly so this test exercises retirement ACK,
+        // rather than a not-yet-initialized worker startup race.
+        d.ioWorkerReady_ = true;
         session.m4Mode_ = true;
         d.m4Ready_ = true;
         d.m4ScenarioApplying_ = true;
