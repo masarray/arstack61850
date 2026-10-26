@@ -3,6 +3,7 @@
 #include "DeviceIoWorker.hpp"
 #include "FirmwareManager.hpp"
 #include "SclProfileModel.hpp"
+#include "M4StreamScenarioModel.hpp"
 #include "SingleInstanceGuard.hpp"
 #include "SmartSessionController.hpp"
 #include "StudioClipboard.hpp"
@@ -642,6 +643,7 @@ int main(int argc, char* argv[]) {
     FirmwareManager firmwareService;
 
     qmlRegisterType<SclProfileModel>("ARStack.Studio", 1, 0, "SclProfileModel");
+    qmlRegisterType<M4StreamScenarioModel>("ARStack.Studio", 1, 0, "M4StreamScenarioModel");
     qmlRegisterType<StudioDeviceController>("ARStack.Studio", 1, 0, "DeviceController");
     qmlRegisterType<SvCaptureController>("ARStack.Studio", 1, 0, "SvCaptureController");
     qmlRegisterType<SmartSessionController>("ARStack.Studio", 1, 0, "SmartSessionController");

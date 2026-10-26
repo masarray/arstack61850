@@ -20,6 +20,8 @@ add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../.. ${CMAKE_BINARY_DIR}/ariec61850-
 set(ARSTACK_STUDIO_CORE_SOURCES
     src/SclProfileModel.cpp
     src/SclProfileModel.hpp
+    src/M4StreamScenarioModel.cpp
+    src/M4StreamScenarioModel.hpp
     src/DeviceIoWorker.cpp
     src/DeviceIoWorker.hpp
     src/DeviceController.cpp
@@ -209,6 +211,15 @@ target_compile_features(arstack_session_harness PRIVATE cxx_std_20)
 target_compile_definitions(arstack_studio PRIVATE
     ARSTACK_STUDIO_VERSION="${PROJECT_VERSION}"
 )
+
+# Portable native GUI-side M4 pagination regression, no COM/ESP32 required.
+qt_add_executable(arstack_m4_pages_harness
+    src/M4StreamScenarioHarness.cpp
+    src/M4StreamScenarioModel.cpp
+    src/M4StreamScenarioModel.hpp
+)
+target_link_libraries(arstack_m4_pages_harness PRIVATE Qt6::Core)
+target_compile_features(arstack_m4_pages_harness PRIVATE cxx_std_20)
 
 # Opt-in Windows engineering preview identity; OFF for all stable builds.
 option(ARSTACK_STUDIO_ENGINEERING_PREVIEW "Mark this Studio build as an isolated preview" OFF)

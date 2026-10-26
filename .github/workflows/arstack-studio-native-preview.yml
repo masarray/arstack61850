@@ -5,6 +5,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'apps/arstack_studio/**'
+      - 'tests/test_m4_studio_qml_safety_contract.py'
       # Firmware-only timing fixes MUST create a matched ESP32 image and
       # Windows Inno installer; do not leave users on stale embedded firmware.
       - 'embedded/esp32p4_smv_injector/**'
@@ -45,6 +46,12 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
+      - name: M4 Studio QML safety contract regression
+        shell: pwsh
+        run: |
+          python tests/test_m4_studio_qml_safety_contract.py
+          if ($LASTEXITCODE -ne 0) { throw 'M4 QML safety contract failed' }
+
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
@@ -58,8 +65,10 @@ jobs:
         run: |
           cmake -S apps/arstack_studio -B build-studio-preview -G "Visual Studio 17 2022" -A x64 -DARIEC61850_WARNINGS_AS_ERRORS=ON -DARSTACK_STUDIO_ENGINEERING_PREVIEW=ON
           if ($LASTEXITCODE -ne 0) { throw 'Preview configuration failed' }
-          cmake --build build-studio-preview --config Release --target arstack_studio arstack_session_harness arstack_clipboard_harness arstack_capture_harness --parallel 2
+          cmake --build build-studio-preview --config Release --target arstack_studio arstack_session_harness arstack_clipboard_harness arstack_capture_harness arstack_m4_pages_harness --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'Native Studio preview build failed' }
+          & "$PWD\build-studio-preview\Release\arstack_m4_pages_harness.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'M4 page state regression failed' }
           & "$PWD\build-studio-preview\Release\arstack_session_harness.exe"
           if ($LASTEXITCODE -ne 0) { throw 'Native session regression failed' }
           & "$PWD\build-studio-preview\Release\arstack_clipboard_harness.exe"

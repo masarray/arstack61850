@@ -35,9 +35,13 @@ ApplicationWindow {
     Timer {
         id: saveScenarioTimer
         interval: 400
-        onTriggered: scenarioSettings.lastScenario = JSON.stringify(root.scenarioSnapshot())
+        onTriggered: {
+            if (!m4Pages.active && !root.restoringScenario)
+                scenarioSettings.lastScenario = JSON.stringify(root.scenarioSnapshot())
+        }
     }
     function adoptRunningBoardScenario(snapshot) {
+        if (m4Pages.active) return // M4 drafts are never V1 board readback.
         if (!device.deviceVerified || !device.running ||
             device.scenarioApplying || reconnectScenarioRevision < 0 ||
             reconnectScenarioRevision !== scenarioRevision ||
@@ -150,6 +154,12 @@ ApplicationWindow {
     }
     function markScenarioDirty() {
         if (restoringScenario) return
+        if (m4Pages.active) {
+            m4Pages.saveCurrent(startScenarioSnapshot(false))
+            pendingApply = true
+            scenarioRevision += 1
+            return // No legacy single-SV serial mutation in M4 draft mode.
+        }
         saveScenarioTimer.restart()
         pendingApply = true
         scenarioRevision += 1
@@ -285,7 +295,7 @@ ApplicationWindow {
         // closes immediately after editing. Flush the local draft once, while
         // ListModels and Settings remain alive; no device command is sent.
         saveScenarioTimer.stop()
-        if (!root.restoringScenario)
+        if (!root.restoringScenario && !m4Pages.active)
             scenarioSettings.lastScenario = JSON.stringify(root.scenarioSnapshot())
         // C++ owns process termination and bounded worker retirement. Do not
         // race it with a second QML quit path.
@@ -306,7 +316,91 @@ ApplicationWindow {
     property double lastNotifiedSvStopIncident: 0
 
     SclProfileModel { id: sclProfiles }
+    M4StreamScenarioModel { id: m4Pages }
     DeviceController { id: device }
+    property var m4LegacyDraft: null
+
+    // One set of native editors and preview canvases. The page model stores
+    // independent per-IED drafts; no parallel QML waveform/phasor engines.
+    function restoreM4Draft(draft) {
+        if (!draft || !draft.current || !draft.voltage ||
+            draft.current.length !== 4 || draft.voltage.length !== 4) return false
+        restoringScenario = true
+        const groups = [draft.current, draft.voltage]
+        const models = [currentModel, voltageModel]
+        for (var g = 0; g < 2; ++g) {
+            for (var row = 0; row < 4; ++row) {
+                const ch = groups[g][row]
+                models[g].setProperty(row, "magnitude", ch[0])
+                models[g].setProperty(row, "phase", ch[1])
+                models[g].setProperty(row, "enabled", ch[2])
+                models[g].setProperty(row, "quality", ch[3])
+            }
+        }
+        signalFrequency = draft.hz
+        previousAcFrequency = draft.hz > 0 ? draft.hz : 50
+        frequencyField.text = signalFrequency.toFixed(3)
+        frequencyField.frequencyDirty = false
+        frequencyField.invalidInput = false
+        phaseLink = draft.linked === true
+        if (draft.ct) {
+            ctSaturationEnabled = draft.ct.enabled
+            ctDcOffsetPercent = draft.ct.dc
+            ctHarmonicPercent = draft.ct.harmonic
+            ctHarmonicOrder = draft.ct.order
+            ctClipPercent = draft.ct.clip
+        }
+        selectSignal(activeGroup, activeRow)
+        refreshPreview()
+        restoringScenario = false
+        return true
+    }
+    function m4OpenDraft() {
+        if (!sclProfiles.m4DraftSupported || m4Pages.active || device.running ||
+            device.scenarioApplying || workflowBar.startQueued) {
+            showMessage("M4 draft requires a qualified 3-SV SCD and stopped board.", true)
+            return
+        }
+        if (!root.commitFrequencyEditor() ||
+            !currentMatrix.flushPendingEdits() || !voltageMatrix.flushPendingEdits()) return
+        const before = startScenarioSnapshot(false)
+        if (!before || !m4Pages.openThree(sclProfiles.m4RosterRows(), before)) {
+            showMessage("M4 stream identities invalid: cannot open three pages.", true)
+            return
+        }
+        m4LegacyDraft = before
+        // Flush the legacy experiment once before the MU editor becomes active.
+        saveScenarioTimer.stop()
+        scenarioSettings.lastScenario = JSON.stringify(root.scenarioSnapshot())
+        autoLiveApplyTimer.stop()
+        autoLiveQueuedRevision = -1
+        showMessage("Three MU draft pages ready. Device deploy is not enabled yet.", false)
+    }
+    function m4SelectPage(slot) {
+        if (!m4Pages.active || slot === m4Pages.selectedSlot) return
+        // A tab click need not blur the focused NumericField; commit first.
+        if (!root.commitFrequencyEditor() ||
+            !currentMatrix.flushPendingEdits() || !voltageMatrix.flushPendingEdits()) return
+        const next = m4Pages.select(slot, startScenarioSnapshot(false))
+        if (!next || !restoreM4Draft(next))
+            showMessage("MU switch rejected: incomplete scenario.", true)
+    }
+    function m4CloseDraft() {
+        if (!m4Pages.active) return
+        // Never let the pending legacy save timer persist the outgoing MU.
+        saveScenarioTimer.stop()
+        const previous = m4LegacyDraft
+        m4Pages.clear()
+        m4LegacyDraft = null
+        if (previous) restoreM4Draft(previous)
+        showMessage("M4 draft pages closed. Legacy 4I+4V editor restored.", false)
+    }
+    Connections {
+        target: sclProfiles
+        function onSourceChanged() {
+            if (m4Pages.active) root.m4CloseDraft()
+        }
+    }
 
     Connections {
         target: device
@@ -665,6 +759,7 @@ ApplicationWindow {
     }
 
     function sendSignal(group, row) {
+        if (m4Pages.active) return false
         if (!workflowBar.session || !workflowBar.session.liveControlReady) return true
         var signal = groupModel(group).get(row)
         return workflowBar.session.requestSetSignal(
@@ -715,6 +810,10 @@ ApplicationWindow {
     }
 
     function applyAllSignals() {
+        if (m4Pages.active) {
+            showMessage("M4 pages are offline drafts until three-stream deploy/readback is available.", true)
+            return false
+        }
         if (workflowBar.injectionRunning) return applyLiveScenario()
         if (!workflowBar.session || !workflowBar.session.liveControlReady) return false
         var ok = workflowBar.session.requestSetFrequency(signalFrequency)
@@ -758,6 +857,7 @@ ApplicationWindow {
     }
 
     function applyLiveScenario() {
+        if (m4Pages.active) return false
         if (!workflowBar.injectionRunning || !workflowBar.session ||
             !workflowBar.session.liveControlReady || device.scenarioApplying) return false
         // Live must transmit committed model values only. A second text cell
@@ -826,7 +926,7 @@ ApplicationWindow {
         ctSaturationEnabled = enabled
         refreshPreview()
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
+        if (!m4Pages.active && workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
             workflowBar.session.requestSetCtSaturation(enabled, ctDcOffsetPercent,
                                                        ctHarmonicPercent, ctHarmonicOrder, ctClipPercent)
         showMessage(enabled
@@ -897,7 +997,7 @@ ApplicationWindow {
         selectSignal(activeGroup, activeRow)
         refreshPreview()
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply) applyAllSignals()
+        if (!m4Pages.active && workflowBar.session && workflowBar.session.liveControlReady && !pendingApply) applyAllSignals()
     }
 
     function zeroAll() {
@@ -908,7 +1008,7 @@ ApplicationWindow {
         selectSignal(activeGroup, activeRow)
         refreshPreview()
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
+        if (!m4Pages.active && workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
             workflowBar.session.requestZero()
     }
 
@@ -917,7 +1017,7 @@ ApplicationWindow {
         groupModel(activeGroup).setProperty(activeRow, "quality", unsignedValue)
         activeQuality = unsignedValue
         markScenarioDirty()
-        if (workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
+        if (!m4Pages.active && workflowBar.session && workflowBar.session.liveControlReady && !pendingApply)
             workflowBar.session.requestSetQuality(activeSignal, unsignedValue)
     }
 
@@ -1227,9 +1327,61 @@ ApplicationWindow {
             controller: root
             device: device
             profiles: sclProfiles
+            m4DraftOnly: m4Pages.active
             uiFont: root.uiFont
             monoFont: root.monoFont
             compact: root.compactLayout
+        }
+
+        RowLayout {
+            id: m4PaginationStrip
+            visible: sclProfiles.m4DraftSupported || m4Pages.active
+            Layout.fillWidth: true
+            Layout.preferredHeight: visible ? 31 : 0
+            spacing: 5
+            Label {
+                text: "M4 · 3 SV"
+                color: studioTheme.muted
+                font.family: root.uiFont
+                font.pixelSize: 10
+            }
+            Repeater {
+                model: m4Pages.active ? 3 : 0
+                delegate: Rectangle {
+                    required property int index
+                    implicitWidth: 114
+                    implicitHeight: 26
+                    radius: 5
+                    color: m4Pages.selectedSlot === index ? studioTheme.accentSoft : studioTheme.surface2
+                    border.width: 1
+                    border.color: m4Pages.selectedSlot === index ? studioTheme.accent : studioTheme.lineSoft
+                    Label {
+                        anchors.centerIn: parent
+                        text: "MU " + (index + 1)
+                        font.family: root.uiFont
+                        font.pixelSize: 10
+                        color: studioTheme.text
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: root.m4SelectPage(index)
+                    }
+                }
+            }
+            Item { Layout.fillWidth: true }
+            Label {
+                visible: m4Pages.active
+                text: "DRAFT ONLY · NOT DEPLOYED"
+                color: studioTheme.amber
+                font.family: root.uiFont
+                font.pixelSize: 9
+            }
+            Button {
+                text: m4Pages.active ? "Close MU pages" : "Open MU pages"
+                font.family: root.uiFont
+                font.pixelSize: 10
+                onClicked: m4Pages.active ? root.m4CloseDraft() : root.m4OpenDraft()
+            }
         }
 
         SplitView {

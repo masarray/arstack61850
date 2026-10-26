@@ -12,6 +12,7 @@ SurfacePanel {
     property var controller
     property var device
     property var profiles
+    property bool m4DraftOnly: false
     property string uiFont: "Inter"
     property string monoFont: "Inter"
     property bool compact: false
@@ -46,6 +47,7 @@ SurfacePanel {
         startIntentExpiry.stop()
     }
     function queueFirstStart() {
+        if (ribbon.m4DraftOnly) return false
         // Only a verified, physically connected board may receive deferred
         // START. Never arm for offline, firmware update or reconnect.
         if (!device.deviceVerified || !device.connected ||
@@ -338,6 +340,10 @@ SurfacePanel {
     }
 
     function requestStart() {
+        if (ribbon.m4DraftOnly) {
+            controller.showMessage("M4 draft pages are not deployed. START blocked until MULTISV deploy/readback is implemented.", true)
+            return
+        }
         if (ribbon.injectionRunning || ribbon.startQueued) return
         if (smartSession.firmwareInstallRequired) {
             ribbon.installPromptDeferred = false
