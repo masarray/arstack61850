@@ -188,6 +188,10 @@ void verify_independent_stream_tx_gate() {
     CHECK(gate.snapshot_mask() == 0x03U);
     CHECK(!gate.set_enabled(3U, true));
     CHECK(gate.snapshot_mask() == 0x03U);
+    // Begin the timeline fixture with all three MUs enabled. The preceding
+    // mask-toggling assertions intentionally left MU3 disabled.
+    gate.reset_all();
+    CHECK(gate.snapshot_mask() == 0x07U);
 
     // Independent electrical phase accumulation continues while packets
     // for one MU are suppressed; shared smpCnt is NEVER restarted.
