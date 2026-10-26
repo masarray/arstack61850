@@ -176,12 +176,57 @@ void verify_three_isolated_complete_scenario_transactions() {
     std::cout << "PASS M4 P0D3: isolated transaction, checksum, stale generation, readback\n";
 }
 
+
+void verify_independent_stream_tx_gate() {
+    M4ThreeSvStreamGate gate{};
+    CHECK(gate.snapshot_mask() == 0x07U);
+    CHECK(gate.set_enabled(1U, false));
+    CHECK(gate.snapshot_mask() == 0x05U);
+    CHECK(gate.set_enabled(2U, false));
+    CHECK(gate.snapshot_mask() == 0x01U);
+    CHECK(gate.set_enabled(1U, true));
+    CHECK(gate.snapshot_mask() == 0x03U);
+    CHECK(!gate.set_enabled(3U, true));
+    CHECK(gate.snapshot_mask() == 0x03U);
+
+    // Independent electrical phase accumulation continues while packets
+    // for one MU are suppressed; shared smpCnt is NEVER restarted.
+    std::array<SvFixedPointSineEngine, 3> engines{};
+    M4ThreeSvSignalBanks banks{};
+    std::array<std::uint32_t, 3> sent{};
+    std::array<std::uint16_t, 3> last_sample{};
+    for (std::uint32_t tick = 0U; tick < 4050U; ++tick) {
+        if (tick == 10U) CHECK(gate.set_enabled(1U, false));
+        if (tick == 4020U) CHECK(gate.set_enabled(1U, true));
+        const auto mask = gate.snapshot_mask();
+        const auto shared_cnt = static_cast<std::uint16_t>(tick % 4000U);
+        for (std::size_t slot = 0U; slot < 3U; ++slot) {
+            SvLiveSignalState state{};
+            CHECK(banks.snapshot(slot, state));
+            static_cast<void>(engines[slot].next(state, 4000U));
+            if ((mask & (1U << slot)) == 0U) continue;
+            last_sample[slot] = shared_cnt;
+            ++sent[slot];
+        }
+    }
+    CHECK(sent[0] == 4050U && sent[2] == 4050U);
+    CHECK(sent[1] == 40U);  // ticks 0-9 + ticks 4020-4049
+    CHECK(last_sample[0] == 49U && last_sample[1] == 49U &&
+          last_sample[2] == 49U);
+    CHECK(engines[0].phase_accumulator() == engines[1].phase_accumulator());
+    CHECK(engines[1].phase_accumulator() == engines[2].phase_accumulator());
+    gate.reset_all();
+    CHECK(gate.snapshot_mask() == 0x07U);
+    std::cout << "PASS M4 P0D3: per-MU TX gates rejoin shared sampling grid\n";
+}
+
 } // namespace
 
 int main() {
     try {
         verify_three_atomic_isolated_setpoint_banks();
         verify_three_isolated_complete_scenario_transactions();
+        verify_independent_stream_tx_gate();
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

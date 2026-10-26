@@ -32,6 +32,8 @@ ar::iec61850::sampled_values::M4ThreeSvSignalBanks g_mu_signals{};
 // Each slot independently stages a complete scenario. One UART writer; no
 // transactional parsing or allocation in the 4-kHz data-plane.
 std::array<ar::iec61850::sampled_values::SvScenarioTransaction, 3> g_mu_transactions{};
+// Toggled only by UART control; publisher takes one atomic mask per grid tick.
+ar::iec61850::sampled_values::M4ThreeSvStreamGate g_mu_stream_gate{};
 // Selection changes only in STOPPED control-plane commands; the active
 // publisher reads the immutable committed roster once at START.
 std::atomic<bool> g_multi_tx_selected{false};
@@ -318,6 +320,10 @@ void handle_svstream_cfg(const std::size_t slot, char* save) noexcept {
     ESP_LOGI(kTag, "SVSTREAM CFG STAGED slot=%u verb=%s", log_slot, verb);
 }
 
+std::uint8_t multi_profile_enabled_mask() noexcept {
+    return g_mu_stream_gate.snapshot_mask();
+}
+
 void handle_svstream_command(char* arguments) noexcept {
     char* save = nullptr;
     const char* slot_text = strtok_r(arguments, kDelimiters, &save);
@@ -336,13 +342,26 @@ void handle_svstream_command(char* arguments) noexcept {
         handle_svstream_cfg(slot, save);
         return;
     }
+    if (std::strcmp(verb, "START") == 0 || std::strcmp(verb, "STOP") == 0) {
+        if (!no_extra(&save)) {
+            ESP_LOGE(kTag, "SVSTREAM START|STOP takes no extra tokens");
+            return;
+        }
+        const bool enabled = std::strcmp(verb, "START") == 0;
+        static_cast<void>(g_mu_stream_gate.set_enabled(slot, enabled));
+        ESP_LOGI(kTag, "SVSTREAM slot=%lu enabled=%u mask=0x%02X effect=NEXT_COMMON_TICK",
+                 static_cast<unsigned long>(slot_number), enabled ? 1U : 0U,
+                 static_cast<unsigned>(multi_profile_enabled_mask()));
+        return;
+    }
     auto state = multi_profile_signal_snapshot(slot);
     if (std::strcmp(verb, "SHOW") == 0) {
         if (!no_extra(&save)) { ESP_LOGE(kTag, "SVSTREAM SHOW takes no extras"); return; }
-        ESP_LOGI(kTag, "SVSTREAM slot=%lu generation=%llu frequency_millihz=%lu",
+        ESP_LOGI(kTag, "SVSTREAM slot=%lu generation=%llu frequency_millihz=%lu tx_enabled=%u",
                  static_cast<unsigned long>(slot_number),
                  static_cast<unsigned long long>(state.generation),
-                 static_cast<unsigned long>(state.frequency_millihz));
+                 static_cast<unsigned long>(state.frequency_millihz),
+                 (multi_profile_enabled_mask() & (1U << slot)) ? 1U : 0U);
         static constexpr const char* names[] = {"IA", "IB", "IC", "IN", "UA", "UB", "UC", "UN"};
         for (std::size_t i = 0; i < state.channels.size(); ++i) {
             const auto& ch = state.channels[i];
@@ -492,8 +511,10 @@ void handle_multi_profile_command(char* arguments) noexcept {
             ESP_LOGE(kTag, "MULTISV COMMIT rejected: VALIDATE required or transaction invalid");
             return;
         }
-        // Roster identity changed: pending MU tickets belong to the old set.
+        // Roster identity changed: pending MU tickets and TX bits belong
+        // to the old set; all newly deployed MUs default to enabled.
         reset_mu_transactions();
+        g_mu_stream_gate.reset_all();
         // A new committed profile set is never auto-activated by replacing
         // the old roster. Require an explicit SELECT after each COMMIT.
         g_multi_tx_selected.store(false, std::memory_order_release);
