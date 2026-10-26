@@ -3,8 +3,10 @@
 #include "multi_profile_staging.hpp"
 #include "live_control.hpp"
 #include "ariec61850/sampled_values/m4_three_sv_signals.hpp"
+#include "ariec61850/sampled_values/live_signal_transaction.hpp"
 
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include <array>
 #include <atomic>
@@ -27,6 +29,9 @@ constexpr char kDelimiters[] = " \t\r\n";
 MultiSvConfigStore g_multi{};
 // Exactly three independent atomic waveform banks; only console task writes.
 ar::iec61850::sampled_values::M4ThreeSvSignalBanks g_mu_signals{};
+// Each slot independently stages a complete scenario. One UART writer; no
+// transactional parsing or allocation in the 4-kHz data-plane.
+std::array<ar::iec61850::sampled_values::SvScenarioTransaction, 3> g_mu_transactions{};
 // Selection changes only in STOPPED control-plane commands; the active
 // publisher reads the immutable committed roster once at START.
 std::atomic<bool> g_multi_tx_selected{false};
@@ -161,6 +166,158 @@ multi_profile_signal_snapshot(const std::size_t slot) noexcept {
     return value;
 }
 
+
+[[nodiscard]] bool parse_u64_token(const char* text, std::uint64_t& output,
+                                   const int base) noexcept {
+    if (!text || !*text || *text == '-') return false;
+    errno = 0;
+    char* end = nullptr;
+    const unsigned long long value = std::strtoull(text, &end, base);
+    if (errno || end == text || *end) return false;
+    output = static_cast<std::uint64_t>(value);
+    return true;
+}
+
+[[nodiscard]] std::uint32_t serial_now_ms() noexcept {
+    return static_cast<std::uint32_t>(
+        static_cast<std::uint64_t>(esp_timer_get_time()) / 1000ULL);
+}
+
+void reset_mu_transactions() noexcept {
+    for (auto& tx : g_mu_transactions) tx.reset();
+}
+
+// The existing V1 SvScenarioTransaction is deliberately reused per MU:
+// complete 8-channel staging, generation guard, 8s timeout, canonical
+// wire-state hash and explicit readback. Only this UART task writes a bank.
+void handle_svstream_cfg(const std::size_t slot, char* save) noexcept {
+    using Tx = ar::iec61850::sampled_values::SvScenarioTransaction;
+    auto& tx = g_mu_transactions[slot];
+    auto* bank = g_mu_signals.control_bank_for_serial_writer(slot);
+    char* verb = strtok_r(nullptr, kDelimiters, &save);
+    if (!verb || bank == nullptr) {
+        tx.reject();
+        ESP_LOGE(kTag, "SVSTREAM CFG requires BEGIN|FREQ|SET|SHAPE|COMMIT|READBACK|ABORT");
+        return;
+    }
+    upper(verb);
+    const auto now = serial_now_ms();
+    const auto log_slot = static_cast<unsigned>(slot + 1U);
+    if (std::strcmp(verb, "ABORT") == 0) {
+        if (!no_extra(&save)) { tx.reject(); return; }
+        tx.reset();
+        ESP_LOGI(kTag, "SVSTREAM CFG ABORT slot=%u", log_slot);
+        return;
+    }
+    if (std::strcmp(verb, "BEGIN") == 0) {
+        std::uint64_t token{};
+        if (!parse_u64_token(strtok_r(nullptr, kDelimiters, &save), token, 10) ||
+            !no_extra(&save) ||
+            !tx.begin(token, bank->snapshot(), now, live_tx_running())) {
+            tx.reset();
+            ESP_LOGE(kTag, "SVSTREAM CFG BEGIN rejected slot=%u", log_slot);
+            return;
+        }
+        ESP_LOGI(kTag, "SVSTREAM CFG BEGIN slot=%u token=%llu",
+                 log_slot, static_cast<unsigned long long>(token));
+        return;
+    }
+    if (std::strcmp(verb, "READBACK") == 0) {
+        std::uint64_t token{};
+        if (!parse_u64_token(strtok_r(nullptr, kDelimiters, &save), token, 10) ||
+            !no_extra(&save) || !tx.confirm_readback(*bank, token, now)) {
+            ESP_LOGE(kTag, "SVSTREAM CFG READBACK rejected slot=%u", log_slot);
+            return;
+        }
+        ESP_LOGI(kTag,
+            "SVSTREAM CFG READBACK slot=%u token=%llu hash=%016llX generation=%llu",
+            log_slot, static_cast<unsigned long long>(token),
+            static_cast<unsigned long long>(tx.checksum()),
+            static_cast<unsigned long long>(tx.applied_generation()));
+        return;
+    }
+    if (std::strcmp(verb, "COMMIT") == 0) {
+        std::uint64_t token{}, expected_hash{};
+        if (!parse_u64_token(strtok_r(nullptr, kDelimiters, &save), token, 10) ||
+            !parse_u64_token(strtok_r(nullptr, kDelimiters, &save), expected_hash, 16) ||
+            !no_extra(&save) || tx.began_running() != live_tx_running()) {
+            tx.reject();
+            ESP_LOGE(kTag, "SVSTREAM CFG COMMIT rejected slot=%u malformed or RUN state changed",
+                     log_slot);
+            return;
+        }
+        const auto result = tx.commit(*bank, token, expected_hash, now);
+        if (result != Tx::Result::accepted) {
+            ESP_LOGE(kTag, "SVSTREAM CFG REJECT slot=%u code=%u", log_slot,
+                     static_cast<unsigned>(result));
+            return;
+        }
+        ESP_LOGI(kTag,
+            "SVSTREAM CFG COMMITTED slot=%u token=%llu hash=%016llX generation=%llu",
+            log_slot, static_cast<unsigned long long>(token),
+            static_cast<unsigned long long>(tx.checksum()),
+            static_cast<unsigned long long>(tx.applied_generation()));
+        return;
+    }
+
+    if (!tx.staging() || tx.began_running() != live_tx_running()) {
+        tx.reject();
+        ESP_LOGE(kTag, "SVSTREAM CFG rejected slot=%u: BEGIN required or RUN state changed",
+                 log_slot);
+        return;
+    }
+    auto& draft = tx.draft();
+    if (std::strcmp(verb, "FREQ") == 0) {
+        std::uint32_t frequency{};
+        if (!parse_uint(strtok_r(nullptr, kDelimiters, &save), frequency) ||
+            !no_extra(&save)) { tx.reject(); return; }
+        draft.frequency_millihz = frequency;
+        tx.mark_frequency();
+    } else if (std::strcmp(verb, "SET") == 0) {
+        const int index = stream_channel(strtok_r(nullptr, kDelimiters, &save));
+        std::int32_t rms{}, phase{};
+        std::uint32_t quality{}, enabled{};
+        if (index < 0 ||
+            !parse_signed(strtok_r(nullptr, kDelimiters, &save), rms) ||
+            !parse_signed(strtok_r(nullptr, kDelimiters, &save), phase) ||
+            !parse_uint(strtok_r(nullptr, kDelimiters, &save), quality) ||
+            !parse_uint(strtok_r(nullptr, kDelimiters, &save), enabled) ||
+            enabled > 1U || !no_extra(&save)) { tx.reject(); return; }
+        auto& ch = draft.channels[static_cast<std::size_t>(index)];
+        ch.rms_counts = rms;
+        ch.phase_millidegrees = phase;
+        ch.quality = quality;
+        ch.enabled = enabled != 0U;
+        tx.mark_set(static_cast<std::size_t>(index));
+        tx.mark_enabled(static_cast<std::size_t>(index));
+    } else if (std::strcmp(verb, "SHAPE") == 0) {
+        std::uint32_t enabled{}, harmonic{}, order{}, clip{};
+        std::int32_t dc{};
+        if (!parse_uint(strtok_r(nullptr, kDelimiters, &save), enabled) ||
+            enabled > 1U ||
+            !parse_signed(strtok_r(nullptr, kDelimiters, &save), dc) ||
+            !parse_uint(strtok_r(nullptr, kDelimiters, &save), harmonic) ||
+            !parse_uint(strtok_r(nullptr, kDelimiters, &save), order) ||
+            !parse_uint(strtok_r(nullptr, kDelimiters, &save), clip) ||
+            order > 255U || !no_extra(&save)) { tx.reject(); return; }
+        draft.current_shape = {enabled != 0U, dc, harmonic,
+                               static_cast<std::uint8_t>(order), clip};
+        tx.mark_shape();
+    } else {
+        tx.reject();
+        ESP_LOGE(kTag, "SVSTREAM CFG invalid command slot=%u", log_slot);
+        return;
+    }
+    // Even before COMMIT, reject an invalid individual field without exposing
+    // this draft to the publisher; full validation repeats on COMMIT.
+    if (!ar::iec61850::sampled_values::SvLiveSignalBank::validate(draft)) {
+        tx.reject();
+        ESP_LOGE(kTag, "SVSTREAM CFG invalid staged value slot=%u", log_slot);
+        return;
+    }
+    ESP_LOGI(kTag, "SVSTREAM CFG STAGED slot=%u verb=%s", log_slot, verb);
+}
+
 void handle_svstream_command(char* arguments) noexcept {
     char* save = nullptr;
     const char* slot_text = strtok_r(arguments, kDelimiters, &save);
@@ -175,6 +332,10 @@ void handle_svstream_command(char* arguments) noexcept {
     char* verb = strtok_r(nullptr, kDelimiters, &save);
     if (!verb) { ESP_LOGE(kTag, "SVSTREAM usage: <1..3> SHOW|SET|FREQ"); return; }
     upper(verb);
+    if (std::strcmp(verb, "CFG") == 0) {
+        handle_svstream_cfg(slot, save);
+        return;
+    }
     auto state = multi_profile_signal_snapshot(slot);
     if (std::strcmp(verb, "SHOW") == 0) {
         if (!no_extra(&save)) { ESP_LOGE(kTag, "SVSTREAM SHOW takes no extras"); return; }
@@ -259,6 +420,7 @@ void handle_multi_profile_command(char* arguments) noexcept {
             return;
         }
         const bool selected = !std::strcmp(command, "SELECT");
+        reset_mu_transactions();
         g_multi_tx_selected.store(selected, std::memory_order_release);
         ESP_LOGI(kTag, "MULTISV TXMODE selected=%u; next verified START uses %s",
                  selected ? 1U : 0U, selected ? "THREE_SV" : "LEGACY_ONE_SV");
@@ -330,11 +492,13 @@ void handle_multi_profile_command(char* arguments) noexcept {
             ESP_LOGE(kTag, "MULTISV COMMIT rejected: VALIDATE required or transaction invalid");
             return;
         }
+        // Roster identity changed: pending MU tickets belong to the old set.
+        reset_mu_transactions();
         // A new committed profile set is never auto-activated by replacing
         // the old roster. Require an explicit SELECT after each COMMIT.
         g_multi_tx_selected.store(false, std::memory_order_release);
         ESP_LOGI(kTag,
-            "MULTISV COMMITTED transaction=%lu generation=%llu hash=%016llX bytes=%lu output=INACTIVE_UNTIL_M4_P0C2",
+            "MULTISV COMMITTED transaction=%lu generation=%llu hash=%016llX bytes=%lu output=CONFIG_COMMITTED_TX_REQUIRES_SELECT_AND_VERIFIED_START",
             static_cast<unsigned long>(txn),
             static_cast<unsigned long long>(g_multi.generation()),
             static_cast<unsigned long long>(g_multi.committed_hash()),

@@ -42,6 +42,14 @@ public:
         return banks_[slot].snapshot().generation;
     }
 
+    // Control-plane only: the one serialized UART writer may use the existing
+    // SvScenarioTransaction against a specific bank. Never call this on the
+    // publisher task, which only uses snapshot(slot, output).
+    [[nodiscard]] SvLiveSignalBank* control_bank_for_serial_writer(
+        const std::size_t slot) noexcept {
+        return slot < banks_.size() ? &banks_[slot] : nullptr;
+    }
+
 private:
     std::array<SvLiveSignalBank, capacity> banks_{};
 };

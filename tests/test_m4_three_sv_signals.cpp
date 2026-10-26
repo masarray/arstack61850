@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ariec61850/sampled_values/m4_three_sv_signals.hpp"
+#include "ariec61850/sampled_values/live_signal_transaction.hpp"
 
 #include <array>
 #include <cstddef>
@@ -88,11 +89,99 @@ void verify_three_atomic_isolated_setpoint_banks() {
     std::cout << "PASS M4 P0D1: three independent 4I4V setpoints, "
                  "quality, phase, generation and GUI page switching\n";
 }
+
+void verify_three_isolated_complete_scenario_transactions() {
+    M4ThreeSvSignalBanks banks;
+    std::array<SvScenarioTransaction, 3> tx{};
+    constexpr std::uint32_t now = 100U;
+    SvLiveSignalState before[3]{};
+    for (std::size_t slot = 0U; slot < 3U; ++slot) {
+        CHECK(banks.snapshot(slot, before[slot]));
+        CHECK(banks.control_bank_for_serial_writer(slot) != nullptr);
+        CHECK(tx[slot].begin(100U + slot, before[slot], now, true));
+        auto& state = tx[slot].draft();
+        state.frequency_millihz = 0U;
+        tx[slot].mark_frequency();
+        state.current_shape = {false, 0, 0, 2, 1000};
+        tx[slot].mark_shape();
+        for (std::size_t channel = 0U; channel < 8U; ++channel) {
+            state.channels[channel].rms_counts =
+                static_cast<std::int32_t>(1000U + 500U * slot + channel);
+            state.channels[channel].phase_millidegrees =
+                static_cast<std::int32_t>(3000U * slot);
+            state.channels[channel].quality = static_cast<std::uint32_t>(slot);
+            state.channels[channel].enabled = channel != 7U;
+            tx[slot].mark_set(channel);
+            tx[slot].mark_enabled(channel);
+        }
+    }
+    // Staging even three simultaneous transactions must not change any bank.
+    for (std::size_t slot = 0U; slot < 3U; ++slot) {
+        SvLiveSignalState current{};
+        CHECK(banks.snapshot(slot, current));
+        CHECK(current == before[slot]);
+    }
+    auto* mu2 = banks.control_bank_for_serial_writer(1U);
+    CHECK(mu2 != nullptr);
+    const auto mu2_hash = sv_scenario_hash(tx[1].draft());
+    CHECK(tx[1].commit(*mu2, 101U, mu2_hash, now + 1U) ==
+          SvScenarioTransaction::Result::accepted);
+    CHECK(tx[1].confirm_readback(*mu2, 101U, now + 2U));
+    CHECK(tx[1].readback_matches(*mu2, 101U, now + 2U));
+    CHECK(banks.generation(1U) == 1U);
+    CHECK(banks.generation(0U) == 0U && banks.generation(2U) == 0U);
+    SvLiveSignalState applied{};
+    CHECK(banks.snapshot(1U, applied));
+    CHECK(applied.channels[0].rms_counts == 1500);
+    CHECK(applied.channels[0].quality == 1U);
+    CHECK(!tx[1].can_start(*mu2, 101U, mu2_hash, now + 2U));
+
+    // A bad hash cannot partially update MU1 (nor touch the other MUs).
+    auto* mu1 = banks.control_bank_for_serial_writer(0U);
+    CHECK(mu1 != nullptr);
+    CHECK(tx[0].commit(*mu1, 100U, sv_scenario_hash(tx[0].draft()) ^ 1U, now + 1U) ==
+          SvScenarioTransaction::Result::checksum);
+    CHECK(banks.generation(0U) == 0U && banks.generation(1U) == 1U);
+
+    // A stale MU3 draft must not overwrite a subsequent independent edit.
+    auto* mu3 = banks.control_bank_for_serial_writer(2U);
+    CHECK(mu3 != nullptr);
+    auto edited = mu3->snapshot();
+    edited.channels[1].quality = 0xABCDU;
+    CHECK(mu3->publish(edited));
+    CHECK(tx[2].commit(*mu3, 102U, sv_scenario_hash(tx[2].draft()), now + 1U) ==
+          SvScenarioTransaction::Result::stale_generation);
+    CHECK(banks.generation(2U) == 1U);
+    CHECK(banks.generation(1U) == 1U);
+
+    // A fresh full MU1 transaction is committed while the common grid can
+    // keep publishing MU2 and MU3 without resetting either bank.
+    CHECK(tx[0].begin(200U, mu1->snapshot(), now + 3U, true));
+    auto& fresh = tx[0].draft();
+    fresh.frequency_millihz = 60000U;
+    tx[0].mark_frequency();
+    tx[0].mark_shape();
+    for (std::size_t ch = 0U; ch < 8U; ++ch) {
+        fresh.channels[ch].quality = static_cast<std::uint32_t>(ch + 10U);
+        tx[0].mark_set(ch);
+        tx[0].mark_enabled(ch);
+    }
+    const auto fresh_hash = sv_scenario_hash(fresh);
+    CHECK(tx[0].commit(*mu1, 200U, fresh_hash, now + 4U) ==
+          SvScenarioTransaction::Result::accepted);
+    CHECK(tx[0].confirm_readback(*mu1, 200U, now + 5U));
+    CHECK(banks.generation(0U) == 1U);
+    CHECK(banks.generation(1U) == 1U && banks.generation(2U) == 1U);
+    CHECK(banks.control_bank_for_serial_writer(3U) == nullptr);
+    std::cout << "PASS M4 P0D3: isolated transaction, checksum, stale generation, readback\n";
+}
+
 } // namespace
 
 int main() {
     try {
         verify_three_atomic_isolated_setpoint_banks();
+        verify_three_isolated_complete_scenario_transactions();
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
