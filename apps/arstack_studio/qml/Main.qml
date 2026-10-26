@@ -35,7 +35,10 @@ ApplicationWindow {
     Timer {
         id: saveScenarioTimer
         interval: 400
-        onTriggered: scenarioSettings.lastScenario = JSON.stringify(root.scenarioSnapshot())
+        onTriggered: {
+            if (!m4Pages.active && !root.restoringScenario)
+                scenarioSettings.lastScenario = JSON.stringify(root.scenarioSnapshot())
+        }
     }
     function adoptRunningBoardScenario(snapshot) {
         if (m4Pages.active) return // M4 drafts are never V1 board readback.
@@ -292,7 +295,7 @@ ApplicationWindow {
         // closes immediately after editing. Flush the local draft once, while
         // ListModels and Settings remain alive; no device command is sent.
         saveScenarioTimer.stop()
-        if (!root.restoringScenario)
+        if (!root.restoringScenario && !m4Pages.active)
             scenarioSettings.lastScenario = JSON.stringify(root.scenarioSnapshot())
         // C++ owns process termination and bounded worker retirement. Do not
         // race it with a second QML quit path.
@@ -337,6 +340,8 @@ ApplicationWindow {
         signalFrequency = draft.hz
         previousAcFrequency = draft.hz > 0 ? draft.hz : 50
         frequencyField.text = signalFrequency.toFixed(3)
+        frequencyField.frequencyDirty = false
+        frequencyField.invalidInput = false
         phaseLink = draft.linked === true
         if (draft.ct) {
             ctSaturationEnabled = draft.ct.enabled
@@ -356,26 +361,34 @@ ApplicationWindow {
             showMessage("M4 draft requires a qualified 3-SV SCD and stopped board.", true)
             return
         }
-        if (!currentMatrix.flushPendingEdits() || !voltageMatrix.flushPendingEdits()) return
+        if (!root.commitFrequencyEditor() ||
+            !currentMatrix.flushPendingEdits() || !voltageMatrix.flushPendingEdits()) return
         const before = startScenarioSnapshot(false)
         if (!before || !m4Pages.openThree(sclProfiles.m4RosterRows(), before)) {
             showMessage("M4 stream identities invalid: cannot open three pages.", true)
             return
         }
         m4LegacyDraft = before
+        // Flush the legacy experiment once before the MU editor becomes active.
+        saveScenarioTimer.stop()
+        scenarioSettings.lastScenario = JSON.stringify(root.scenarioSnapshot())
         autoLiveApplyTimer.stop()
         autoLiveQueuedRevision = -1
         showMessage("Three MU draft pages ready. Device deploy is not enabled yet.", false)
     }
     function m4SelectPage(slot) {
         if (!m4Pages.active || slot === m4Pages.selectedSlot) return
-        if (!currentMatrix.flushPendingEdits() || !voltageMatrix.flushPendingEdits()) return
+        // A tab click need not blur the focused NumericField; commit first.
+        if (!root.commitFrequencyEditor() ||
+            !currentMatrix.flushPendingEdits() || !voltageMatrix.flushPendingEdits()) return
         const next = m4Pages.select(slot, startScenarioSnapshot(false))
         if (!next || !restoreM4Draft(next))
             showMessage("MU switch rejected: incomplete scenario.", true)
     }
     function m4CloseDraft() {
         if (!m4Pages.active) return
+        // Never let the pending legacy save timer persist the outgoing MU.
+        saveScenarioTimer.stop()
         const previous = m4LegacyDraft
         m4Pages.clear()
         m4LegacyDraft = null
