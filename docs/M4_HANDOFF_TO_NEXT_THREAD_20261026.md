@@ -6,7 +6,27 @@
 **Tracking:** https://github.com/masarray/arstack61850/issues/333  
 **Engineering architecture:** [ARD M4](ARD_M4_THREE_SV_SCL_SHARED_PTP_STUDIO.md)  
 **Latest official stable release:** `processbus-sim-m3h3-20261025` (**do not overwrite released assets**)  
-**Main HEAD at 2026-10-26 P0E2A checkpoint:** `310be156e5e71a496ae65639d8374d075235de06`. Always verify HEAD again.
+**Latest known M4 merge HEAD:** `be54592af7be086f1d883d4d0db9fe1af3807224`. Reverify before modifying.
+
+## LATEST MERGED M4 CHECKPOINT — 2026-10-26 (authoritative)
+
+**Main HEAD checked:** `be54592af7be086f1d883d4d0db9fe1af3807224`. The following are **fully merged** to `main`, not pending PRs:
+
+- **P0D2 #341 / P0D3 #342:** firmware isolated per-MU signal banks, bounded atomic scenario transactions, independent stream TX gates on one common PTP/GPTimer/publisher. Hardware acceptance still pending.
+- **P0E1 [#343](https://github.com/masarray/arstack61850/pull/343):** one native Studio Qt/QML GUI with isolated MU1/MU2/MU3 draft-page Table, Waveform, Phasor state. Legacy autosave and unsaved frequency-tab switching bugs fixed. Merged `6de01f3ccf6bde396c0c48a85ceec6d465cc6c9f`.
+- **P0E2A [#344](https://github.com/masarray/arstack61850/pull/344):** real Studio `SclProfileModel` compiles three SCD-backed exact 4I4V/4000Hz selected 9-2LE device profiles into one bounded CRC-checked `ARM3 V2` envelope with firmware-identical full-envelope hash. Preserves three genuine MAC/svID/APPID/VLAN identities and MU2 VLAN override isolation; invalidation on changed/invalid source. Merged `310be156e5e71a496ae65639d8374d075235de06`.
+- **P0E2B [#345](https://github.com/masarray/arstack61850/pull/345):** production-compiled Qt host ACK-driven `M4MultiSvUploadTransaction`, one command at a time through `MULTISV STATUS/ABORT/BEGIN/48B CHUNK/VALIDATE/COMMIT/SHOW/SELECT`. Rejects mismatched transaction IDs/offsets/CRC/board boot, checks full envelope committed hash, size, generation and **all 3 MU authoritative SHOW identities before SELECT**. Native Linux/Windows Qt harnesses, matched Windows preview/installer, ESP32-P4 firmware CI all passed. One release-publish job intentionally skipped. Codex P1 harness bug fixed and review resolved. **Merged `be54592af7be086f1d883d4d0db9fe1af3807224`**.
+
+**CRITICAL CURRENT LIMITATION:** P0E2B transaction state machine is linked in the production Studio build but is **not yet wired into actual `DeviceController` / the single existing `DeviceIoWorker`**. It has no real UART runtime/ACK deadline/reconnect flow yet. Studio M4 GUI stays **DRAFT ONLY** and its legacy V1 START path remains blocked. Do not claim successful M4 GUI deploy/START from #345, or physical 12,000fps/PTP capture from CI.
+
+**NEXT CODE PRIORITIES:**
+1. **P0E2C:** wire the proven transaction engine to one serial owner, with explicit device capability guard, `STOPPED` guard, ACK timeout, session/boot generation, cancellation on disconnect/operator STOP, serialized command ownership and full 3-SV readback before enabling any M4 START. Integrate proper Studio deploy action; verify START does **not** deselect M4 roster or mutate legacy V1 state. Add real deterministic session/worker regression to CI.
+2. **P0E3:** per-MU live scenario UI transactions `SVSTREAM <slot> CFG` and complete bank readback; reconnect must adopt running firmware state instead of overwriting it. Preserve one shared PTP epoch/smpCnt, 3 independent banks.
+3. **P0F:** paired firmware+Studio engineering package and **physical** independent Wireshark/NIC capture proving 3×4,000fps, authentic MAC/APPID/svID/VLAN, same PTP epoch/counter, measured egress skew, missed/drops/overrun. Do NOT invent physical evidence.
+
+**Do not restart P0D2/D3/P0E1/P0E2A/B; all were merged. Do not modify M3.H.3 Official Stable assets.** Always recheck latest `main` and open PRs before code changes.
+
+---
 
 ## LIVE 2026-10-26 checkpoint — supersedes older P0E status below
 
