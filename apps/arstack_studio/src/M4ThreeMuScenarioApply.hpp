@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include "ariec61850/sampled_values/live_signal_state.hpp"
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
