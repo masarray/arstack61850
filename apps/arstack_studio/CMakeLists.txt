@@ -22,6 +22,8 @@ set(ARSTACK_STUDIO_CORE_SOURCES
     src/SclProfileModel.hpp
     src/M4StreamScenarioModel.cpp
     src/M4StreamScenarioModel.hpp
+    src/M4MultiSvUploadTransaction.cpp
+    src/M4MultiSvUploadTransaction.hpp
     src/DeviceIoWorker.cpp
     src/DeviceIoWorker.hpp
     src/DeviceController.cpp
@@ -237,6 +239,25 @@ target_compile_definitions(arstack_m4_compile_harness PRIVATE
     ARIEC61850_SOURCE_DIR="${CMAKE_CURRENT_LIST_DIR}/../.."
 )
 target_compile_features(arstack_m4_compile_harness PRIVATE cxx_std_20)
+
+# M4 host control-plane transaction regression (no COM hardware required).
+# Uses production SCD model + production serial transaction state machine.
+qt_add_executable(arstack_m4_upload_harness
+    src/M4MultiSvUploadHarness.cpp
+    src/M4MultiSvUploadTransaction.cpp
+    src/M4MultiSvUploadTransaction.hpp
+    src/SclProfileModel.cpp
+    src/SclProfileModel.hpp
+)
+target_link_libraries(arstack_m4_upload_harness PRIVATE
+    Qt6::Core
+    ARIEC61850::core
+)
+target_compile_definitions(arstack_m4_upload_harness PRIVATE
+    ARIEC61850_SOURCE_DIR="${CMAKE_CURRENT_LIST_DIR}/../.."
+)
+target_compile_features(arstack_m4_upload_harness PRIVATE cxx_std_20)
+
 
 
 # Opt-in Windows engineering preview identity; OFF for all stable builds.
