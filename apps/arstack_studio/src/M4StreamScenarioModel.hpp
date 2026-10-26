@@ -7,7 +7,7 @@
 
 // Presentation-only independent MU drafts, never the firmware source of truth.
 // An explicitly opened SCD roster owns 3 IED-qualified immutable identities.
-class M4StreamScenarioModel final : public QObject {
+class M4StreamScenarioModel : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool active READ active NOTIFY changed)
     Q_PROPERTY(int selectedSlot READ selectedSlot NOTIFY changed)
