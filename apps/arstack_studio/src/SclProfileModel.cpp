@@ -330,6 +330,8 @@ void SclProfileModel::clear() {
     profileFamilies_.clear();
     vlanOverrides_.clear();
     rows_.clear();
+    m4BinaryEnvelope_.clear();
+    m4EnvelopeHash_.clear();
     selectedIndex_ = -1;
     fatalError_.clear();
     referenceTemplateActive_ = false;
