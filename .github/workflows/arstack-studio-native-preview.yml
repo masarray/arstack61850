@@ -5,6 +5,7 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'apps/arstack_studio/**'
+      - 'tests/test_m4_studio_qml_safety_contract.py'
       # Firmware-only timing fixes MUST create a matched ESP32 image and
       # Windows Inno installer; do not leave users on stale embedded firmware.
       - 'embedded/esp32p4_smv_injector/**'
@@ -44,6 +45,12 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
+
+      - name: M4 Studio QML safety contract regression
+        shell: pwsh
+        run: |
+          python tests/test_m4_studio_qml_safety_contract.py
+          if ($LASTEXITCODE -ne 0) { throw 'M4 QML safety contract failed' }
 
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
