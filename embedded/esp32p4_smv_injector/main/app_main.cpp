@@ -1673,8 +1673,15 @@ void publisher_task(void* argument) {
                     continue;
                 }
             }
-            patch_packet(
-                canonical, canonical_sample_count, sample_synchronization, row, signal_state);
+            // One mask snapshot per batch. A disabled MU still advances its
+            // DDS phase on the shared 250us grid; it simply skips Ethernet.
+            const std::uint8_t multi_enabled_mask = multi_active
+                ? ar::esp32p4::smv::multi_profile_enabled_mask() : 0x01U;
+            const bool send_primary = (multi_enabled_mask & 0x01U) != 0U;
+            if (send_primary) {
+                patch_packet(
+                    canonical, canonical_sample_count, sample_synchronization, row, signal_state);
+            }
             // One timestamp BEFORE all three canonical EMAC submissions.
             // Budget telemetry is folded into the existing 400-tick stats
             // flush, never logged or malloc'ed on the real-time path.
@@ -1692,7 +1699,7 @@ void publisher_task(void* argument) {
             SvPtpClockLease evidence_lease{};
             std::uint32_t evidence_session = 0U;
             std::uint32_t fault_generation_before = 0U;
-            if (epoch_armed && g_sample_clock_context.phase_enabled &&
+            if (send_primary && epoch_armed && g_sample_clock_context.phase_enabled &&
                 canonical_sample_count == 0U && missed_slots == 0U &&
                 active_profile.sample_counter_modulus ==
                     active_profile.publisher_rate_hz) {
@@ -1730,7 +1737,8 @@ void publisher_task(void* argument) {
             eth_mac_time_t egress_hw_time{};
             const std::int64_t submit_before_us =
                 take_egress_timestamp ? esp_timer_get_time() : 0;
-            const esp_err_t canonical_result = take_egress_timestamp
+            const esp_err_t canonical_result = !send_primary ? ESP_OK :
+                take_egress_timestamp
                 ? esp_eth_transmit_ctrl_vargs(
                     eth_handle, &egress_hw_time, 2U, canonical.bytes.data(),
                     static_cast<std::uint32_t>(canonical.bytes.size()))
@@ -1811,9 +1819,11 @@ void publisher_task(void* argument) {
                 }
             }
 #else
-            const esp_err_t canonical_result =
-                esp_eth_transmit(eth_handle, canonical.bytes.data(), canonical.bytes.size());
+            const esp_err_t canonical_result = send_primary
+                ? esp_eth_transmit(eth_handle, canonical.bytes.data(), canonical.bytes.size())
+                : ESP_OK;
 #endif
+            if (send_primary) {
             if (canonical_result == ESP_OK) {
                 ++local.canonical_ok;
                 if (consecutive_canonical_tx_failures != 0U)
@@ -1840,6 +1850,8 @@ void publisher_task(void* argument) {
 #endif
             }
 
+            } // primary-MU enable gate
+
             // M4: exactly two additional canonical SV frames from the same
             // hardware-timed tick. Each has independent prebuilt packet bytes
             // and DDS state. The three frames share smpCnt/smpSynch; egress
@@ -1849,6 +1861,9 @@ void publisher_task(void* argument) {
                 for (std::size_t slot = 0U; slot < multi_extra_packets.size(); ++slot) {
                     const auto extra_row = multi_extra_engines[slot].next(
                         multi_extra_signals[slot], 4000U);
+                    // Advance phase even when muted, so re-enabled frames
+                    // rejoin this same shared PTP sample epoch.
+                    if ((multi_enabled_mask & (1U << (slot + 1U))) == 0U) continue;
                     patch_packet(multi_extra_packets[slot], canonical_sample_count,
                                  sample_synchronization, extra_row,
                                  multi_extra_signals[slot]);
@@ -1902,7 +1917,7 @@ void publisher_task(void* argument) {
                     eth_handle, probe_multicast.data(), probe_multicast.size()));
             }
 #endif
-            if (multi_active) {
+            if (multi_active && multi_enabled_mask != 0U) {
                 const std::int64_t elapsed = esp_timer_get_time() - multi_batch_start_us;
                 const auto bounded = static_cast<std::uint32_t>(
                     std::clamp<std::int64_t>(elapsed, 0LL, 0xFFFFFFFFLL));
