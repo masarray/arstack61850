@@ -8,6 +8,17 @@
 **Latest official stable release:** `processbus-sim-m3h3-20261025` (**do not overwrite released assets**)  
 **Main HEAD at handoff inspection:** `7ee7ad39d76f8072b7940f438143049549b21bb6`.
 
+## 0. Latest verified continuation checkpoint (2026-10-26; supersedes historical sections 2–4)
+
+- **Main:** `c79bbfbc17c78641dea5e48a9b8bd981b185c31c` after **P0D2 PR #341 merged** (commit `c57e154c0e30d40df4a5fc8c97ee039556b9d828`) and **P0D3 PR #342 merged**. The latter passed **all 10** final-head GitHub workflows including firmware, Clang ASan/UBSan, native matched preview, Studio Qt and C++ GCC/Clang/MSVC.
+- **P0D3 is now CODE COMPLETE and merged**: three independent full-scenario firmware transactions reusing V1 `SvScenarioTransaction` (hash, stale-generation guard, timeout, readback), and per-MU TX gates on the **one shared** 250µs grid. See [P0D3 protocol](M4_P0D3_STREAM_SCENARIO_TRANSACTIONS.md) and [PR #342](https://github.com/masarray/arstack61850/pull/342). Physical performance **NOT** validated.
+- **P0E1 actual GUI code is in [PR #343](https://github.com/masarray/arstack61850/pull/343)**, branch `feat/m4-p0e-studio-mu-pagination-model`, **NOT merged at this checkpoint**. Adds one Studio Table/Waveform/Phasor surface with MU1/MU2/MU3 pagination, a dedicated three-slot Qt scenario draft model, SCD-classified host identities, Linux/Windows native harness regression and safe **DRAFT ONLY** state. The existing single-SV START/SET/QUALITY/CT/ZERO commands are blocked in M4 draft mode; do not claim actual M4 GUI deploy functionality yet. Recheck latest PR HEAD and CI, repair failures and merge only after checks pass.
+- **P0E2 next:** Host compile from same SCD profiles into three native `CompiledSvDeviceProfile` values, canonical `ARM3 V2` encode, serialized bounded `MULTISV BEGIN/CHUNK/VALIDATE/COMMIT/SELECT`, parse firmware readback/boot ID, use single existing `DeviceIoWorker` and only enable M4 START after device confirms all three identities. Reuse verified V1 start/stop handshake without accidentally deselecting the 3-stream roster.
+- **P0E3 next:** Per-MU Studio `SVSTREAM <slot> CFG` complete atomic setpoint transactions and readback; reconnect must first adopt firmware state rather than overwrite live values.
+- **P0F next:** Build matched ESP32-P4 firmware + Studio M4 package, then capture on physical board 3×4,000fps, same `smpCnt`/PTP reference, identities and actual peak batch timing. A CI green check alone does not establish PTP phase or Ethernet wire performance.
+
+**The older “P0D2 OPEN / P0D3 NOT DONE” text below is historical input from the initial handoff, not the current task list. Do not repeat or overwrite those completed milestones.**
+
 ## 1. Product outcome (do not redesign)
 
 ONE ESP32-P4 is a virtual three-Merging-Unit process-bus source based on the user's `01_SV_Stream_4I+4V_(9-2LE).scd`. The host **Studio** reads SCL/SCD, resolves three streams, compiles the existing supported V1 device profile for each, embeds all three in the validated `ARM3` V2 configuration and deploys it to firmware. The MCU never parses XML.
