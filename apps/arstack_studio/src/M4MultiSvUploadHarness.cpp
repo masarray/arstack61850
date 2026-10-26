@@ -27,8 +27,13 @@ QByteArray fixtureEnvelope() {
 }
 const QString kBoot = QStringLiteral("ABCDEF0123456789");
 void ack(M4MultiSvUploadTransaction& x, const QString& line) {
-    check(x.receive(line, kBoot), "firmware ACK not recognized");
-    check(x.stage() != M4MultiSvUploadTransaction::Stage::failed, "ACK failed transaction");
+    const auto before = x.stage();
+    const bool consumed = x.receive(line, kBoot);
+    if (!consumed || x.stage() == M4MultiSvUploadTransaction::Stage::failed) {
+        throw std::runtime_error{
+            QStringLiteral("ACK rejected stage=%1 line=%2 error=%3")
+                .arg(static_cast<int>(before)).arg(line, x.error()).toStdString()};
+    }
 }
 QString status(bool staging, unsigned tx, unsigned last) {
     return QStringLiteral("MULTISV STATUS staging=%1 validated=0 transaction=%2 "
