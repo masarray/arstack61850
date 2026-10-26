@@ -85,8 +85,10 @@ void happyPath(const QByteArray& image) {
         "received=0 expected=0 last=9 configured=1 generation=17 hash=%1 bytes=%2 "
         "output=OPT_IN_THREE_SV_TX_PREVIEW").arg(x.identityHash()).arg(image.size()));
     check(x.takeCommand().isEmpty(), "one STATUS alone cannot authorize SELECT");
-    ack(x, QStringLiteral("MULTISV TXMODE selected=0 configured=1 "
-        "(START uses selected roster; STOP ends TX)"));
+    // SHOW also emits an informational TXMODE line; it is NOT a SELECT ACK.
+    check(!x.receive(QStringLiteral("MULTISV TXMODE selected=0 configured=1 "
+        "(START uses selected roster; STOP ends TX)"), kBoot),
+        "informational SHOW TXMODE must not advance the transaction");
     for (unsigned slot = 1; slot <= 3; ++slot) {
         ack(x, stream(slot));
         if (slot < 3) check(x.takeCommand().isEmpty(), "all three identities required");
