@@ -3,6 +3,8 @@
 #include "SclProfileModel.hpp"
 
 #include "ariec61850/sampled_values/compiled_device_profile.hpp"
+#include "ariec61850/sampled_values/m4_three_sv_binary.hpp"
+#include "ariec61850/sampled_values/profile_identity.hpp"
 #include "ariec61850/sampled_values/esp32p4_profile_support.hpp"
 #include "ariec61850/scl/parser.hpp"
 
@@ -14,6 +16,8 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <span>
+#include <limits>
 #include <string_view>
 
 namespace {
@@ -205,20 +209,16 @@ bool SclProfileModel::hasProfiles() const noexcept { return !rows_.empty(); }
 bool SclProfileModel::referenceTemplateActive() const noexcept { return referenceTemplateActive_; }
 
 bool SclProfileModel::m4DraftSupported() const noexcept {
-    if (rows_.size() != 3U) return false;
-    for (const auto& row : rows_) {
-        if (!row.errors.isEmpty() || !row.profile.has_value() ||
-            row.compatibilityClass != QStringLiteral("A")) return false;
-        const auto& p = *row.profile;
-        if (classify_esp32p4_sv_profile(p) != Esp32P4SvProfileSupport::ready)
-            return false;
-        const auto hz = p.timing.exact_frame_rate_hz();
-        if (!hz.has_value() || *hz != 4000U ||
-            !p.sample_counter_modulus.has_value() ||
-            *p.sample_counter_modulus != 4000U ||
-            p.payload_size_bytes != 64U) return false;
-    }
-    return true;
+    // Recomputed only on engineering-source/profile changes, not GUI rendering.
+    return !m4BinaryEnvelope_.isEmpty();
+}
+
+QByteArray SclProfileModel::m4ConfigurationBinary() const {
+    return m4BinaryEnvelope_;
+}
+
+QString SclProfileModel::m4ConfigurationHash() const {
+    return m4EnvelopeHash_;
 }
 
 QVariantList SclProfileModel::m4RosterRows() const {
@@ -265,6 +265,8 @@ void SclProfileModel::installDocument(
                           : SvProfileFamily::unspecified);
     vlanOverrides_.assign(document_->sampled_values_streams.size(), std::nullopt);
     rows_.clear();
+    m4BinaryEnvelope_.clear();
+    m4EnvelopeHash_.clear();
     selectedIndex_ = -1;
     fatalError_.clear();
     referenceTemplateActive_ = referenceTemplate;
@@ -467,6 +469,69 @@ void SclProfileModel::rebuildRows() {
             row.deviceSupport = supportText(classify_esp32p4_sv_profile(profile));
         }
         rows_.push_back(std::move(row));
+    }
+
+    // Compile a bounded ARM3 envelope ONCE per changed SCD/selection.
+    // Always derive from the exact individual profiles shown in the UI, so
+    // engineer VLAN overrides and selected profile-family are not discarded.
+    // No XML reparsing, no separate MU serialization, no GUI-frame allocation.
+    m4BinaryEnvelope_.clear();
+    m4EnvelopeHash_.clear();
+    if (rows_.size() == ar::iec61850::sampled_values::m4_three_sv_capacity) {
+        using namespace ar::iec61850::sampled_values;
+        std::array<CompiledSvDeviceProfile, m4_three_sv_capacity> profiles{};
+        bool valid = true;
+        for (std::size_t i = 0; i < m4_three_sv_capacity && valid; ++i) {
+            const auto& row = rows_[i];
+            if (!row.errors.isEmpty() || !row.profile.has_value() ||
+                row.ied.isEmpty() || row.controlBlockReference.isEmpty() ||
+                row.compatibilityClass != QStringLiteral("A")) {
+                valid = false;
+                break;
+            }
+            // M4.0 is three separately addressed virtual MUs, not three
+            // controls accidentally collapsed into a single IED identity.
+            for (std::size_t j = 0; j < i; ++j) {
+                if (row.ied == rows_[j].ied) {
+                    valid = false;
+                    break;
+                }
+            }
+            const auto& p = *row.profile;
+            if (!valid || classify_esp32p4_sv_profile(p) != Esp32P4SvProfileSupport::ready ||
+                p.timing.exact_sample_rate_hz() != std::optional<std::uint32_t>{4000U} ||
+                p.timing.exact_frame_rate_hz() != std::optional<std::uint32_t>{4000U} ||
+                p.timing.asdus_per_frame != 1U ||
+                p.sample_counter_modulus != std::optional<std::uint16_t>{4000U} ||
+                !p.asdu_options.sample_synchronized ||
+                p.payload_size_bytes != 64U || p.channels.size() != 16U) {
+                valid = false;
+                break;
+            }
+            const auto device = compile_esp32p4_device_profile(p);
+            if (!device.ok()) { valid = false; break; }
+            profiles[i] = *device.profile;
+        }
+        if (valid) {
+            const auto size = M4ThreeSvBinaryCodec::encoded_size(profiles);
+            // Firmware MultiSvConfigStore max_record_bytes is under 4096.
+            if (size.has_value() && *size > M4ThreeSvBinaryCodec::header_bytes &&
+                *size < 4096U &&
+                *size <= static_cast<std::size_t>(std::numeric_limits<qsizetype>::max())) {
+                QByteArray bytes(static_cast<qsizetype>(*size), '\0');
+                auto output = std::span<std::uint8_t>{
+                    reinterpret_cast<std::uint8_t*>(bytes.data()), *size};
+                const auto encoded = M4ThreeSvBinaryCodec::encode_into(profiles, output);
+                if (encoded.success() && encoded.bytes == *size) {
+                    const auto hash = sv_binary_profile_identity_hash(
+                        std::span<const std::uint8_t>{output});
+                    m4EnvelopeHash_ = QString::number(
+                        static_cast<qulonglong>(hash), 16).rightJustified(
+                            16, QLatin1Char('0')).toUpper();
+                    m4BinaryEnvelope_ = std::move(bytes);
+                }
+            }
+        }
     }
 
     selectedIndex_ = rows_.empty()

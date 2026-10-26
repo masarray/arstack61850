@@ -5,6 +5,7 @@
 #include "ariec61850/scl/model.hpp"
 
 #include <QAbstractListModel>
+#include <QByteArray>
 #include <QUrl>
 #include <QVariantMap>
 
@@ -23,6 +24,7 @@ class SclProfileModel : public QAbstractListModel {
     Q_PROPERTY(bool hasProfiles READ hasProfiles NOTIFY sourceChanged)
     Q_PROPERTY(bool referenceTemplateActive READ referenceTemplateActive NOTIFY sourceChanged)
     Q_PROPERTY(bool m4DraftSupported READ m4DraftSupported NOTIFY sourceChanged)
+    Q_PROPERTY(QString m4ConfigurationHash READ m4ConfigurationHash NOTIFY sourceChanged)
 
 public:
     enum Roles {
@@ -58,6 +60,10 @@ public:
     [[nodiscard]] bool referenceTemplateActive() const noexcept;
     [[nodiscard]] bool m4DraftSupported() const noexcept;
     Q_INVOKABLE QVariantList m4RosterRows() const;
+    // Canonical, immutable after SCD recompilation; never encode per GUI frame.
+    // Empty on any invalid MU or duplicate wire identity.
+    Q_INVOKABLE QByteArray m4ConfigurationBinary() const;
+    [[nodiscard]] QString m4ConfigurationHash() const;
 
     Q_INVOKABLE bool loadFile(const QUrl& fileUrl);
     Q_INVOKABLE bool loadReferenceTemplate();
@@ -106,6 +112,8 @@ private:
     std::vector<ar::iec61850::sampled_values::SvProfileFamily> profileFamilies_;
     std::vector<std::optional<VlanOverride>> vlanOverrides_;
     std::vector<Row> rows_;
+    QByteArray m4BinaryEnvelope_;
+    QString m4EnvelopeHash_;
     int selectedIndex_{-1};
     QString fatalError_;
     bool referenceTemplateActive_{false};
