@@ -210,6 +210,8 @@ bool SclProfileModel::m4DraftSupported() const noexcept {
         if (!row.errors.isEmpty() || !row.profile.has_value() ||
             row.compatibilityClass != QStringLiteral("A")) return false;
         const auto& p = *row.profile;
+        if (classify_esp32p4_sv_profile(p) != Esp32P4SvProfileSupport::ready)
+            return false;
         const auto hz = p.timing.exact_frame_rate_hz();
         if (!hz.has_value() || *hz != 4000U ||
             !p.sample_counter_modulus.has_value() ||
