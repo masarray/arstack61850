@@ -165,6 +165,8 @@ public slots:
         bool exclusive,
         quint64 generation);
     void setHeartbeatEnabled(bool enabled, quint64 generation);
+    // Retire unsent exclusive CFG commands without stopping autonomous SV/PTP.
+    void retireExclusiveCommands(quint64 generation);
 
 signals:
     void ready(quint64 generation, bool serialAffinityValid);
@@ -180,6 +182,7 @@ signals:
     void lineReceived(quint64 generation, const QString& line);
     void commandTransmitted(quint64 generation, const QString& command, bool quiet);
     void commandRejected(quint64 generation, const QString& message);
+    void exclusiveCommandsRetired(quint64 generation);
     void transportError(quint64 generation, const QString& message, bool fatal);
     // Emitted only after the worker has CLOSED a failed verified COM port.
     // Deliberate user disconnect must never emit an automatic recovery event.
@@ -232,6 +235,7 @@ private:
     // STOP priority remains higher. This is transport queue ownership, not
     // a duplicate firmware RUNNING/LOCK state.
     bool heartbeatPending_{false};
+    bool retireExclusivePending_{false};
     PendingCommand activeCommand_;
     QString lastPort_;
 

@@ -16,6 +16,7 @@
 
 - No new task, timer or heap use in the firmware 250 µs SV hot path.
 - Host-only one-shot 7 s ACK/readback stage timer, plus a 60 s monotonic hard bound. No automatic replays. Firmware still enforces its own 8 s atomic staging deadline.
+- On timeout/rejection/cancellation, Studio asks the **existing sole DeviceIoWorker** to retire every *unsent* exclusive CFG command and waits for acknowledgement after any active UART write drains. No implicit SV/PTP STOP is emitted. The already-written command may still execute on the board, so a partially applied MU set is explicitly **unverified**, and a subsequent operation requires a fresh transaction/readback. This prevents stale queued COMMIT from mutating the board after the UI releases command ownership.
 - Per-MU atomicity is **not** group atomicity: MU1 and MU2 might be committed when MU3 is rejected. Failure status explicitly says partial board state is possible. START remains inhibited.
 - Supervisor permits Apply only if current SCD ARM3 hash matches firmware-selected roster, the board is verified and STOPPED, and no competing profile, PTP startup, M4 upload or scenario transaction owns serial.
 - Existing production binary and unit harness targets link the exact same `M4ThreeMuScenarioApply` C++ implementation. Added negative tests to the already-existing `arstack_m4_upload_harness` and STOP isolation to S8 deterministic session harness. No workflow, job or matrix added.

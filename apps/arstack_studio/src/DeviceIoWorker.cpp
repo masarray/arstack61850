@@ -155,6 +155,7 @@ void DeviceIoWorker::shutdown(const bool requestSvStop, const bool requestPtpSto
     }
 
     exclusiveCommandsRemaining_ = 0;
+    retireExclusivePending_ = false;
     writeActive_ = false;
     activeCommand_ = {};
     closePortInternal(true);
@@ -278,6 +279,7 @@ bool DeviceIoWorker::openPortInternal(const QString& portName, const bool automa
     ptpStopPending_ = false;
     svStopPending_ = false;
     exclusiveCommandsRemaining_ = 0;
+    retireExclusivePending_ = false;
     writeActive_ = false;
     activeCommand_ = {};
     lastPort_ = portName.trimmed();
@@ -341,6 +343,7 @@ void DeviceIoWorker::closePortInternal(const bool emitRelease) {
     ptpStopPending_ = false;
     svStopPending_ = false;
     exclusiveCommandsRemaining_ = 0;
+    retireExclusivePending_ = false;
     writeActive_ = false;
     activeCommand_ = {};
 
@@ -478,6 +481,28 @@ bool DeviceIoWorker::enqueueCommandsInternal(
     return true;
 }
 
+void DeviceIoWorker::retireExclusiveCommands(const quint64 generation) {
+    if (generation == 0 || generation != activeGeneration_) return;
+    // Serial owner only. Drop the unsent CFG tail; never synthesize STOP
+    // merely because the GUI lost an ACK. A command already written to
+    // QSerialPort may still be processed by firmware, so the host must
+    // report uncertain/partial commit and require fresh readback.
+    QQueue<PendingCommand> retained;
+    while (!commandQueue_.isEmpty()) {
+        auto command = commandQueue_.dequeue();
+        if (!command.exclusive) retained.enqueue(std::move(command));
+    }
+    commandQueue_ = std::move(retained);
+    exclusiveCommandsRemaining_ = writeActive_ && activeCommand_.exclusive ? 1 : 0;
+    if (exclusiveCommandsRemaining_ > 0) {
+        retireExclusivePending_ = true;
+    } else {
+        retireExclusivePending_ = false;
+        emit exclusiveCommandsRetired(generation);
+    }
+    pumpWriteQueue();
+}
+
 void DeviceIoWorker::queuePrioritySvStop() {
     // The emergency STOP slot is outside the 64-entry normal queue.
     // Discard remaining batch commands, including an unsent START, so
@@ -572,6 +597,10 @@ void DeviceIoWorker::completeActiveWrite() {
         --exclusiveCommandsRemaining_;
     }
     emit commandTransmitted(activeGeneration_, completed.text, completed.quiet);
+    if (retireExclusivePending_ && exclusiveCommandsRemaining_ == 0) {
+        retireExclusivePending_ = false;
+        emit exclusiveCommandsRetired(activeGeneration_);
+    }
     if (svStopPending_ || ptpStopPending_) {
         pumpWriteQueue(); // safety priority never waits for line pacing
     } else if (writeGapTimer_ != nullptr) {

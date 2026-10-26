@@ -191,7 +191,7 @@ public:
     [[nodiscard]] bool m4Ready() const noexcept { return m4Ready_; }
     [[nodiscard]] QString m4DeploymentStatus() const { return m4Status_; }
     [[nodiscard]] QString m4DeployedHash() const { return m4DeployedHash_; }
-    [[nodiscard]] bool m4ScenarioApplying() const noexcept { return m4ScenarioApplying_; }
+    [[nodiscard]] bool m4ScenarioApplying() const noexcept { return m4ScenarioApplying_ || m4ScenarioRetiring_; }
     [[nodiscard]] bool m4ScenariosVerified() const noexcept { return m4ScenariosVerified_; }
     [[nodiscard]] QString m4ScenarioStatus() const { return m4ScenarioStatus_; }
     [[nodiscard]] QString profileDeploymentProgressSummary() const;
@@ -525,6 +525,7 @@ private:
     QString m4ScenarioStatus_{QStringLiteral("Three MU scenarios not applied")};
     quint64 m4ScenarioSession_{0};
     bool m4ScenarioApplying_{false};
+    bool m4ScenarioRetiring_{false};
     bool m4ScenariosVerified_{false};
     bool m4ScenarioDispatching_{false};
     // One coalesced readback of each kind; no second serial writer or retry loop.
