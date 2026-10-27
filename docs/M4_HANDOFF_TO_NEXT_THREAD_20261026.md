@@ -8,6 +8,20 @@
 **Latest official stable release:** `processbus-sim-m3h3-20261025` (**do not overwrite released assets**)  
 **Latest known M4 merge HEAD:** `be54592af7be086f1d883d4d0db9fe1af3807224`. Reverify before modifying.
 
+## CURRENT M4 CHECKPOINT — 2026-10-27 (THIS SECTION OVERRIDES HISTORICAL STATUS BELOW)
+
+**Verified main:** `3d18c50c8a98e8f3604ec04256756d913153d674` after [PR #347](https://github.com/masarray/arstack61850/pull/347) squash-merged. **Do not redo any of #341–#347.** PR #346 already merged earlier at main commit `f171b7cf511015088e302a90a87b2f9d83233002`.
+
+- **DONE P0E2C1 (#346):** `DeviceController` and supervisor now use the **existing single DeviceIoWorker** for operator-triggered SCD/ARM3 three-MU deployment; transmit-confirmed ACK, 5-second step / 120-second total deadline, boot/session/STOP/rejection guards, hash + generation + three exact MAC/APPID/svID/VLAN identities + SELECT firmware readback. M4 roster proof does **not** permit legacy V1 START. Qt/S8/firmware/native Windows preview CI passed. Emergency GUI STOP/F6 path fixed.
+- **DONE P0E3A (#347):** all 3 MU draft scenarios are typed/preflighted **before any UART write**, then sent with one existing worker as three independent bounded `SVSTREAM 1/2/3 CFG BEGIN/FREQ/8 SET/SHAPE/COMMIT` transactions. Each requires exact COMMITTED token/hash/generation and independent firmware READBACK token/hash/generation; cancellation retires **unsent** exclusive commands on the worker, preserving single-writer authority. Board state after timeout is explicitly marked uncertain; never claim rollback of a command already written. STOP/F6 remains available. **All 11 executed CI checks PASS**, one release upload skipped. Codex P2 queue-retirement concern fixed and review resolved. Merged `3d18c50c8a98e8f3604ec04256756d913153d674`.
+- **Current product boundary:** Studio supports **Deploy 3 MU** and **Apply 3 MU** with readback but **M4 START remains blocked** intentionally. No board-owned group START/reconnect running-state adoption has been verified; no real 3×4,000 fps/PTP wire capture yet. Stable M3.H.3 official release untouched.
+- **NEXT P0E3B:** complete firmware-side SHOW bank detail for all 3 live scenarios including CT shaping/enable/quality; ensure reconnect reads all 3 authoritative slots and **adopts RUNNING board state without automatically writing drafts**, exact boot/generation roster and per-slot match. Then implement guarded group START/STOP with actual board proof and autonomy semantics.
+- **NEXT P0F:** paired firmware/Studio plus independent physical NIC/Wireshark captures: 12,000 total SV frames/s, exact 3 SCL identities, 250-us shared sample grid and synchronized smpCnt, network/EMAC TX egress skew and dropped/overrun diagnostics. Host CI is NOT proof of this.
+
+**CI economy:** avoid new workflows and parallel PRs for the same P0E3B code. Before writing, verify current main/head/open PRs and outstanding reviews; consolidate offline changes and run the existing relevant regressions once.
+
+---
+
 ## LATEST MERGED M4 CHECKPOINT — 2026-10-26 (authoritative)
 
 **Main HEAD checked:** `be54592af7be086f1d883d4d0db9fe1af3807224`. The following are **fully merged** to `main`, not pending PRs:
