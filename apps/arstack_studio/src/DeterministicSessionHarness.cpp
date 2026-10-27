@@ -59,6 +59,8 @@ public:
             {"PTP STOP cancels pending start after verified readback", ptpGuidedStopCancelsStart()},
             {"M4 roster never authorizes V1 START or automatic profile sync", m4RosterIsolationAndV1StartGuard()},
             {"M4 upload STOP revokes transaction proof before serial STOP", m4StopCancelsUpload()},
+            {"M4 per-MU CFG STOP aborts serial queue without V1 START", m4PerMuScenarioStopGuard()},
+            {"M4 timeout retires unsent exclusive CFG without unsolicited STOP", m4RetireExclusiveQueueWithoutStop()},
             {"legacy bare SV START refuses stale eight-channel state", legacyBareStartFailsClosed()},
             {"SV commit ACK/readback START chain is generation bound", svTransactionAckChain()},
             {"SV stale ACK and mismatched firmware readback fail closed", svTransactionNegativeAcks()},
@@ -2072,6 +2074,69 @@ private:
         session.reconcile();
         return cancelled && !session.startReady() &&
             session.state() == QStringLiteral("M4 DEPLOY NOT VERIFIED");
+    }
+
+    static bool m4PerMuScenarioStopGuard() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
+        auto& d = fixture.device;
+        auto& session = fixture.session;
+        // The deterministic seed models a verified board but not always the
+        // asynchronous DeviceIoWorker::ready event. Model a fully ready
+        // serial owner explicitly so this test exercises retirement ACK,
+        // rather than a not-yet-initialized worker startup race.
+        d.ioWorkerReady_ = true;
+        session.m4Mode_ = true;
+        d.m4Ready_ = true;
+        d.m4ScenarioApplying_ = true;
+        d.m4ScenarioSession_ = d.sessionGeneration_;
+        d.m4ScenarioTimer_.start(5000);
+        session.reconcile();
+        if (session.startReady() || session.liveControlReady() ||
+            session.state() != QStringLiteral("M4 APPLYING MU BANKS")) return false;
+        static_cast<void>(session.requestStop());
+        return !d.m4ScenarioApplying_ && !d.m4ScenariosVerified_ &&
+            d.m4ScenarioRetiring_ && !d.m4ScenarioTimer_.isActive() &&
+            d.m4ScenarioStatus().contains(QStringLiteral("STOP")) &&
+            !session.requestStartWithScenario({}) &&
+            !session.canApplyMultiSvScenarios() && !session.startReady();
+    }
+
+    static bool m4RetireExclusiveQueueWithoutStop() {
+        DeviceIoWorker worker;
+        worker.activeGeneration_ = 77;
+        using Command = DeviceIoWorker::PendingCommand;
+        worker.commandQueue_.enqueue(Command{
+            QStringLiteral("SVSTREAM 1 CFG COMMIT 1 FFFF"),
+            QByteArrayLiteral("SVSTREAM 1 CFG COMMIT 1 FFFF\n"), false, true});
+        worker.commandQueue_.enqueue(Command{
+            QStringLiteral("HEARTBEAT"), QByteArrayLiteral("HEARTBEAT\n"), true, false});
+        worker.exclusiveCommandsRemaining_ = 1;
+        bool retired = false;
+        QObject::connect(&worker, &DeviceIoWorker::exclusiveCommandsRetired,
+                         &worker, [&retired](quint64 generation) {
+            if (generation == 77) retired = true;
+        });
+        worker.retireExclusiveCommands(77);
+        const bool cleared = retired && worker.commandQueue_.size() == 1 &&
+            worker.commandQueue_.head().text == QStringLiteral("HEARTBEAT") &&
+            worker.exclusiveCommandsRemaining_ == 0 &&
+            !worker.svStopPending_ && !worker.ptpStopPending_;
+        // If one UART command was already being written, acknowledgement of
+        // retirement must wait until that write is drained.
+        retired = false;
+        worker.writeActive_ = true;
+        worker.activeCommand_ = Command{
+            QStringLiteral("SVSTREAM 2 CFG SHAPE 0 0 0 2 1000"),
+            QByteArrayLiteral("SVSTREAM 2 CFG SHAPE 0 0 0 2 1000\n"), false, true};
+        worker.exclusiveCommandsRemaining_ = 1;
+        worker.retireExclusiveCommands(77);
+        const bool waited = !retired && worker.retireExclusivePending_ &&
+            worker.exclusiveCommandsRemaining_ == 1;
+        worker.completeActiveWrite();
+        return cleared && waited && retired && !worker.retireExclusivePending_ &&
+            !worker.svStopPending_ && !worker.ptpStopPending_;
     }
 
     static bool workerTeardownCompletes() {

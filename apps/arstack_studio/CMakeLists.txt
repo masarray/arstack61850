@@ -24,6 +24,8 @@ set(ARSTACK_STUDIO_CORE_SOURCES
     src/M4StreamScenarioModel.hpp
     src/M4MultiSvUploadTransaction.cpp
     src/M4MultiSvUploadTransaction.hpp
+    src/M4ThreeMuScenarioApply.cpp
+    src/M4ThreeMuScenarioApply.hpp
     src/DeviceIoWorker.cpp
     src/DeviceIoWorker.hpp
     src/DeviceController.cpp
@@ -246,6 +248,8 @@ qt_add_executable(arstack_m4_upload_harness
     src/M4MultiSvUploadHarness.cpp
     src/M4MultiSvUploadTransaction.cpp
     src/M4MultiSvUploadTransaction.hpp
+    src/M4ThreeMuScenarioApply.cpp
+    src/M4ThreeMuScenarioApply.hpp
     src/SclProfileModel.cpp
     src/SclProfileModel.hpp
 )

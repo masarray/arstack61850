@@ -394,7 +394,7 @@ SurfacePanel {
     function requestStop() {
         // STOP is the operator's emergency cancellation even while an M4
         // roster upload is staged with the publisher still STOPPED.
-        if (device.m4Deploying) {
+        if (device.m4Deploying || device.m4ScenarioApplying) {
             if (!smartSession.requestStop())
                 controller.showMessage("Unable to stop the M4 device transaction.", true)
             return

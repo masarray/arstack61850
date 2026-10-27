@@ -148,6 +148,14 @@ DeviceController::DeviceController(QObject* parent) : QObject(parent) {
         if (m4Deploying_)
             cancelM4(QStringLiteral("M4 MULTISV ACK/readback timed out; configuration not verified."));
     });
+    // Per-MU CFG transactions are bounded on the UI control thread only;
+    // the 4kHz firmware sample loop never waits on these timers.
+    m4ScenarioTimer_.setSingleShot(true);
+    m4ScenarioTimer_.setInterval(7000);
+    connect(&m4ScenarioTimer_, &QTimer::timeout, this, [this] {
+        if (m4ScenarioApplying_)
+            cancelM4Scenarios(QStringLiteral("Per-MU CFG COMMIT/READBACK timeout; partial board state possible."));
+    });
     scenarioTimer_.setSingleShot(true);
     scenarioTimer_.setInterval(8000);
     connect(&scenarioTimer_, &QTimer::timeout, this, [this] {
@@ -204,6 +212,7 @@ bool DeviceController::shutdown() {
     shuttingDown_ = true;
     pendingAutoDetect_ = false;
     pendingConnectPort_.clear();
+    cancelM4Scenarios(QStringLiteral("Studio closing; per-MU board state must be re-read."));
     cancelM4(QStringLiteral("Studio closing; M4 transaction no longer verified."));
     // USB/Studio process lifetime is not the ESP32-P4's publisher lifetime.
     // Closing the GUI does not imply SV STOP or PTP STOP: those are explicit
@@ -430,11 +439,21 @@ void DeviceController::connectWorkerSignals() {
         }
     });
 
+    connect(ioWorker_, &DeviceIoWorker::exclusiveCommandsRetired, this,
+            [this](const quint64 generation) {
+        if (!workerEventIsCurrent(sessionGeneration_, generation) ||
+            !m4ScenarioRetiring_) return;
+        m4ScenarioRetiring_ = false;
+        emit m4DeploymentChanged();
+    });
+
     connect(ioWorker_, &DeviceIoWorker::commandRejected, this,
             [this](const quint64 generation, const QString& message) {
         if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
         if (m4Deploying_)
             cancelM4(QStringLiteral("M4 serial command rejected: ") + message);
+        if (m4ScenarioApplying_)
+            cancelM4Scenarios(QStringLiteral("Per-MU serial command rejected: ") + message);
         if (scenarioStage_ != ScenarioStage::idle)
             failScenarioStart(QStringLiteral("SV scenario serial command rejected: ") + message);
         if (profileDeploying_) {
@@ -464,6 +483,8 @@ void DeviceController::connectWorkerSignals() {
         Q_UNUSED(fatal)
         if (m4Deploying_)
             cancelM4(QStringLiteral("M4 transport failure: ") + message);
+        if (m4ScenarioApplying_)
+            cancelM4Scenarios(QStringLiteral("Per-MU transport failure: ") + message);
         if (scenarioStage_ != ScenarioStage::idle)
             failScenarioStart(QStringLiteral("SV transaction transport error: ") + message);
         setError(message);
@@ -544,6 +565,8 @@ QString DeviceController::ptpTxFailures() const { return ptpTxFailures_; }
 
 void DeviceController::setSessionGeneration(const quint64 generation) {
     if (generation == 0 || generation == sessionGeneration_) return;
+    cancelM4Scenarios(QStringLiteral("Device session changed; per-MU proof revoked."));
+    m4ScenarioRetiring_ = false; // new worker epoch discards old queued commands
     cancelM4(QStringLiteral("Device session generation changed; previous M4 proof revoked."));
     resetPtpStartup();
     resetScenarioStart();
@@ -737,6 +760,8 @@ void DeviceController::handlePortOpened(const QString& portName, const bool auto
     profileArmed_ = false;
     profileWasReused_ = false;
     profileDeploying_ = false;
+    cancelM4Scenarios(QStringLiteral("Port reopened; per-MU proof revoked."));
+    m4ScenarioRetiring_ = false;
     cancelM4(QStringLiteral("Serial session reopened; previous M4 proof retired."));
     deferredShow_ = false;
     deferredProfileShow_ = false;
@@ -769,6 +794,8 @@ void DeviceController::handlePortClosed(const QString& portName) {
     profileDeploying_ = false;
     profileArmed_ = false;
     profileWasReused_ = false;
+    cancelM4Scenarios(QStringLiteral("Port closed; per-MU readback invalid."));
+    m4ScenarioRetiring_ = false;
     cancelM4(QStringLiteral("Serial session closed; M4 readback no longer valid."));
     deferredShow_ = false;
     deferredProfileShow_ = false;
@@ -803,7 +830,7 @@ bool DeviceController::start() {
 }
 
 bool DeviceController::startWithScenario(const QVariantMap& scenario) {
-    if (m4Ready_ || m4Deploying_) {
+    if (m4Ready_ || m4Deploying_ || m4ScenarioApplying_) {
         setError(QStringLiteral("Legacy V1 START blocked while an M4 roster is selected. Configure all three MU scenarios first."));
         return false;
     }
@@ -811,6 +838,7 @@ bool DeviceController::startWithScenario(const QVariantMap& scenario) {
 }
 
 bool DeviceController::applyLiveScenario(const QVariantMap& scenario) {
+    if (m4Ready_ || m4Deploying_ || m4ScenarioApplying_) return false;
     return submitScenario(scenario, false);
 }
 
@@ -928,6 +956,7 @@ bool DeviceController::submitScenario(const QVariantMap& scenario, const bool st
     return true;
 }
 bool DeviceController::stop() {
+    if (m4ScenarioApplying_) cancelM4Scenarios(QStringLiteral("Explicit STOP cancelled per-MU CFG transaction."));
     if (m4Deploying_) cancelM4(QStringLiteral("M4 upload cancelled by explicit operator STOP."));
     operatorStopPending_ = true;
     appendLog(QStringLiteral("SVTX"), QStringLiteral(
@@ -1020,7 +1049,7 @@ bool DeviceController::setQuality(const QString& signalId, const quint32 quality
 }
 
 bool DeviceController::deployProfile(const QVariantMap& profile) {
-    if (m4Deploying_ || m4Ready_) {
+    if (m4Deploying_ || m4Ready_ || m4ScenarioApplying_) {
         setError(QStringLiteral("M4 roster is selected; legacy PROFILE deploy requires an explicit firmware mode switch."));
         return false;
     }
@@ -1101,7 +1130,7 @@ bool DeviceController::deployMultiSv(const QByteArray& arm3) {
     // A staging-only board is not a TX-capable board: require BOTH tags.
     if (!deviceVerified_ || !connected_ || !ioWorkerReady_ ||
         sessionGeneration_ == 0 || identity_.bootId.size() != 16 ||
-        running_ || profileDeploying_ || m4Deploying_ ||
+        running_ || profileDeploying_ || m4Deploying_ || m4ScenarioApplying_ || m4ScenarioRetiring_ ||
         scenarioStage_ != ScenarioStage::idle || ptpStarting() ||
         !identity_.capabilities.contains(QStringLiteral("MULTISV-CONFIG-STAGING-V2"),
                                          Qt::CaseInsensitive) ||
@@ -1115,6 +1144,7 @@ bool DeviceController::deployMultiSv(const QByteArray& arm3) {
         setError(QStringLiteral("M4 ARM3 configuration failed canonical CRC/layout validation."));
         return false;
     }
+    cancelM4Scenarios(QStringLiteral("New ARM3 roster invalidates previous per-MU banks."));
     m4Ready_ = false;
     m4DeployedHash_.clear();
     m4Deploying_ = true;
@@ -1126,6 +1156,7 @@ bool DeviceController::deployMultiSv(const QByteArray& arm3) {
 }
 
 void DeviceController::cancelM4(const QString& reason, const bool clearReady) {
+    if (clearReady) cancelM4Scenarios(reason);
     if (!m4Deploying_ && (!clearReady || !m4Ready_)) return;
     m4AckTimer_.stop();
     if (m4Upload_.active()) m4Upload_.cancel(reason);
@@ -1189,6 +1220,108 @@ bool DeviceController::processM4Line(const QString& line) {
         return true;
     }
     static_cast<void>(dispatchNextM4());
+    return true;
+}
+
+
+bool DeviceController::applyMultiSvScenarios(const QVariantList& drafts) {
+    if (!connected_ || !deviceVerified_ || !ioWorkerReady_ || !m4Ready_ ||
+        m4Deploying_ || m4ScenarioApplying_ || m4ScenarioRetiring_ || running_ || ptpStarting() ||
+        profileDeploying_ || scenarioStage_ != ScenarioStage::idle ||
+        identity_.bootId.size() != 16 || sessionGeneration_ == 0) {
+        setError(QStringLiteral("Three-MU CFG requires verified selected ARM3 roster, "
+            "STOPPED board and exclusive idle device session."));
+        return false;
+    }
+    // Validate all three and freeze the snapshots before first UART mutation.
+    if (!m4Scenarios_.start(drafts, identity_.bootId)) {
+        setError(m4Scenarios_.error().isEmpty()
+            ? QStringLiteral("Invalid three-MU scenario draft set.")
+            : m4Scenarios_.error());
+        return false;
+    }
+    m4ScenariosVerified_ = false;
+    m4ScenarioApplying_ = true;
+    m4ScenarioSession_ = sessionGeneration_;
+    m4ScenarioStatus_ = QStringLiteral("Applying three independent MU scenarios; START blocked.");
+    m4ScenarioClock_.start();
+    emit m4DeploymentChanged();
+    return dispatchM4ScenarioStep();
+}
+
+void DeviceController::cancelM4Scenarios(const QString& reason) {
+    if (!m4ScenarioApplying_ && !m4ScenariosVerified_) return;
+    m4ScenarioTimer_.stop();
+    const bool mustRetire = m4ScenarioApplying_ && connected_ && ioWorkerReady_ &&
+        ioWorker_ != nullptr && sessionGeneration_ == m4ScenarioSession_;
+    // Hold the transaction reservation until the one serial worker confirms
+    // that no stale exclusive CFG tail remains queued or in flight.
+    if (mustRetire) {
+        m4ScenarioRetiring_ = true;
+        DeviceIoWorker* const worker = ioWorker_;
+        const quint64 generation = sessionGeneration_;
+        if (!QMetaObject::invokeMethod(worker, [worker, generation] {
+                worker->retireExclusiveCommands(generation);
+            }, Qt::QueuedConnection)) {
+            setError(QStringLiteral("Could not retire M4 serial queue; reconnect before next apply."));
+            // Fail closed: reservation remains until a new session.
+        }
+    }
+    if (m4Scenarios_.active()) m4Scenarios_.cancel(reason);
+    const int verified = m4Scenarios_.verifiedSlots();
+    m4ScenarioApplying_ = false;
+    m4ScenariosVerified_ = false;
+    m4ScenarioDispatching_ = false;
+    m4ScenarioStatus_ = QStringLiteral("%1 Board may hold %2/3 committed MU banks; "
+        "START is NOT authorized.").arg(reason).arg(verified);
+    emit m4DeploymentChanged();
+}
+
+bool DeviceController::dispatchM4ScenarioStep() {
+    if (!m4ScenarioApplying_ || !m4Ready_ || !connected_ ||
+        !deviceVerified_ || running_ || sessionGeneration_ != m4ScenarioSession_ ||
+        m4ScenarioClock_.elapsed() > 60000) {
+        cancelM4Scenarios(QStringLiteral("Per-MU session, STOPPED or overall deadline guard failed."));
+        return false;
+    }
+    const auto commands = m4Scenarios_.takeCommands();
+    if (commands.isEmpty()) {
+        cancelM4Scenarios(QStringLiteral("Per-MU state machine emitted no next command."));
+        return false;
+    }
+    // Only this narrow callsite may enqueue the in-progress exact transaction;
+    // STOP/PTP STOP/HEARTBEAT retain priority in the existing single worker.
+    m4ScenarioDispatching_ = true;
+    const bool ok = sendCommandBatch(commands, false, commands.size() > 1);
+    m4ScenarioDispatching_ = false;
+    if (!ok) {
+        cancelM4Scenarios(QStringLiteral("Per-MU serial dispatcher refused transaction step."));
+        return false;
+    }
+    m4ScenarioTimer_.start();
+    return true;
+}
+
+bool DeviceController::processM4ScenarioLine(const QString& line) {
+    if (!m4ScenarioApplying_ || !line.contains(QStringLiteral("SVSTREAM "))) return false;
+    if (!connected_ || !deviceVerified_ || running_ ||
+        sessionGeneration_ != m4ScenarioSession_ || m4ScenarioClock_.elapsed() > 60000) {
+        cancelM4Scenarios(QStringLiteral("Per-MU session changed during scenario confirmation."));
+        return true;
+    }
+    if (!m4Scenarios_.receive(line, identity_.bootId)) return false;
+    m4ScenarioTimer_.stop();
+    if (m4Scenarios_.stage() == M4ThreeMuScenarioApply::Stage::failed) {
+        cancelM4Scenarios(m4Scenarios_.error());
+    } else if (m4Scenarios_.verified()) {
+        m4ScenarioApplying_ = false;
+        m4ScenariosVerified_ = true;
+        m4ScenarioStatus_ = QStringLiteral("3/3 MU CFG COMMIT+READBACK verified on this boot; "
+            "group START still gated pending M4 start/readback acceptance.");
+        emit m4DeploymentChanged();
+    } else {
+        static_cast<void>(dispatchM4ScenarioStep());
+    }
     return true;
 }
 
@@ -1957,6 +2090,17 @@ bool DeviceController::sendCommandBatch(const QStringList& commands, const bool 
         }
         return true;
     };
+    if (m4ScenarioApplying_ || m4ScenarioRetiring_) {
+        const bool one = !exclusive && commands.size() == 1;
+        const QString command = one ? commands.constFirst() : QString{};
+        const bool safety = one && (command == QStringLiteral("STOP") ||
+            command == QStringLiteral("PTP STOP") || command == QStringLiteral("HEARTBEAT"));
+        if (!m4ScenarioDispatching_ && !safety) {
+            if (readback) return deferReadback();
+            setError(QStringLiteral("Three-MU CFG owns the serial queue until independent readback."));
+            return false;
+        }
+    }
     if (m4Deploying_) {
         const bool one = !exclusive && commands.size() == 1;
         const QString command = one ? commands.constFirst() : QString{};
@@ -2018,7 +2162,7 @@ bool DeviceController::sendCommandBatch(const QStringList& commands, const bool 
 }
 
 void DeviceController::flushDeferredReadbacks() {
-    if (m4Deploying_ || profileDeploying_ || binaryProfileStage_ != BinaryProfileStage::idle ||
+    if (m4Deploying_ || m4ScenarioApplying_ || m4ScenarioRetiring_ || profileDeploying_ || binaryProfileStage_ != BinaryProfileStage::idle ||
         scenarioStage_ != ScenarioStage::idle ||
         !connected_ || !ioWorkerReady_ || ioWorker_ == nullptr || sessionGeneration_ == 0)
         return;
@@ -2233,6 +2377,7 @@ void DeviceController::processLine(const QString& rawLine) {
     if (line.isEmpty()) return;
     appendLog(QStringLiteral("←"), line);
     if (processM4Line(line)) return;
+    if (processM4ScenarioLine(line)) return;
 
     // Read-only 4I+4V sync after reconnect: a complete eight-row message
     // must match the verified boot and one bank generation, never just a
@@ -2622,6 +2767,7 @@ void DeviceController::processLine(const QString& rawLine) {
         const bool unexpectedDevice = deviceVerified_ &&
             !identity_.deviceId.isEmpty() && !sameDevice;
         if (unexpectedDevice) {
+            cancelM4Scenarios(QStringLiteral("Different board identity: MU banks unverified."));
             cancelM4(QStringLiteral("Different board identity: M4 roster proof revoked."));
             resetScenarioStart();
             resetBinaryProfileTransfer();
@@ -2645,6 +2791,7 @@ void DeviceController::processLine(const QString& rawLine) {
         const bool newBoot = sameDevice && !identity_.bootId.isEmpty() &&
             identity_.bootId != parsedIdentity.bootId;
         if (newBoot) {
+            cancelM4Scenarios(QStringLiteral("Firmware reboot: MU banks invalidated."));
             cancelM4(QStringLiteral("Firmware reboot: M4 transaction/readback revoked."));
             resetScenarioStart();
             resetBinaryProfileTransfer();
