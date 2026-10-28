@@ -8,6 +8,24 @@
 **Latest official stable release:** `processbus-sim-m3h3-20261025` (**do not overwrite released assets**)  
 **Latest known M4 merge HEAD:** `be54592af7be086f1d883d4d0db9fe1af3807224`. Reverify before modifying.
 
+## CURRENT M4 CHECKPOINT — 2026-10-28 (AUTHORITATIVE; OVERRIDES OLDER STATUS BELOW)
+
+**Verified merged main:** `b7fdf402a37bc5a189e2e4aa92f1b41a573babe0`. **P0E3B1 [PR #348](https://github.com/masarray/arstack61850/pull/348) is MERGED.** Earlier M4 #341–#347 are also merged; do not redo them. Stable M3.H.3 official release remains untouched.
+
+- **DONE P0E2C1 #346:** Studio operator-deployed 3-MU ARM3 roster via existing sole DeviceIoWorker, exact ACK/hash/identity/SELECT readback, safety STOP, boot/session guards.
+- **DONE P0E3A #347:** Three separate canonical `SVSTREAM <1..3> CFG` full scenario transactions with COMMIT+READBACK hash/generation, verified 3/3 MU banks. Worker retires unsent CFG tails on cancellation. Group START remains blocked.
+- **DONE P0E3B1 #348:** ESP32-P4 `SVSTREAM <slot> SHOW` now emits one **atomic bank snapshot** `SNAP BEGIN / 8 ROW / SNAP END` from the actual active MU signal bank: 8 channel counts, phase, quality, enabled, frequency, CT shaping and TX-enable flag. Generation and canonical `sv_scenario_hash` are checked in the production bounded Qt `M4ThreeMuBoardReadback` for all three sequential slots. Missing/duplicated channel, changed quality/hash, boot/session change or timeout invalidate the readback. Pristine generation 0 is valid. Firmware work is UART/control-plane only, no modification to 250µs publisher path.
+- **Studio operator feature:** **Inspect board** is read-only, works while output is autonomously RUNNING, **even without an SCD currently loaded**, and shows three board summaries with full channel/CT details via hover. Inspection never automatically writes a GUI draft, selects a roster, starts or stops streams. Existing sole worker, 6s per-slot timer, queued write confirmation, cancellation on STOP/disconnect/firmware reboot; PTP STOP preempts inspection and pending PTP readback is drained safely. The 2 Codex P2 review findings were repaired and resolved; new S8 deterministic session test confirms safety preemption.
+- **Quality gate:** [PR #348](https://github.com/masarray/arstack61850/pull/348) exact head `9124faca0bbda9d4d9b6557f4588e0ae2518786f` completed **19/19 executed CI SUCCESS, zero failures/pending**, including Linux Qt/M4 parser test, native Windows preview, lifecycle, Windows MSVC, GCC/Clang, ESP32-P4 build/PTP source+receiver, embedded host simulation, package and RC2 policy. One release-publish step intentionally skipped. Merged as `b7fdf402a37bc5a189e2e4aa92f1b41a573babe0`. No extra CI job/workflow/matrix was introduced. [Engineer guide](M4_P0E3B1_FULL_BOARD_READBACK.md).
+
+**SCOPE STILL NOT ACCEPTED:** Inspector produces a **manual read-only snapshot**, not automatic reconnect RUNNING-state adoption or proof that SCD selection, bank generations and board runtime are mutually consistent. Three-stream group START is deliberately still blocked; physical 12,000fps, shared smpCnt/PTP and egress timing have NOT been measured. Never claim physical acceptance from CI.
+
+**NEXT milestone P0E3B2:** secure reconnect discovery of board-selected `MULTISV` roster/status, boot-scoped read-only adoption of all three bank states/stream TX enable, full firmware authority / SCD identity matching, and robust UI state handling without draft overwrite or automatic START. Preserve STOP as safety priority and do not create a second serial writer.
+
+**THEN P0E3C / P0F:** verified board-owned three-MU group START/STOP and per-stream enable readback, followed by paired firmware+Studio build and independent physical NIC/Wireshark proof of three distinct 4I4V 4000fps streams on the common PTP/250us sample epoch with actual egress skew, miss/drop/overrun evidence. Do not modify Official Stable assets. Check latest main/PRs before code changes.
+
+---
+
 ## CURRENT M4 CHECKPOINT — 2026-10-27 (THIS SECTION OVERRIDES HISTORICAL STATUS BELOW)
 
 **Verified main:** `3d18c50c8a98e8f3604ec04256756d913153d674` after [PR #347](https://github.com/masarray/arstack61850/pull/347) squash-merged. **Do not redo any of #341–#347.** PR #346 already merged earlier at main commit `f171b7cf511015088e302a90a87b2f9d83233002`.
