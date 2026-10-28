@@ -2531,13 +2531,16 @@ bool DeviceController::processM4ReconnectLine(const QString& line) {
 void DeviceController::markDeviceVerified() {
     if (deviceVerified_) return;
     deviceVerified_ = true;
-    resetM4Reconnect(QStringLiteral("LEGACY"));
+    // Never surface LEGACY transiently to a synchronous supervisor callback.
+    resetM4Reconnect(QStringLiteral("UNKNOWN"));
     if (identity_.capabilities.contains(QStringLiteral("MULTISV-TX-LAB-PREVIEW"),
                                         Qt::CaseInsensitive)) {
         m4ReconnectMode_ = QStringLiteral("PENDING");
         m4ReconnectBoot_ = identity_.bootId;
         m4ReconnectTimer_.start();
         emit m4ReconnectModeChanged();
+    } else {
+        resetM4Reconnect(QStringLiteral("LEGACY"));
     }
     recoveryCandidatePort_.clear();
     lastIdentificationPort_ = portName_;
@@ -3062,7 +3065,7 @@ void DeviceController::processLine(const QString& rawLine) {
         if (newBoot) {
             // Revoke V1 synchronization BEFORE deviceIdentityChanged is emitted:
             // that supervisor callback may synchronously reconcile this boot.
-            resetM4Reconnect(QStringLiteral("LEGACY"));
+            resetM4Reconnect(QStringLiteral("UNKNOWN"));
             if (parsedIdentity.capabilities.contains(QStringLiteral("MULTISV-TX-LAB-PREVIEW"),
                                                      Qt::CaseInsensitive)) {
                 m4ReconnectMode_ = QStringLiteral("PENDING");
@@ -3070,6 +3073,8 @@ void DeviceController::processLine(const QString& rawLine) {
                 m4ReconnectAwaitingTx_ = true;
                 m4ReconnectTimer_.start();
                 emit m4ReconnectModeChanged();
+            } else {
+                resetM4Reconnect(QStringLiteral("LEGACY"));
             }
         }
         applyIdentity(std::move(parsedIdentity));
