@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "ariec61850/sampled_values/live_signal_transaction.hpp"
 #include "M4MultiSvUploadTransaction.hpp"
 #include "M4ThreeMuScenarioApply.hpp"
+#include "M4ThreeMuBoardReadback.hpp"
 #include "SclProfileModel.hpp"
 
 #include <QCoreApplication>
 #include <QUrl>
 #include <filesystem>
+#include <array>
 #include <stdexcept>
 
 namespace {
@@ -227,6 +230,81 @@ void testThreeMuScenarioApply() {
           "firmware reboot invalidates all MU proof");
 }
 
+QStringList snapRows(int slot) {
+    using namespace ar::iec61850::sampled_values;
+    SvLiveSignalState state{};
+    state.generation=static_cast<std::uint64_t>(slot+3);
+    state.frequency_millihz=static_cast<std::uint32_t>(slot*50000);
+    state.current_shape={slot==2,0,static_cast<std::uint32_t>(slot*10),2,1000};
+    static constexpr std::array<const char*,8> names{"IA","IB","IC","IN","UA","UB","UC","UN"};
+    for(int i=0;i<8;++i) state.channels[static_cast<std::size_t>(i)]={
+        slot*1000+i, i*3000, static_cast<std::uint32_t>(i*128), i%2==0};
+    const QString hash=QString::number(sv_scenario_hash(state),16)
+        .rightJustified(16,QLatin1Char('0')).toUpper();
+    QStringList lines;
+    lines << QStringLiteral(
+        "I (1234) ar_smv_multi: SVSTREAM SNAP BEGIN slot=%1 generation=%2 hash=%3 hz_millihz=%4 tx_enabled=%5 ct_enabled=%6 ct_dc=0 ct_harmonic=%7 ct_order=2 ct_clip=1000")
+        .arg(slot).arg(static_cast<qulonglong>(state.generation)).arg(hash).arg(state.frequency_millihz)
+        .arg(slot==1?1:0).arg(slot==2?1:0).arg(slot*10);
+    for(int i=0;i<8;++i) {
+        const auto& ch=state.channels[static_cast<std::size_t>(i)];
+        lines << QStringLiteral(
+            "SVSTREAM SNAP ROW slot=%1 generation=%2 channel=%3 rms=%4 phase=%5 quality=%6 enabled=%7")
+            .arg(slot).arg(static_cast<qulonglong>(state.generation))
+            .arg(QString::fromLatin1(names[static_cast<std::size_t>(i)]))
+            .arg(ch.rms_counts).arg(ch.phase_millidegrees).arg(ch.quality)
+            .arg(ch.enabled?1:0);
+    }
+    lines << QStringLiteral("SVSTREAM SNAP END slot=%1 generation=%2 hash=%3")
+        .arg(slot).arg(static_cast<qulonglong>(state.generation)).arg(hash);
+    return lines;
+}
+void testBoardSnapshots() {
+    M4ThreeMuBoardReadback reader;
+    check(reader.start(kBoot),"read-only 3-slot inspection start");
+    for(int slot=1;slot<=3;++slot) {
+        check(reader.takeCommand()==QStringLiteral("SVSTREAM %1 SHOW").arg(slot),
+              "exact sequential read-only SHOW");
+        const auto lines=snapRows(slot);
+        for(const auto& line:lines)
+            check(reader.receive(line,kBoot),"valid atomic bank record accepted");
+        check(reader.verifiedSlots()==slot,"only complete hash-valid slot advances");
+    }
+    const auto results=reader.snapshots();
+    check(reader.verified() && results.size()==3,"three authoritative board banks");
+    check(results[0].toMap().value(QStringLiteral("txEnabled")).toBool() &&
+          results[1].toMap().value(QStringLiteral("ct")).toMap()
+              .value(QStringLiteral("enabled")).toBool() &&
+          results[2].toMap().value(QStringLiteral("channels")).toList().size()==8,
+          "read-only board TX/CT/8-channel quality exposed, no GUI draft writes");
+    M4ThreeMuBoardReadback duplicate;
+    check(duplicate.start(kBoot) && !duplicate.takeCommand().isEmpty(),"duplicate fixture start");
+    auto dup=snapRows(1);
+    check(duplicate.receive(dup[0],kBoot),"begin accepted");
+    check(duplicate.receive(dup[1],kBoot),"row accepted");
+    check(duplicate.receive(dup[1],kBoot) &&
+          duplicate.stage()==M4ThreeMuBoardReadback::Stage::failed,
+          "duplicate row fails closed");
+    M4ThreeMuBoardReadback missing;
+    check(missing.start(kBoot) && !missing.takeCommand().isEmpty(),"missing fixture start");
+    auto partial=snapRows(1);
+    partial.removeAt(5);
+    for(const auto& line:partial) missing.receive(line,kBoot);
+    check(missing.stage()==M4ThreeMuBoardReadback::Stage::failed,
+          "missing channel cannot be a coherent bank");
+    M4ThreeMuBoardReadback badHash;
+    check(badHash.start(kBoot) && !badHash.takeCommand().isEmpty(),"hash fixture start");
+    auto altered=snapRows(1);
+    altered[3].replace(QStringLiteral("quality=256"),QStringLiteral("quality=257"));
+    for(const auto& line:altered) badHash.receive(line,kBoot);
+    check(badHash.stage()==M4ThreeMuBoardReadback::Stage::failed,
+          "tampered quality invalidates canonical board hash");
+    M4ThreeMuBoardReadback reboot;
+    check(reboot.start(kBoot) && !reboot.takeCommand().isEmpty(),"boot fixture start");
+    check(reboot.receive(snapRows(1)[0],QStringLiteral("0011223344556677")) &&
+          reboot.stage()==M4ThreeMuBoardReadback::Stage::failed,
+          "new boot never adopts earlier bank rows");
+}
 } // namespace
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
@@ -235,7 +313,8 @@ int main(int argc, char** argv) {
         happyPath(image);
         negativeCases(image);
         testThreeMuScenarioApply();
-        qInfo("PASS: 3-MU canonical scenario preflight/COMMIT/READBACK, and ACK-driven M4 48B chunks, BEGIN/VALIDATE/COMMIT/SHOW/SELECT, "
+        testBoardSnapshots();
+        qInfo("PASS: complete 3-MU atomic firmware snapshot hash/CT/quality/reboot, scenario preflight/COMMIT/READBACK, and ACK-driven M4 48B chunks, BEGIN/VALIDATE/COMMIT/SHOW/SELECT, "
               "full hash and three-MU readback, stale transaction and boot-fault guards");
         return 0;
     } catch (const std::exception& e) {

@@ -1335,7 +1335,9 @@ ApplicationWindow {
 
         RowLayout {
             id: m4PaginationStrip
-            visible: sclProfiles.m4DraftSupported || m4Pages.active
+            visible: sclProfiles.m4DraftSupported || m4Pages.active ||
+                     (workflowBar.session && workflowBar.session.canInspectMultiSvBoard) ||
+                     device.m4BoardInspecting || device.m4BoardSnapshots.length === 3
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 31 : 0
             spacing: 5
@@ -1421,11 +1423,74 @@ ApplicationWindow {
                 }
             }
             Button {
-                enabled: !device.m4Deploying && !device.m4ScenarioApplying
+                visible: device.deviceVerified || device.m4BoardInspecting ||
+                         device.m4BoardSnapshots.length === 3
+                enabled: workflowBar.session && workflowBar.session.canInspectMultiSvBoard &&
+                         !workflowBar.startQueued
+                text: device.m4BoardInspecting ? "Reading…" : "Inspect board"
+                font.family: root.uiFont
+                font.pixelSize: 10
+                onClicked: {
+                    const ok = workflowBar.session.requestInspectMultiSvBoard()
+                    root.showMessage(ok
+                        ? "Reading MU1/2/3 from the actual board; editor drafts remain unchanged."
+                        : "Board inspection unavailable; check identity, serial ownership and firmware.", !ok)
+                }
+            }
+            Button {
+                enabled: (m4Pages.active || sclProfiles.m4DraftSupported) &&
+                         !device.m4Deploying && !device.m4ScenarioApplying
                 text: m4Pages.active ? "Close MU pages" : "Open MU pages"
                 font.family: root.uiFont
                 font.pixelSize: 10
                 onClicked: m4Pages.active ? root.m4CloseDraft() : root.m4OpenDraft()
+            }
+        }
+
+        RowLayout {
+            visible: device.m4BoardSnapshots.length === 3
+            Layout.fillWidth: true
+            Layout.preferredHeight: visible ? 24 : 0
+            spacing: 8
+            Repeater {
+                model: device.m4BoardSnapshots
+                delegate: Rectangle {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    implicitHeight: 23
+                    radius: 5
+                    color: studioTheme.surface2
+                    border.color: studioTheme.lineSoft
+                    border.width: 1
+                    HoverHandler { id: bankHover }
+                    ToolTip.visible: bankHover.hovered
+                    ToolTip.delay: 500
+                    ToolTip.text: {
+                        const shape = modelData.ct
+                        const channels = modelData.channels
+                        const rows = channels.map(function(ch) {
+                            return ch.id + " = " + ch.counts + " counts, phase " +
+                                   ch.phaseMdeg + " mdeg, Q=" + ch.quality +
+                                   ", " + (ch.enabled ? "enabled" : "disabled")
+                        }).join("\n")
+                        return "BOARD READBACK · MU" + modelData.slot +
+                               "\nGen " + modelData.generation + " · hash " + modelData.hash +
+                               "\nCT shaping: " + (shape.enabled ? "ON" : "OFF") +
+                               " · DC " + shape.dcPermille + " ‰ · H " +
+                               shape.harmonicPermille + " ‰ / order " + shape.order +
+                               " · clip " + shape.clipPermille + " ‰\n" + rows
+                    }
+                    Label {
+                        anchors.centerIn: parent
+                        text: "BOARD MU" + modelData.slot + " · " +
+                              (modelData.frequencyMilliHz / 1000).toFixed(3) +
+                              " Hz · G" + modelData.generation +
+                              " · TX " + (modelData.txEnabled ? "ON" : "OFF")
+                        color: studioTheme.green
+                        font.family: root.uiFont
+                        font.pixelSize: 9
+                    }
+                }
             }
         }
 

@@ -61,6 +61,7 @@ public:
             {"M4 upload STOP revokes transaction proof before serial STOP", m4StopCancelsUpload()},
             {"M4 per-MU CFG STOP aborts serial queue without V1 START", m4PerMuScenarioStopGuard()},
             {"M4 timeout retires unsent exclusive CFG without unsolicited STOP", m4RetireExclusiveQueueWithoutStop()},
+            {"M4 board inspection defers refresh but PTP STOP preempts it", m4BoardInspectionPtpSafetyPreempts()},
             {"legacy bare SV START refuses stale eight-channel state", legacyBareStartFailsClosed()},
             {"SV commit ACK/readback START chain is generation bound", svTransactionAckChain()},
             {"SV stale ACK and mismatched firmware readback fail closed", svTransactionNegativeAcks()},
@@ -2137,6 +2138,25 @@ private:
         worker.completeActiveWrite();
         return cleared && waited && retired && !worker.retireExclusivePending_ &&
             !worker.svStopPending_ && !worker.ptpStopPending_;
+    }
+
+    static bool m4BoardInspectionPtpSafetyPreempts() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
+        auto& d=fixture.device;
+        d.m4BoardInspecting_=true;
+        d.m4BoardSession_=d.sessionGeneration_;
+        d.m4BoardTimer_.start(6000);
+        d.deferredPtpShow_=true;
+        d.flushDeferredReadbacks();
+        const bool deferred=d.deferredPtpShow_ && d.m4BoardInspecting_;
+        // Even while the publisher is stopped, safety STOP must terminate the
+        // inspection before the priority command reaches the sole worker.
+        static_cast<void>(d.sendCommand(QStringLiteral("PTP STOP")));
+        return deferred && !d.m4BoardInspecting_ && !d.m4BoardTimer_.isActive() &&
+            d.m4BoardStatus().contains(QStringLiteral("STOP")) &&
+            d.deferredPtpShow_ && d.m4BoardSnapshots_.isEmpty();
     }
 
     static bool workerTeardownCompletes() {

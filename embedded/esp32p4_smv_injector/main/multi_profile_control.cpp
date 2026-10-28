@@ -357,20 +357,36 @@ void handle_svstream_command(char* arguments) noexcept {
     auto state = multi_profile_signal_snapshot(slot);
     if (std::strcmp(verb, "SHOW") == 0) {
         if (!no_extra(&save)) { ESP_LOGE(kTag, "SVSTREAM SHOW takes no extras"); return; }
-        ESP_LOGI(kTag, "SVSTREAM slot=%lu generation=%llu frequency_millihz=%lu tx_enabled=%u",
-                 static_cast<unsigned long>(slot_number),
-                 static_cast<unsigned long long>(state.generation),
-                 static_cast<unsigned long>(state.frequency_millihz),
-                 (multi_profile_enabled_mask() & (1U << slot)) ? 1U : 0U);
+        // One atomic bank snapshot, one writer, zero work on the 250us
+        // publisher. BEGIN/8 ROW/END carry generation + canonical hash so a
+        // reconnecting Studio can reject missing/mixed/duplicated responses.
+        const auto hash = ar::iec61850::sampled_values::sv_scenario_hash(state);
+        ESP_LOGI(kTag,
+            "SVSTREAM SNAP BEGIN slot=%lu generation=%llu hash=%016llX hz_millihz=%lu tx_enabled=%u ct_enabled=%u ct_dc=%ld ct_harmonic=%lu ct_order=%u ct_clip=%lu",
+            static_cast<unsigned long>(slot_number),
+            static_cast<unsigned long long>(state.generation),
+            static_cast<unsigned long long>(hash),
+            static_cast<unsigned long>(state.frequency_millihz),
+            (multi_profile_enabled_mask() & (1U << slot)) ? 1U : 0U,
+            state.current_shape.enabled ? 1U : 0U,
+            static_cast<long>(state.current_shape.dc_offset_permille),
+            static_cast<unsigned long>(state.current_shape.harmonic_permille),
+            static_cast<unsigned>(state.current_shape.harmonic_order),
+            static_cast<unsigned long>(state.current_shape.clip_permille));
         static constexpr const char* names[] = {"IA", "IB", "IC", "IN", "UA", "UB", "UC", "UN"};
         for (std::size_t i = 0; i < state.channels.size(); ++i) {
             const auto& ch = state.channels[i];
-            ESP_LOGI(kTag, "SVSTREAM slot=%lu channel=%s rms=%ld phase=%ld quality=%lu enabled=%u",
-                     static_cast<unsigned long>(slot_number), names[i],
+            ESP_LOGI(kTag, "SVSTREAM SNAP ROW slot=%lu generation=%llu channel=%s rms=%ld phase=%ld quality=%lu enabled=%u",
+                     static_cast<unsigned long>(slot_number),
+                     static_cast<unsigned long long>(state.generation), names[i],
                      static_cast<long>(ch.rms_counts),
                      static_cast<long>(ch.phase_millidegrees),
                      static_cast<unsigned long>(ch.quality), ch.enabled ? 1U : 0U);
         }
+        ESP_LOGI(kTag, "SVSTREAM SNAP END slot=%lu generation=%llu hash=%016llX",
+            static_cast<unsigned long>(slot_number),
+            static_cast<unsigned long long>(state.generation),
+            static_cast<unsigned long long>(hash));
         return;
     }
     if (std::strcmp(verb, "FREQ") == 0) {
