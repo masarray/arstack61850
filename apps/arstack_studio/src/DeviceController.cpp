@@ -3059,19 +3059,24 @@ void DeviceController::processLine(const QString& rawLine) {
             appendLog(QStringLiteral("!"), QStringLiteral(
                 "Firmware reboot detected on the same COM port; old profile and START revoked."));
         }
-        applyIdentity(std::move(parsedIdentity));
         if (newBoot) {
+            // Revoke V1 synchronization BEFORE deviceIdentityChanged is emitted:
+            // that supervisor callback may synchronously reconcile this boot.
             resetM4Reconnect(QStringLiteral("LEGACY"));
-            if (identity_.capabilities.contains(QStringLiteral("MULTISV-TX-LAB-PREVIEW"),
-                                                 Qt::CaseInsensitive)) {
+            if (parsedIdentity.capabilities.contains(QStringLiteral("MULTISV-TX-LAB-PREVIEW"),
+                                                     Qt::CaseInsensitive)) {
                 m4ReconnectMode_ = QStringLiteral("PENDING");
-                m4ReconnectBoot_ = identity_.bootId;
+                m4ReconnectBoot_ = parsedIdentity.bootId;
                 m4ReconnectAwaitingTx_ = true;
                 m4ReconnectTimer_.start();
                 emit m4ReconnectModeChanged();
-                if (!sendCommand(QStringLiteral("MULTISV SHOW")))
-                    resetM4Reconnect(QStringLiteral("UNKNOWN"));
             }
+        }
+        applyIdentity(std::move(parsedIdentity));
+        if (newBoot) {
+            if (m4ReconnectMode_ == QStringLiteral("PENDING") &&
+                !sendCommand(QStringLiteral("MULTISV SHOW")))
+                resetM4Reconnect(QStringLiteral("UNKNOWN"));
             emit profileStateChanged();
             emit ptpStateChanged();
         }
