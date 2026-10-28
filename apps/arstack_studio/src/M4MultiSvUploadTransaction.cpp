@@ -60,6 +60,28 @@ QString M4MultiSvUploadTransaction::identityHash() const {
         .rightJustified(16, QLatin1Char('0')).toUpper();
 }
 
+bool M4MultiSvUploadTransaction::matchesBoardRoster(
+    const QByteArray& expectedArm3, const QString& boardHash,
+    const QStringList& firmwareStreamLines) {
+    if (expectedArm3.isEmpty() || expectedArm3.size() >= 4096 ||
+        firmwareStreamLines.size() != 3 || boardHash.size() != 16) return false;
+    const auto source = std::span<const std::uint8_t>{
+        reinterpret_cast<const std::uint8_t*>(expectedArm3.constData()),
+        static_cast<std::size_t>(expectedArm3.size())};
+    const QString canonicalHash = QString::number(
+        static_cast<qulonglong>(sv_binary_profile_identity_hash(source)), 16)
+            .rightJustified(16, QLatin1Char('0')).toUpper();
+    if (canonicalHash != boardHash.toUpper()) return false;
+    M4MultiSvUploadTransaction checker;
+    const auto decoded = M4ThreeSvBinaryCodec::decode(source, checker.profiles_);
+    if (!decoded.success() || decoded.bytes != source.size()) return false;
+    for (const QString& line : firmwareStreamLines) {
+        if (!line.startsWith(QStringLiteral("MULTISV STREAM ")) ||
+            !checker.validateStream(line)) return false;
+    }
+    return checker.rowsVerified_ == 0x07U;
+}
+
 QString M4MultiSvUploadTransaction::value(
     const QString& line, const char* key) {
     const QString prefix = QString::fromLatin1(key) + QLatin1Char('=');

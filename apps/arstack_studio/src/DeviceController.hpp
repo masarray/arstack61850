@@ -85,6 +85,7 @@ class DeviceController : public QObject {
     Q_PROPERTY(bool m4ScenariosVerified READ m4ScenariosVerified NOTIFY m4DeploymentChanged)
     Q_PROPERTY(bool m4BoardInspecting READ m4BoardInspecting NOTIFY m4BoardChanged)
     Q_PROPERTY(QString m4ReconnectMode READ m4ReconnectMode NOTIFY m4ReconnectModeChanged)
+    Q_PROPERTY(QString m4BoardRosterHash READ m4BoardRosterHash NOTIFY m4ReconnectModeChanged)
     Q_PROPERTY(QVariantList m4BoardSnapshots READ m4BoardSnapshots NOTIFY m4BoardChanged)
     Q_PROPERTY(QString m4BoardStatus READ m4BoardStatus NOTIFY m4BoardChanged)
     Q_PROPERTY(QString m4ScenarioStatus READ m4ScenarioStatus NOTIFY m4DeploymentChanged)
@@ -203,6 +204,9 @@ public:
     [[nodiscard]] QVariantList m4BoardSnapshots() const { return m4BoardSnapshots_; }
     [[nodiscard]] QString m4BoardStatus() const { return m4BoardStatus_; }
     [[nodiscard]] QString m4ReconnectMode() const { return m4ReconnectMode_; }
+    [[nodiscard]] QString m4BoardRosterHash() const { return m4ReconnectRosterHash_; }
+    // Exact three original firmware STREAM records, only exposed for SELECTED.
+    [[nodiscard]] QStringList m4BoardRosterLines() const { return m4ReconnectRosterLines_; }
     [[nodiscard]] QString m4ScenarioStatus() const { return m4ScenarioStatus_; }
     [[nodiscard]] QString profileDeploymentProgressSummary() const;
     [[nodiscard]] bool ptpAvailable() const noexcept;
@@ -559,6 +563,7 @@ private:
     bool m4ReconnectAwaitingTx_{false};
     quint64 m4ReconnectRosterGeneration_{0};
     QString m4ReconnectRosterHash_;
+    QStringList m4ReconnectRosterLines_;
     QString m4BoardInFlight_;
     quint64 m4BoardSession_{0};
     bool m4BoardInspecting_{false};

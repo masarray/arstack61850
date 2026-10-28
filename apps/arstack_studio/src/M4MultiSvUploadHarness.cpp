@@ -108,6 +108,44 @@ void happyPath(const QByteArray& image) {
     check(x.verified() && x.generation() == 17 && x.takeCommand().isEmpty(),
           "three verified stream identities and selected firmware roster");
 }
+void reconnectRosterSclMatch(const QByteArray& image) {
+    M4MultiSvUploadTransaction tx;
+    check(tx.start(image, kBoot), "real SCD ARM3 must decode");
+    const QString hash = tx.identityHash();
+    QStringList rows{stream(1), stream(2), stream(3)};
+    const auto matches = [&image, &hash](const QStringList& wire) {
+        return M4MultiSvUploadTransaction::matchesBoardRoster(image, hash, wire);
+    };
+    check(matches(rows), "exact three firmware identities match original SCD");
+    const auto rejectChange = [&matches, &rows](const QString& original,
+                                                  const QString& changed) {
+        auto modified = rows;
+        modified[1].replace(original, changed);
+        check(!matches(modified), "changed firmware roster field must fail closed");
+    };
+    rejectChange(QStringLiteral("svID=MU01_SV2"), QStringLiteral("svID=WRONG_MU"));
+    rejectChange(QStringLiteral("APPID=0x4000"), QStringLiteral("APPID=0x4001"));
+    rejectChange(QStringLiteral("MAC=01:0C:CD:04:00:02"),
+                 QStringLiteral("MAC=01:0C:CD:04:00:09"));
+    rejectChange(QStringLiteral("VLAN=1/0/4"), QStringLiteral("VLAN=1/23/4"));
+    rejectChange(QStringLiteral("rate=4000"), QStringLiteral("rate=3999"));
+    rejectChange(QStringLiteral("wrap=4000"), QStringLiteral("wrap=8192"));
+    rejectChange(QStringLiteral("confRev=1"), QStringLiteral("confRev=2"));
+    auto duplicate = rows;
+    duplicate[1] = duplicate[0];
+    check(!matches(duplicate), "duplicate MU cannot satisfy 3/3 roster");
+    check(!M4MultiSvUploadTransaction::matchesBoardRoster(
+        image, QStringLiteral("FFFFFFFFFFFFFFFF"), rows),
+        "different ARM3 whole-envelope hash cannot match");
+    check(!M4MultiSvUploadTransaction::matchesBoardRoster(
+        image, hash, {rows[0], rows[1]}),
+        "incomplete firmware roster cannot match SCD");
+    auto corrupt = image;
+    corrupt[corrupt.size()-1] = static_cast<char>(corrupt.back() ^ 1);
+    check(!M4MultiSvUploadTransaction::matchesBoardRoster(corrupt, hash, rows),
+        "CRC-corrupt expected SCD binary cannot match board");
+}
+
 void negativeCases(const QByteArray& image) {
     M4MultiSvUploadTransaction x;
     auto corrupt = image;
@@ -311,10 +349,11 @@ int main(int argc, char** argv) {
     try {
         const auto image = fixtureEnvelope();
         happyPath(image);
+        reconnectRosterSclMatch(image);
         negativeCases(image);
         testThreeMuScenarioApply();
         testBoardSnapshots();
-        qInfo("PASS: complete 3-MU atomic firmware snapshot hash/CT/quality/reboot, scenario preflight/COMMIT/READBACK, and ACK-driven M4 48B chunks, BEGIN/VALIDATE/COMMIT/SHOW/SELECT, "
+        qInfo("PASS: exact 3-MU SCD/board roster matcher plus complete 3-MU atomic firmware snapshot hash/CT/quality/reboot, scenario preflight/COMMIT/READBACK, and ACK-driven M4 48B chunks, BEGIN/VALIDATE/COMMIT/SHOW/SELECT, "
               "full hash and three-MU readback, stale transaction and boot-fault guards");
         return 0;
     } catch (const std::exception& e) {

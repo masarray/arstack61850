@@ -5,6 +5,7 @@
 
 #include <QByteArray>
 #include <QString>
+#include <QStringList>
 #include <array>
 #include <cstdint>
 
@@ -30,6 +31,11 @@ public:
     [[nodiscard]] bool verified() const noexcept { return stage_ == Stage::verified; }
     [[nodiscard]] QString error() const { return error_; }
     [[nodiscard]] QString identityHash() const;
+    // Read-only reconnect proof: same ARM3 decoder and per-stream validator as
+    // the ACK-gated deploy; never trust a matching hash alone.
+    [[nodiscard]] static bool matchesBoardRoster(
+        const QByteArray& expectedArm3, const QString& boardHash,
+        const QStringList& firmwareStreamLines);
     [[nodiscard]] std::uint64_t generation() const noexcept { return generation_; }
     [[nodiscard]] std::uint32_t transaction() const noexcept { return transaction_; }
 

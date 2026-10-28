@@ -2444,6 +2444,7 @@ void DeviceController::resetM4Reconnect(const QString& mode) {
     m4ReconnectAwaitingTx_ = false;
     m4ReconnectRosterGeneration_ = 0;
     m4ReconnectRosterHash_.clear();
+    m4ReconnectRosterLines_.clear();
     m4ReconnectBoot_.clear();
     if (m4ReconnectMode_ != mode) {
         m4ReconnectMode_ = mode;
@@ -2508,6 +2509,7 @@ bool DeviceController::processM4ReconnectLine(const QString& line) {
                 resetM4Reconnect(QStringLiteral("UNKNOWN"));
             } else {
                 m4ReconnectStreamMask_ |= bit;
+                m4ReconnectRosterLines_.push_back(reply);
                 if (m4ReconnectStreamMask_ == 7U) {
                     m4ReconnectTimer_.stop();
                     m4ReconnectMode_ = QStringLiteral("SELECTED");
