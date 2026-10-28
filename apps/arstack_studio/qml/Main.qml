@@ -1335,7 +1335,9 @@ ApplicationWindow {
 
         RowLayout {
             id: m4PaginationStrip
-            visible: sclProfiles.m4DraftSupported || m4Pages.active
+            visible: sclProfiles.m4DraftSupported || m4Pages.active ||
+                     (workflowBar.session && workflowBar.session.canInspectMultiSvBoard) ||
+                     device.m4BoardInspecting || device.m4BoardSnapshots.length === 3
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 31 : 0
             spacing: 5
@@ -1421,7 +1423,8 @@ ApplicationWindow {
                 }
             }
             Button {
-                visible: sclProfiles.m4DraftSupported || device.m4BoardSnapshots.length === 3
+                visible: device.deviceVerified || device.m4BoardInspecting ||
+                         device.m4BoardSnapshots.length === 3
                 enabled: workflowBar.session && workflowBar.session.canInspectMultiSvBoard &&
                          !workflowBar.startQueued
                 text: device.m4BoardInspecting ? "Reading…" : "Inspect board"
@@ -1435,7 +1438,8 @@ ApplicationWindow {
                 }
             }
             Button {
-                enabled: !device.m4Deploying && !device.m4ScenarioApplying
+                enabled: (m4Pages.active || sclProfiles.m4DraftSupported) &&
+                         !device.m4Deploying && !device.m4ScenarioApplying
                 text: m4Pages.active ? "Close MU pages" : "Open MU pages"
                 font.family: root.uiFont
                 font.pixelSize: 10

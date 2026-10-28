@@ -199,6 +199,7 @@ DeviceController::DeviceController(QObject* parent) : QObject(parent) {
     };
     connect(this, &DeviceController::profileStateChanged, this, drainDeferred);
     connect(this, &DeviceController::m4DeploymentChanged, this, drainDeferred);
+    connect(this, &DeviceController::m4BoardChanged, this, drainDeferred);
     connect(this, &DeviceController::scenarioStateChanged, this, drainDeferred);
     ioWorker_ = new DeviceIoWorker;
     ioWorker_->moveToThread(&ioThread_);
@@ -2184,6 +2185,12 @@ bool DeviceController::sendQuietCommand(const QString& command) {
 bool DeviceController::sendCommandBatch(const QStringList& commands, const bool quiet, const bool exclusive) {
     const bool single = !exclusive && commands.size() == 1;
     const QString onlyCommand = single ? commands.constFirst() : QString{};
+    // PTP STOP has higher safety priority than non-mutating MU inspection;
+    // never let the reader postpone STOP readback beyond its own deadline.
+    if (m4BoardInspecting_ &&
+        (onlyCommand == QStringLiteral("PTP STOP") ||
+         onlyCommand == QStringLiteral("STOP")))
+        cancelM4Board(QStringLiteral("Safety STOP preempted read-only MU inspection."));
     const bool readback = onlyCommand == QStringLiteral("SHOW") ||
         onlyCommand == QStringLiteral("PROFILE SHOW") ||
         onlyCommand == QStringLiteral("PTP SHOW");
@@ -2283,7 +2290,7 @@ bool DeviceController::sendCommandBatch(const QStringList& commands, const bool 
 }
 
 void DeviceController::flushDeferredReadbacks() {
-    if (m4Deploying_ || m4ScenarioApplying_ || m4ScenarioRetiring_ || profileDeploying_ || binaryProfileStage_ != BinaryProfileStage::idle ||
+    if (m4BoardInspecting_ || m4Deploying_ || m4ScenarioApplying_ || m4ScenarioRetiring_ || profileDeploying_ || binaryProfileStage_ != BinaryProfileStage::idle ||
         scenarioStage_ != ScenarioStage::idle ||
         !connected_ || !ioWorkerReady_ || ioWorker_ == nullptr || sessionGeneration_ == 0)
         return;
