@@ -62,6 +62,8 @@ public:
             {"M4 per-MU CFG STOP aborts serial queue without V1 START", m4PerMuScenarioStopGuard()},
             {"M4 timeout retires unsent exclusive CFG without unsolicited STOP", m4RetireExclusiveQueueWithoutStop()},
             {"M4 board inspection defers refresh but PTP STOP preempts it", m4BoardInspectionPtpSafetyPreempts()},
+            {"M4 reconnect selected roster blocks legacy V1 sync and awaits read-only banks", m4ReconnectSelectedGate()},
+            {"M4 reconnect uncertain roster never guesses legacy", m4ReconnectUnknownGate()},
             {"legacy bare SV START refuses stale eight-channel state", legacyBareStartFailsClosed()},
             {"SV commit ACK/readback START chain is generation bound", svTransactionAckChain()},
             {"SV stale ACK and mismatched firmware readback fail closed", svTransactionNegativeAcks()},
@@ -2157,6 +2159,50 @@ private:
         return deferred && !d.m4BoardInspecting_ && !d.m4BoardTimer_.isActive() &&
             d.m4BoardStatus().contains(QStringLiteral("STOP")) &&
             d.deferredPtpShow_ && d.m4BoardSnapshots_.isEmpty();
+    }
+
+    static bool m4ReconnectSelectedGate() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
+        auto& d = fixture.device;
+        auto& sup = fixture.session;
+        d.m4ReconnectMode_ = QStringLiteral("PENDING");
+        d.m4ReconnectBoot_ = d.identity_.bootId;
+        d.m4ReconnectAwaitingTx_ = false;
+        d.m4ReconnectTimer_.start(5000);
+        emit d.m4ReconnectModeChanged();
+        if (sup.startReady() || sup.state() != QStringLiteral("READING BOARD ROSTER"))
+            return false;
+        const QString pfx = QStringLiteral("I (456) multi: ");
+        d.processLine(pfx + QStringLiteral("MULTISV STATUS staging=0 validated=0 transaction=4 received=0 expected=0 last=4 configured=1 generation=5 hash=0123456789ABCDEF bytes=333 output=OPT_IN_THREE_SV_TX_PREVIEW"));
+        d.processLine(pfx + QStringLiteral("MULTISV TXMODE selected=1 configured=1 (START uses selected roster; STOP ends TX)"));
+        for (int slot = 1; slot <= 3; ++slot) {
+            d.processLine(pfx + QStringLiteral("MULTISV STREAM slot=%1 svID=MU%1 APPID=0x4000 MAC=01:0C:CD:04:00:0%1 VLAN=0/0/4 rate=4000 wrap=4000 noASDU=1 confRev=1 output=INACTIVE").arg(slot));
+        }
+        const bool result = d.m4ReconnectMode() == QStringLiteral("SELECTED") &&
+            sup.m4Mode_ && !sup.startReady() && !sup.canDeployProfile() &&
+            !d.m4ReconnectTimer_.isActive() &&
+            d.m4ReconnectRosterGeneration_ == 5 &&
+            d.m4ReconnectStreamMask_ == 7U && !d.profileDeploying_;
+        // Avoid a later queued read-only worker action after fixture retirement.
+        return result;
+    }
+
+    static bool m4ReconnectUnknownGate() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
+        auto& d = fixture.device;
+        auto& sup = fixture.session;
+        d.m4ReconnectMode_ = QStringLiteral("PENDING");
+        d.m4ReconnectBoot_ = d.identity_.bootId;
+        d.m4ReconnectAwaitingTx_ = false;
+        emit d.m4ReconnectModeChanged();
+        d.processLine(QStringLiteral("MULTISV STATUS configured=1 generation=5 hash=bad"));
+        return d.m4ReconnectMode() == QStringLiteral("UNKNOWN") &&
+            !sup.startReady() && !d.profileDeploying_ &&
+            sup.state() == QStringLiteral("BOARD MODE UNVERIFIED");
     }
 
     static bool workerTeardownCompletes() {
