@@ -193,6 +193,16 @@ bool SmartSessionController::canApplyMultiSvScenarios() const noexcept {
         profiles_->m4DraftSupported() &&
         device_->m4DeployedHash() == profiles_->m4ConfigurationHash();
 }
+bool SmartSessionController::canInspectMultiSvBoard() const noexcept {
+    // Explicit board inspection remains available after reconnect, including
+    // autonomous RUNNING state, without selecting or deploying any GUI draft.
+    return deviceControlAvailable() && !device_->m4BoardInspecting() &&
+        !device_->m4Deploying() && !device_->m4ScenarioApplying() &&
+        !device_->profileDeploying() && !device_->scenarioApplying() &&
+        !device_->ptpStarting() && profileSyncStage_ != ProfileSyncStage::deploying &&
+        device_->capabilities().contains(QStringLiteral("MULTISV-TX-LAB-PREVIEW"),
+                                          Qt::CaseInsensitive);
+}
 bool SmartSessionController::liveControlReady() const noexcept {
     return !m4Mode_ && deviceControlAvailable() && !device_->profileDeploying() &&
         (startReady_ || device_->running());
@@ -448,6 +458,13 @@ bool SmartSessionController::requestApplyMultiSvScenarios(const QVariantList& dr
     return started;
 }
 
+bool SmartSessionController::requestInspectMultiSvBoard() {
+    if (!canInspectMultiSvBoard()) return false;
+    // Never change the running board or rewrite a restored draft.
+    const bool accepted = device_->inspectMultiSvBoard();
+    reconcile();
+    return accepted;
+}
 bool SmartSessionController::requestProfileSync() {
     if (!canDeployProfile()) return false;
     resetProfileSync(true);
@@ -850,6 +867,9 @@ void SmartSessionController::reconnectDeviceSignals() {
     });
     connect(device_, &DeviceController::profileStateChanged, this, [this] {
         handleProfileStateChanged();
+        reconcile();
+    });
+    connect(device_, &DeviceController::m4BoardChanged, this, [this] {
         reconcile();
     });
     connect(device_, &DeviceController::m4DeploymentChanged, this, [this] {

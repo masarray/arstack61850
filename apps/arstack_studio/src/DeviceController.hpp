@@ -3,6 +3,7 @@
 
 #include "M4MultiSvUploadTransaction.hpp"
 #include "M4ThreeMuScenarioApply.hpp"
+#include "M4ThreeMuBoardReadback.hpp"
 #include <QByteArray>
 #include <QElapsedTimer>
 #include <cstdint>
@@ -81,6 +82,9 @@ class DeviceController : public QObject {
     Q_PROPERTY(QString m4DeployedHash READ m4DeployedHash NOTIFY m4DeploymentChanged)
     Q_PROPERTY(bool m4ScenarioApplying READ m4ScenarioApplying NOTIFY m4DeploymentChanged)
     Q_PROPERTY(bool m4ScenariosVerified READ m4ScenariosVerified NOTIFY m4DeploymentChanged)
+    Q_PROPERTY(bool m4BoardInspecting READ m4BoardInspecting NOTIFY m4BoardChanged)
+    Q_PROPERTY(QVariantList m4BoardSnapshots READ m4BoardSnapshots NOTIFY m4BoardChanged)
+    Q_PROPERTY(QString m4BoardStatus READ m4BoardStatus NOTIFY m4BoardChanged)
     Q_PROPERTY(QString m4ScenarioStatus READ m4ScenarioStatus NOTIFY m4DeploymentChanged)
     Q_PROPERTY(bool ptpAvailable READ ptpAvailable NOTIFY ptpStateChanged)
     Q_PROPERTY(bool ptpRunning READ ptpRunning NOTIFY ptpStateChanged)
@@ -193,6 +197,9 @@ public:
     [[nodiscard]] QString m4DeployedHash() const { return m4DeployedHash_; }
     [[nodiscard]] bool m4ScenarioApplying() const noexcept { return m4ScenarioApplying_ || m4ScenarioRetiring_; }
     [[nodiscard]] bool m4ScenariosVerified() const noexcept { return m4ScenariosVerified_; }
+    [[nodiscard]] bool m4BoardInspecting() const noexcept { return m4BoardInspecting_; }
+    [[nodiscard]] QVariantList m4BoardSnapshots() const { return m4BoardSnapshots_; }
+    [[nodiscard]] QString m4BoardStatus() const { return m4BoardStatus_; }
     [[nodiscard]] QString m4ScenarioStatus() const { return m4ScenarioStatus_; }
     [[nodiscard]] QString profileDeploymentProgressSummary() const;
     [[nodiscard]] bool ptpAvailable() const noexcept;
@@ -294,6 +301,7 @@ public:
     // Exclusive SCD-based, operator-initiated M4 transaction, not V1 auto sync.
     bool deployMultiSv(const QByteArray& arm3);
     bool applyMultiSvScenarios(const QVariantList& drafts);
+    bool inspectMultiSvBoard(); // read-only: no draft writes and no START
 
     void abandonProfileDeployment();
 
@@ -359,6 +367,7 @@ signals:
     void profileStateChanged();
     void profileDeploymentProgress();
     void m4DeploymentChanged();
+    void m4BoardChanged();
     void ptpStateChanged();
     void deviceMessage(const QString& message);
     void scenarioStateChanged();
@@ -445,6 +454,9 @@ private:
     void cancelM4Scenarios(const QString& reason);
     bool dispatchM4ScenarioStep();
     bool processM4ScenarioLine(const QString& line);
+    bool processM4BoardLine(const QString& line);
+    bool dispatchM4BoardShow();
+    void cancelM4Board(const QString& why);
     void failScenarioStart(const QString& message);
     bool submitScenario(const QVariantMap& scenario, bool starting);
     void resetScenarioStart() noexcept;
@@ -528,6 +540,14 @@ private:
     bool m4ScenarioRetiring_{false};
     bool m4ScenariosVerified_{false};
     bool m4ScenarioDispatching_{false};
+    M4ThreeMuBoardReadback m4BoardReadback_;
+    QTimer m4BoardTimer_;
+    QVariantList m4BoardSnapshots_;
+    QString m4BoardStatus_{QStringLiteral("No board MU snapshot verified")};
+    QString m4BoardInFlight_;
+    quint64 m4BoardSession_{0};
+    bool m4BoardInspecting_{false};
+    bool m4BoardDispatching_{false};
     // One coalesced readback of each kind; no second serial writer or retry loop.
     bool deferredShow_{false};
     bool deferredProfileShow_{false};

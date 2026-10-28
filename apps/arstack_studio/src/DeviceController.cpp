@@ -150,6 +150,12 @@ DeviceController::DeviceController(QObject* parent) : QObject(parent) {
     });
     // Per-MU CFG transactions are bounded on the UI control thread only;
     // the 4kHz firmware sample loop never waits on these timers.
+    m4BoardTimer_.setSingleShot(true);
+    m4BoardTimer_.setInterval(6000);
+    connect(&m4BoardTimer_, &QTimer::timeout, this, [this] {
+        if (m4BoardInspecting_) cancelM4Board(
+            QStringLiteral("3-MU board inspection timed out; no snapshot adopted."));
+    });
     m4ScenarioTimer_.setSingleShot(true);
     m4ScenarioTimer_.setInterval(7000);
     connect(&m4ScenarioTimer_, &QTimer::timeout, this, [this] {
@@ -212,6 +218,7 @@ bool DeviceController::shutdown() {
     shuttingDown_ = true;
     pendingAutoDetect_ = false;
     pendingConnectPort_.clear();
+    cancelM4Board(QStringLiteral("Studio closing; board MU snapshots invalidated."));
     cancelM4Scenarios(QStringLiteral("Studio closing; per-MU board state must be re-read."));
     cancelM4(QStringLiteral("Studio closing; M4 transaction no longer verified."));
     // USB/Studio process lifetime is not the ESP32-P4's publisher lifetime.
@@ -430,6 +437,11 @@ void DeviceController::connectWorkerSignals() {
         if (command == QStringLiteral("HEARTBEAT"))
             appendLog(QStringLiteral("HB-TX"), QStringLiteral("HEARTBEAT host drained serial bytes"));
         else if (!quiet) appendLog(QStringLiteral("→"), command);
+        if (m4BoardInspecting_ && generation == m4BoardSession_ &&
+            command == m4BoardInFlight_) {
+            m4BoardInFlight_.clear();
+            m4BoardTimer_.start();
+        }
         if (m4Deploying_ && generation == m4SessionGeneration_ &&
             command == m4InFlightCommand_) {
             // Worker has actually written the UART bytes; only now are
@@ -450,6 +462,8 @@ void DeviceController::connectWorkerSignals() {
     connect(ioWorker_, &DeviceIoWorker::commandRejected, this,
             [this](const quint64 generation, const QString& message) {
         if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
+        if (m4BoardInspecting_) cancelM4Board(
+            QStringLiteral("M4 read-only serial command rejected: ") + message);
         if (m4Deploying_)
             cancelM4(QStringLiteral("M4 serial command rejected: ") + message);
         if (m4ScenarioApplying_)
@@ -481,6 +495,8 @@ void DeviceController::connectWorkerSignals() {
             [this](const quint64 generation, const QString& message, const bool fatal) {
         if (!workerEventIsCurrent(sessionGeneration_, generation)) return;
         Q_UNUSED(fatal)
+        if (m4BoardInspecting_) cancelM4Board(
+            QStringLiteral("M4 board readback transport error: ") + message);
         if (m4Deploying_)
             cancelM4(QStringLiteral("M4 transport failure: ") + message);
         if (m4ScenarioApplying_)
@@ -565,6 +581,7 @@ QString DeviceController::ptpTxFailures() const { return ptpTxFailures_; }
 
 void DeviceController::setSessionGeneration(const quint64 generation) {
     if (generation == 0 || generation == sessionGeneration_) return;
+    cancelM4Board(QStringLiteral("Device session changed; board MU snapshot revoked."));
     cancelM4Scenarios(QStringLiteral("Device session changed; per-MU proof revoked."));
     m4ScenarioRetiring_ = false; // new worker epoch discards old queued commands
     cancelM4(QStringLiteral("Device session generation changed; previous M4 proof revoked."));
@@ -760,6 +777,7 @@ void DeviceController::handlePortOpened(const QString& portName, const bool auto
     profileArmed_ = false;
     profileWasReused_ = false;
     profileDeploying_ = false;
+    cancelM4Board(QStringLiteral("Port reopened; board MU snapshot revoked."));
     cancelM4Scenarios(QStringLiteral("Port reopened; per-MU proof revoked."));
     m4ScenarioRetiring_ = false;
     cancelM4(QStringLiteral("Serial session reopened; previous M4 proof retired."));
@@ -794,6 +812,7 @@ void DeviceController::handlePortClosed(const QString& portName) {
     profileDeploying_ = false;
     profileArmed_ = false;
     profileWasReused_ = false;
+    cancelM4Board(QStringLiteral("Port closed; board MU snapshot revoked."));
     cancelM4Scenarios(QStringLiteral("Port closed; per-MU readback invalid."));
     m4ScenarioRetiring_ = false;
     cancelM4(QStringLiteral("Serial session closed; M4 readback no longer valid."));
@@ -956,6 +975,7 @@ bool DeviceController::submitScenario(const QVariantMap& scenario, const bool st
     return true;
 }
 bool DeviceController::stop() {
+    cancelM4Board(QStringLiteral("Operator STOP: board MU snapshots must be inspected again."));
     if (m4ScenarioApplying_) cancelM4Scenarios(QStringLiteral("Explicit STOP cancelled per-MU CFG transaction."));
     if (m4Deploying_) cancelM4(QStringLiteral("M4 upload cancelled by explicit operator STOP."));
     operatorStopPending_ = true;
@@ -1126,6 +1146,8 @@ bool DeviceController::deployProfile(const QVariantMap& profile) {
 
 
 bool DeviceController::deployMultiSv(const QByteArray& arm3) {
+    if (m4BoardInspecting_) return false;
+    cancelM4Board(QStringLiteral("M4 roster changing; previous bank snapshot stale."));
     // Config is operator-initiated and independent from V1 profile auto-sync.
     // A staging-only board is not a TX-capable board: require BOTH tags.
     if (!deviceVerified_ || !connected_ || !ioWorkerReady_ ||
@@ -1225,6 +1247,8 @@ bool DeviceController::processM4Line(const QString& line) {
 
 
 bool DeviceController::applyMultiSvScenarios(const QVariantList& drafts) {
+    if (m4BoardInspecting_) return false;
+    cancelM4Board(QStringLiteral("M4 scenario changed; previous bank snapshot stale."));
     if (!connected_ || !deviceVerified_ || !ioWorkerReady_ || !m4Ready_ ||
         m4Deploying_ || m4ScenarioApplying_ || m4ScenarioRetiring_ || running_ || ptpStarting() ||
         profileDeploying_ || scenarioStage_ != ScenarioStage::idle ||
@@ -1321,6 +1345,87 @@ bool DeviceController::processM4ScenarioLine(const QString& line) {
         emit m4DeploymentChanged();
     } else {
         static_cast<void>(dispatchM4ScenarioStep());
+    }
+    return true;
+}
+
+bool DeviceController::inspectMultiSvBoard() {
+    // Pure readback; safe while an autonomous M4 group is RUNNING.
+    if (!connected_ || !deviceVerified_ || !ioWorkerReady_ || ioWorker_ == nullptr ||
+        m4Deploying_ || m4ScenarioApplying_ || m4ScenarioRetiring_ ||
+        m4BoardInspecting_ || profileDeploying_ ||
+        scenarioStage_ != ScenarioStage::idle || ptpStarting() ||
+        sessionGeneration_ == 0 || identity_.bootId.size() != 16 ||
+        !identity_.capabilities.contains(QStringLiteral("MULTISV-TX-LAB-PREVIEW"),
+                                          Qt::CaseInsensitive)) {
+        setError(QStringLiteral("3-MU readback requires an idle verified M4-capable serial session."));
+        return false;
+    }
+    if (!m4BoardReadback_.start(identity_.bootId)) return false;
+    m4BoardSnapshots_.clear();
+    m4BoardInspecting_ = true;
+    m4BoardSession_ = sessionGeneration_;
+    m4BoardStatus_ = QStringLiteral("Reading exact MU1/2/3 firmware banks; not changing output.");
+    emit m4BoardChanged();
+    return dispatchM4BoardShow();
+}
+
+void DeviceController::cancelM4Board(const QString& why) {
+    if (!m4BoardInspecting_ && m4BoardSnapshots_.isEmpty()) return;
+    m4BoardTimer_.stop();
+    m4BoardReadback_.cancel(why);
+    m4BoardInFlight_.clear();
+    m4BoardInspecting_ = false;
+    m4BoardSnapshots_.clear();
+    m4BoardStatus_ = why;
+    emit m4BoardChanged();
+}
+
+bool DeviceController::dispatchM4BoardShow() {
+    if (!m4BoardInspecting_ || !connected_ || !deviceVerified_ ||
+        sessionGeneration_ != m4BoardSession_) {
+        cancelM4Board(QStringLiteral("3-MU inspection session changed."));
+        return false;
+    }
+    const QString command=m4BoardReadback_.takeCommand();
+    if (command.isEmpty()) {
+        cancelM4Board(QStringLiteral("M4 board snapshot did not produce a valid next SHOW."));
+        return false;
+    }
+    m4BoardInFlight_=command;
+    m4BoardTimer_.start();
+    m4BoardDispatching_=true;
+    const bool queued=sendCommand(command);
+    m4BoardDispatching_=false;
+    if (!queued) {
+        cancelM4Board(QStringLiteral("Device rejected read-only M4 SHOW request."));
+        return false;
+    }
+    return true;
+}
+
+bool DeviceController::processM4BoardLine(const QString& line) {
+    if(!m4BoardInspecting_ ||
+       (!line.contains(QStringLiteral("SVSTREAM SNAP ")) &&
+        !line.contains(QStringLiteral("SVSTREAM rejected")))) return false;
+    if(!connected_ || !deviceVerified_ || sessionGeneration_!=m4BoardSession_) {
+        cancelM4Board(QStringLiteral("3-MU inspection lost verified session."));
+        return true;
+    }
+    if(!m4BoardInFlight_.isEmpty()) return true;
+    const bool handled=m4BoardReadback_.receive(line,identity_.bootId);
+    if(!handled) return false;
+    if(m4BoardReadback_.stage()==M4ThreeMuBoardReadback::Stage::failed) {
+        cancelM4Board(m4BoardReadback_.error());
+    } else if(m4BoardReadback_.verified()) {
+        m4BoardTimer_.stop();
+        m4BoardSnapshots_=m4BoardReadback_.snapshots();
+        m4BoardInspecting_=false;
+        m4BoardStatus_=QStringLiteral("3/3 firmware banks verified (generation+hash+CT+quality); read-only, not a START proof.");
+        emit m4BoardChanged();
+    } else if(m4BoardReadback_.stage()==M4ThreeMuBoardReadback::Stage::send) {
+        m4BoardTimer_.stop();
+        static_cast<void>(dispatchM4BoardShow());
     }
     return true;
 }
@@ -2090,6 +2195,20 @@ bool DeviceController::sendCommandBatch(const QStringList& commands, const bool 
         }
         return true;
     };
+    if (m4BoardInspecting_) {
+        const bool one = !exclusive && commands.size() == 1;
+        const QString command = one ? commands.constFirst() : QString{};
+        const bool inspector = m4BoardDispatching_ && one &&
+            command == m4BoardInFlight_;
+        const bool safety = one && (command == QStringLiteral("STOP") ||
+            command == QStringLiteral("PTP STOP") ||
+            command == QStringLiteral("HEARTBEAT"));
+        if (!inspector && !safety) {
+            if (readback) return deferReadback();
+            setError(QStringLiteral("Read-only 3-MU board snapshot owns serial response order."));
+            return false;
+        }
+    }
     if (m4ScenarioApplying_ || m4ScenarioRetiring_) {
         const bool one = !exclusive && commands.size() == 1;
         const QString command = one ? commands.constFirst() : QString{};
@@ -2378,6 +2497,7 @@ void DeviceController::processLine(const QString& rawLine) {
     appendLog(QStringLiteral("←"), line);
     if (processM4Line(line)) return;
     if (processM4ScenarioLine(line)) return;
+    if (processM4BoardLine(line)) return;
 
     // Read-only 4I+4V sync after reconnect: a complete eight-row message
     // must match the verified boot and one bank generation, never just a
@@ -2767,6 +2887,7 @@ void DeviceController::processLine(const QString& rawLine) {
         const bool unexpectedDevice = deviceVerified_ &&
             !identity_.deviceId.isEmpty() && !sameDevice;
         if (unexpectedDevice) {
+            cancelM4Board(QStringLiteral("Foreign board identity; M4 readback revoked."));
             cancelM4Scenarios(QStringLiteral("Different board identity: MU banks unverified."));
             cancelM4(QStringLiteral("Different board identity: M4 roster proof revoked."));
             resetScenarioStart();
@@ -2791,6 +2912,7 @@ void DeviceController::processLine(const QString& rawLine) {
         const bool newBoot = sameDevice && !identity_.bootId.isEmpty() &&
             identity_.bootId != parsedIdentity.bootId;
         if (newBoot) {
+            cancelM4Board(QStringLiteral("Firmware reboot; M4 bank snapshot revoked."));
             cancelM4Scenarios(QStringLiteral("Firmware reboot: MU banks invalidated."));
             cancelM4(QStringLiteral("Firmware reboot: M4 transaction/readback revoked."));
             resetScenarioStart();
