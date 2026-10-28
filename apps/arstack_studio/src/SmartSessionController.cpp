@@ -5,6 +5,7 @@
 #include "DeviceController.hpp"
 #include "FirmwareManager.hpp"
 #include "SclProfileModel.hpp"
+#include "M4MultiSvUploadTransaction.hpp"
 
 #include <QVariantMap>
 #include <QStringList>
@@ -1109,6 +1110,9 @@ QString SmartSessionController::diagnosticsText() const {
             : firmwareIsCompatible() ? QStringLiteral("yes") : QStringLiteral("no"));
         add(QStringLiteral("M4 roster verified"), device_->m4Ready() ? QStringLiteral("yes") : QStringLiteral("no"));
         add(QStringLiteral("M4 deployed identity hash"), device_->m4DeployedHash());
+        add(QStringLiteral("M4 board-selected roster mode"), device_->m4ReconnectMode());
+        add(QStringLiteral("M4 board-selected roster hash"), device_->m4BoardRosterHash());
+        add(QStringLiteral("M4 board roster versus loaded SCD"), m4SclRosterMatch_);
         add(QStringLiteral("M4 roster upload"), device_->m4DeploymentStatus());
         add(QStringLiteral("M4 3-bank readback"), device_->m4ScenarioStatus());
         add(QStringLiteral("M4 all scenarios verified"), device_->m4ScenariosVerified() ? QStringLiteral("yes") : QStringLiteral("no"));
@@ -1340,8 +1344,34 @@ bool SmartSessionController::deviceControlAvailable() const noexcept {
         (firmware_ == nullptr || !firmware_->busy());
 }
 
+void SmartSessionController::refreshM4SclRosterMatch() {
+    QString key;
+    QString next = QStringLiteral("NOT VERIFIED");
+    if (device_ != nullptr && profiles_ != nullptr &&
+        device_->deviceVerified() &&
+        device_->m4ReconnectMode() == QStringLiteral("SELECTED")) {
+        key = device_->bootId() + QLatin1Char('|') +
+            device_->m4BoardRosterHash() + QLatin1Char('|') +
+            profiles_->m4ConfigurationHash() + QLatin1Char('|') +
+            device_->m4BoardRosterLines().join(QLatin1Char('\n'));
+        if (key == m4SclRosterCacheKey_) return;
+        next = !profiles_->m4DraftSupported() ? QStringLiteral("NO SCD")
+            : M4MultiSvUploadTransaction::matchesBoardRoster(
+                profiles_->m4ConfigurationBinary(), device_->m4BoardRosterHash(),
+                device_->m4BoardRosterLines())
+            ? QStringLiteral("MATCHED") : QStringLiteral("MISMATCH");
+    }
+    if (key == m4SclRosterCacheKey_ && next == m4SclRosterMatch_) return;
+    m4SclRosterCacheKey_ = std::move(key);
+    if (next != m4SclRosterMatch_) {
+        m4SclRosterMatch_ = std::move(next);
+        emit stateChanged();
+    }
+}
+
 void SmartSessionController::reconcile() {
     if (shuttingDown_) return;
+    refreshM4SclRosterMatch();
     if (device_ == nullptr || profiles_ == nullptr || firmware_ == nullptr) {
         setPresentation(
             QStringLiteral("INITIALIZING"),
@@ -1489,7 +1519,8 @@ void SmartSessionController::reconcile() {
             ? QStringLiteral("M4 BOARD ADOPTED (READ ONLY)")
             : QStringLiteral("BOARD MODE UNVERIFIED"),
             device_->m4ReconnectMode() == QStringLiteral("SELECTED")
-                ? QStringLiteral("Firmware selected 3-SV roster. Reading all three banks without modifying board or GUI drafts; START gated.")
+                ? QStringLiteral("Firmware selected 3-SV roster; loaded SCD: %1. 3-MU bank inspection remains read-only; START gated.")
+                    .arg(m4SclRosterMatch_)
                 : QStringLiteral("Waiting for authoritative MULTISV SHOW. No automatic V1 PROFILE or START."),
             false, false);
         return;

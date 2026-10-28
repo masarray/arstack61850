@@ -25,6 +25,7 @@ class SmartSessionController : public QObject {
     Q_PROPERTY(bool canDeployMultiSv READ canDeployMultiSv NOTIFY stateChanged)
     Q_PROPERTY(bool canApplyMultiSvScenarios READ canApplyMultiSvScenarios NOTIFY stateChanged)
     Q_PROPERTY(bool canInspectMultiSvBoard READ canInspectMultiSvBoard NOTIFY stateChanged)
+    Q_PROPERTY(QString m4SclRosterMatch READ m4SclRosterMatch NOTIFY stateChanged)
     Q_PROPERTY(bool liveControlReady READ liveControlReady NOTIFY stateChanged)
     Q_PROPERTY(bool engineeringEditable READ engineeringEditable NOTIFY stateChanged)
     Q_PROPERTY(bool firmwareUpdateRequired READ firmwareUpdateRequired NOTIFY stateChanged)
@@ -83,6 +84,7 @@ public:
     [[nodiscard]] bool canDeployMultiSv() const noexcept;
     [[nodiscard]] bool canApplyMultiSvScenarios() const noexcept;
     [[nodiscard]] bool canInspectMultiSvBoard() const noexcept;
+    [[nodiscard]] QString m4SclRosterMatch() const { return m4SclRosterMatch_; }
     [[nodiscard]] bool liveControlReady() const noexcept;
     [[nodiscard]] bool engineeringEditable() const noexcept;
     [[nodiscard]] bool firmwareUpdateRequired() const noexcept;
@@ -378,6 +380,7 @@ private:
     void reconnectDeviceSignals();
     void reconnectProfileSignals();
     void reconnectFirmwareSignals();
+    void refreshM4SclRosterMatch();
     void refreshRecoveryOfferFromIdentity();
     void clearBlankBoardContext();
     void latchFirmwareFailure(QString message);
@@ -427,6 +430,8 @@ private:
     bool wasReady_{false};
     bool needsProfileSync_{true};
     bool m4Mode_{false}; // suppress V1 automatic profile sync after M4 operator intent
+    QString m4SclRosterMatch_{QStringLiteral("NOT VERIFIED")};
+    QString m4SclRosterCacheKey_;
     bool updateRequested_{false};
     bool updateWasOptional_{false};
     bool blankBoardDetected_{false};
