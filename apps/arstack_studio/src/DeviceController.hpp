@@ -84,6 +84,7 @@ class DeviceController : public QObject {
     Q_PROPERTY(bool m4ScenarioApplying READ m4ScenarioApplying NOTIFY m4DeploymentChanged)
     Q_PROPERTY(bool m4ScenariosVerified READ m4ScenariosVerified NOTIFY m4DeploymentChanged)
     Q_PROPERTY(bool m4BoardInspecting READ m4BoardInspecting NOTIFY m4BoardChanged)
+    Q_PROPERTY(QString m4ReconnectMode READ m4ReconnectMode NOTIFY m4ReconnectModeChanged)
     Q_PROPERTY(QVariantList m4BoardSnapshots READ m4BoardSnapshots NOTIFY m4BoardChanged)
     Q_PROPERTY(QString m4BoardStatus READ m4BoardStatus NOTIFY m4BoardChanged)
     Q_PROPERTY(QString m4ScenarioStatus READ m4ScenarioStatus NOTIFY m4DeploymentChanged)
@@ -201,6 +202,7 @@ public:
     [[nodiscard]] bool m4BoardInspecting() const noexcept { return m4BoardInspecting_; }
     [[nodiscard]] QVariantList m4BoardSnapshots() const { return m4BoardSnapshots_; }
     [[nodiscard]] QString m4BoardStatus() const { return m4BoardStatus_; }
+    [[nodiscard]] QString m4ReconnectMode() const { return m4ReconnectMode_; }
     [[nodiscard]] QString m4ScenarioStatus() const { return m4ScenarioStatus_; }
     [[nodiscard]] QString profileDeploymentProgressSummary() const;
     [[nodiscard]] bool ptpAvailable() const noexcept;
@@ -369,6 +371,7 @@ signals:
     void profileDeploymentProgress();
     void m4DeploymentChanged();
     void m4BoardChanged();
+    void m4ReconnectModeChanged();
     void ptpStateChanged();
     void deviceMessage(const QString& message);
     void scenarioStateChanged();
@@ -456,6 +459,8 @@ private:
     bool dispatchM4ScenarioStep();
     bool processM4ScenarioLine(const QString& line);
     bool processM4BoardLine(const QString& line);
+    bool processM4ReconnectLine(const QString& line);
+    void resetM4Reconnect(const QString& mode);
     bool dispatchM4BoardShow();
     void cancelM4Board(const QString& why);
     void failScenarioStart(const QString& message);
@@ -545,6 +550,15 @@ private:
     QTimer m4BoardTimer_;
     QVariantList m4BoardSnapshots_;
     QString m4BoardStatus_{QStringLiteral("No board MU snapshot verified")};
+    QString m4ReconnectMode_{QStringLiteral("LEGACY")}; // PENDING, LEGACY, SELECTED or UNKNOWN
+    QString m4ReconnectBoot_;
+    QTimer m4ReconnectTimer_;
+    bool m4ReconnectStatusSeen_{false};
+    bool m4ReconnectSelectedSeen_{false};
+    quint8 m4ReconnectStreamMask_{0};
+    bool m4ReconnectAwaitingTx_{false};
+    quint64 m4ReconnectRosterGeneration_{0};
+    QString m4ReconnectRosterHash_;
     QString m4BoardInFlight_;
     quint64 m4BoardSession_{0};
     bool m4BoardInspecting_{false};

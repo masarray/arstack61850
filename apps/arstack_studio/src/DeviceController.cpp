@@ -152,6 +152,12 @@ DeviceController::DeviceController(QObject* parent) : QObject(parent) {
     });
     // Per-MU CFG transactions are bounded on the UI control thread only;
     // the 4kHz firmware sample loop never waits on these timers.
+    m4ReconnectTimer_.setSingleShot(true);
+    m4ReconnectTimer_.setInterval(5000);
+    connect(&m4ReconnectTimer_, &QTimer::timeout, this, [this] {
+        if (m4ReconnectMode_ == QStringLiteral("PENDING"))
+            resetM4Reconnect(QStringLiteral("UNKNOWN"));
+    });
     m4BoardTimer_.setSingleShot(true);
     m4BoardTimer_.setInterval(6000);
     connect(&m4BoardTimer_, &QTimer::timeout, this, [this] {
@@ -440,6 +446,8 @@ void DeviceController::connectWorkerSignals() {
         if (command == QStringLiteral("HEARTBEAT"))
             appendLog(QStringLiteral("HB-TX"), QStringLiteral("HEARTBEAT host drained serial bytes"));
         else if (!quiet) appendLog(QStringLiteral("→"), command);
+        if (m4ReconnectMode_ == QStringLiteral("PENDING") &&
+            command == QStringLiteral("MULTISV SHOW")) m4ReconnectAwaitingTx_ = false;
         if (m4BoardInspecting_ && generation == m4BoardSession_ &&
             command == m4BoardInFlight_) {
             m4BoardInFlight_.clear();
@@ -584,6 +592,7 @@ QString DeviceController::ptpTxFailures() const { return ptpTxFailures_; }
 
 void DeviceController::setSessionGeneration(const quint64 generation) {
     if (generation == 0 || generation == sessionGeneration_) return;
+    resetM4Reconnect(QStringLiteral("LEGACY"));
     cancelM4Board(QStringLiteral("Device session changed; board MU snapshot revoked."));
     cancelM4Scenarios(QStringLiteral("Device session changed; per-MU proof revoked."));
     m4ScenarioRetiring_ = false; // new worker epoch discards old queued commands
@@ -780,6 +789,7 @@ void DeviceController::handlePortOpened(const QString& portName, const bool auto
     profileArmed_ = false;
     profileWasReused_ = false;
     profileDeploying_ = false;
+    resetM4Reconnect(QStringLiteral("LEGACY"));
     cancelM4Board(QStringLiteral("Port reopened; board MU snapshot revoked."));
     cancelM4Scenarios(QStringLiteral("Port reopened; per-MU proof revoked."));
     m4ScenarioRetiring_ = false;
@@ -815,6 +825,7 @@ void DeviceController::handlePortClosed(const QString& portName) {
     profileDeploying_ = false;
     profileArmed_ = false;
     profileWasReused_ = false;
+    resetM4Reconnect(QStringLiteral("LEGACY"));
     cancelM4Board(QStringLiteral("Port closed; board MU snapshot revoked."));
     cancelM4Scenarios(QStringLiteral("Port closed; per-MU readback invalid."));
     m4ScenarioRetiring_ = false;
@@ -2425,9 +2436,112 @@ void DeviceController::clearIdentity() {
     emit deviceIdentityChanged();
 }
 
+void DeviceController::resetM4Reconnect(const QString& mode) {
+    m4ReconnectTimer_.stop();
+    m4ReconnectStatusSeen_ = false;
+    m4ReconnectSelectedSeen_ = false;
+    m4ReconnectStreamMask_ = 0;
+    m4ReconnectAwaitingTx_ = false;
+    m4ReconnectRosterGeneration_ = 0;
+    m4ReconnectRosterHash_.clear();
+    m4ReconnectBoot_.clear();
+    if (m4ReconnectMode_ != mode) {
+        m4ReconnectMode_ = mode;
+        emit m4ReconnectModeChanged();
+    }
+}
+
+bool DeviceController::processM4ReconnectLine(const QString& line) {
+    if (m4ReconnectMode_ != QStringLiteral("PENDING") ||
+        !line.contains(QStringLiteral("MULTISV "))) return false;
+    if (m4ReconnectAwaitingTx_) return true; // stale unsolicited reply before UART drain
+    if (!deviceVerified_ || m4ReconnectBoot_ != identity_.bootId) {
+        resetM4Reconnect(QStringLiteral("UNKNOWN"));
+        return true;
+    }
+    const auto at = line.indexOf(QStringLiteral("MULTISV "));
+    const QString reply = line.mid(at);
+    const auto field = [&reply](const QString& key) -> QString {
+        const QRegularExpression re(QStringLiteral("(?:^|\\s)") +
+            QRegularExpression::escape(key) + QStringLiteral("=([^\\s]+)"));
+        return re.match(reply).captured(1);
+    };
+    if (reply.startsWith(QStringLiteral("MULTISV STATUS "))) {
+        bool cfgOk = false, genOk = false, hashOk = false;
+        const auto configured = field(QStringLiteral("configured")).toUInt(&cfgOk);
+        const auto generation = field(QStringLiteral("generation")).toULongLong(&genOk);
+        const QString hash = field(QStringLiteral("hash"));
+        hash.toULongLong(&hashOk, 16);
+        if (!cfgOk || configured > 1 || !genOk || !hashOk || hash.size() != 16) {
+            resetM4Reconnect(QStringLiteral("UNKNOWN"));
+        } else {
+            m4ReconnectStatusSeen_ = true;
+            m4ReconnectRosterGeneration_ = generation;
+            m4ReconnectRosterHash_ = configured ? hash.toUpper() : QString{};
+            if (configured == 0 && m4ReconnectSelectedSeen_)
+                resetM4Reconnect(QStringLiteral("LEGACY"));
+        }
+        return true;
+    }
+    if (reply.startsWith(QStringLiteral("MULTISV TXMODE "))) {
+        bool selectedOk = false;
+        const auto selected = field(QStringLiteral("selected")).toUInt(&selectedOk);
+        if (!selectedOk || selected > 1) {
+            resetM4Reconnect(QStringLiteral("UNKNOWN"));
+        } else {
+            m4ReconnectSelectedSeen_ = true;
+            if (selected == 0 && m4ReconnectStatusSeen_)
+                resetM4Reconnect(QStringLiteral("LEGACY"));
+        }
+        return true;
+    }
+    if (reply.startsWith(QStringLiteral("MULTISV STREAM "))) {
+        bool slotOk = false;
+        const auto slot = field(QStringLiteral("slot")).toUInt(&slotOk);
+        if (!slotOk || slot < 1 || slot > 3 || !m4ReconnectStatusSeen_ ||
+            !m4ReconnectSelectedSeen_ || m4ReconnectRosterHash_.isEmpty()) {
+            resetM4Reconnect(QStringLiteral("UNKNOWN"));
+        } else {
+            const quint8 bit = static_cast<quint8>(1U << (slot - 1));
+            if (m4ReconnectStreamMask_ & bit || field(QStringLiteral("svID")).isEmpty() ||
+                field(QStringLiteral("MAC")).isEmpty() || field(QStringLiteral("APPID")).isEmpty()) {
+                resetM4Reconnect(QStringLiteral("UNKNOWN"));
+            } else {
+                m4ReconnectStreamMask_ |= bit;
+                if (m4ReconnectStreamMask_ == 7U) {
+                    m4ReconnectTimer_.stop();
+                    m4ReconnectMode_ = QStringLiteral("SELECTED");
+                    emit m4ReconnectModeChanged();
+                    // Read-only bank adoption is queued AFTER the roster probe.
+                    // Never update QML drafts or issue START on reconnect.
+                    QTimer::singleShot(0, this, [this] {
+                        if (m4ReconnectMode_ == QStringLiteral("SELECTED") &&
+                            connected_ && deviceVerified_ && !m4BoardInspecting_ &&
+                            !m4Deploying_ && !m4ScenarioApplying_)
+                            static_cast<void>(inspectMultiSvBoard());
+                    });
+                }
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
 void DeviceController::markDeviceVerified() {
     if (deviceVerified_) return;
     deviceVerified_ = true;
+    // Never surface LEGACY transiently to a synchronous supervisor callback.
+    resetM4Reconnect(QStringLiteral("UNKNOWN"));
+    if (identity_.capabilities.contains(QStringLiteral("MULTISV-TX-LAB-PREVIEW"),
+                                        Qt::CaseInsensitive)) {
+        m4ReconnectMode_ = QStringLiteral("PENDING");
+        m4ReconnectBoot_ = identity_.bootId;
+        m4ReconnectTimer_.start();
+        emit m4ReconnectModeChanged();
+    } else {
+        resetM4Reconnect(QStringLiteral("LEGACY"));
+    }
     recoveryCandidatePort_.clear();
     lastIdentificationPort_ = portName_;
     setIdentificationState(IdentificationState::Verified);
@@ -2445,6 +2559,10 @@ void DeviceController::markDeviceVerified() {
     static_cast<void>(sendShow());
     static_cast<void>(sendCommand(QStringLiteral("PROFILE SHOW")));
     static_cast<void>(sendPtpShow());
+    if (m4ReconnectMode_ == QStringLiteral("PENDING")) m4ReconnectAwaitingTx_ = true;
+    if (m4ReconnectMode_ == QStringLiteral("PENDING") &&
+        !sendCommand(QStringLiteral("MULTISV SHOW")))
+        resetM4Reconnect(QStringLiteral("UNKNOWN"));
 }
 
 void DeviceController::setError(const QString& message) {
@@ -2507,6 +2625,7 @@ void DeviceController::processLine(const QString& rawLine) {
     if (processM4Line(line)) return;
     if (processM4ScenarioLine(line)) return;
     if (processM4BoardLine(line)) return;
+    if (processM4ReconnectLine(line)) return;
 
     // Read-only 4I+4V sync after reconnect: a complete eight-row message
     // must match the verified boot and one bank generation, never just a
@@ -2943,8 +3062,26 @@ void DeviceController::processLine(const QString& rawLine) {
             appendLog(QStringLiteral("!"), QStringLiteral(
                 "Firmware reboot detected on the same COM port; old profile and START revoked."));
         }
+        if (newBoot) {
+            // Revoke V1 synchronization BEFORE deviceIdentityChanged is emitted:
+            // that supervisor callback may synchronously reconcile this boot.
+            resetM4Reconnect(QStringLiteral("UNKNOWN"));
+            if (parsedIdentity.capabilities.contains(QStringLiteral("MULTISV-TX-LAB-PREVIEW"),
+                                                     Qt::CaseInsensitive)) {
+                m4ReconnectMode_ = QStringLiteral("PENDING");
+                m4ReconnectBoot_ = parsedIdentity.bootId;
+                m4ReconnectAwaitingTx_ = true;
+                m4ReconnectTimer_.start();
+                emit m4ReconnectModeChanged();
+            } else {
+                resetM4Reconnect(QStringLiteral("LEGACY"));
+            }
+        }
         applyIdentity(std::move(parsedIdentity));
         if (newBoot) {
+            if (m4ReconnectMode_ == QStringLiteral("PENDING") &&
+                !sendCommand(QStringLiteral("MULTISV SHOW")))
+                resetM4Reconnect(QStringLiteral("UNKNOWN"));
             emit profileStateChanged();
             emit ptpStateChanged();
         }

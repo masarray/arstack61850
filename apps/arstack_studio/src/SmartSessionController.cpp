@@ -865,6 +865,13 @@ void SmartSessionController::reconnectDeviceSignals() {
         setPortOwner(PortOwner::none);
         QTimer::singleShot(0, this, [this] { continueFirmwareUpdate(); });
     });
+    connect(device_, &DeviceController::m4ReconnectModeChanged, this, [this] {
+        if (device_ != nullptr && device_->m4ReconnectMode() == QStringLiteral("SELECTED")) {
+            resetProfileSync(false);
+            m4Mode_ = true;
+        }
+        reconcile();
+    });
     connect(device_, &DeviceController::profileStateChanged, this, [this] {
         handleProfileStateChanged();
         reconcile();
@@ -1467,6 +1474,24 @@ void SmartSessionController::reconcile() {
                 .arg(versionText),
             false,
             true);
+        return;
+    }
+
+    // A reconnect cannot fall into V1 auto-PROFILE while the board's
+    // selected MULTISV roster is still unknown or already selected. A board
+    // may continue publishing independently of the USB/Studio lifetime.
+    if (device_->m4ReconnectMode() != QStringLiteral("LEGACY")) {
+        if (device_->m4ReconnectMode() == QStringLiteral("SELECTED"))
+            m4Mode_ = true;
+        setPresentation(device_->m4ReconnectMode() == QStringLiteral("PENDING")
+            ? QStringLiteral("READING BOARD ROSTER")
+            : device_->m4ReconnectMode() == QStringLiteral("SELECTED")
+            ? QStringLiteral("M4 BOARD ADOPTED (READ ONLY)")
+            : QStringLiteral("BOARD MODE UNVERIFIED"),
+            device_->m4ReconnectMode() == QStringLiteral("SELECTED")
+                ? QStringLiteral("Firmware selected 3-SV roster. Reading all three banks without modifying board or GUI drafts; START gated.")
+                : QStringLiteral("Waiting for authoritative MULTISV SHOW. No automatic V1 PROFILE or START."),
+            false, false);
         return;
     }
 
