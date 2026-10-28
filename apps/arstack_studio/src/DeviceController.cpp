@@ -1181,6 +1181,9 @@ bool DeviceController::deployMultiSv(const QByteArray& arm3) {
         return false;
     }
     cancelM4Scenarios(QStringLiteral("New ARM3 roster invalidates previous per-MU banks."));
+    // Firmware may already have committed a DIFFERENT roster at any failed
+    // upload stage. The old reconnect SHOW can never remain board authority.
+    resetM4Reconnect(QStringLiteral("UNKNOWN"));
     m4Ready_ = false;
     m4DeployedHash_.clear();
     m4Deploying_ = true;
@@ -1246,12 +1249,26 @@ bool DeviceController::processM4Line(const QString& line) {
         return true;
     }
     if (m4Upload_.verified()) {
+        const QStringList authoritativeRows = m4Upload_.selectedReadbackStreamLines();
+        if (authoritativeRows.size() != 3) {
+            cancelM4(QStringLiteral("M4 SELECT was acknowledged without three authoritative SHOW identities."));
+            return true;
+        }
         m4Deploying_ = false;
         m4Ready_ = true;
         m4DeployedHash_ = m4Upload_.identityHash();
         m4Status_ = QStringLiteral("3 MU identities read back; selected roster generation %1, hash %2. START awaits per-MU scenario gate.")
             .arg(m4Upload_.generation()).arg(m4Upload_.identityHash());
         m4InFlightCommand_.clear();
+        // Adopt NEW firmware-authoritative roster, never the stale
+        // reconnect snapshot. This fires the same cached SCD reconciliation.
+        m4ReconnectBoot_ = identity_.bootId;
+        m4ReconnectRosterHash_ = m4Upload_.identityHash();
+        m4ReconnectRosterGeneration_ = m4Upload_.generation();
+        m4ReconnectRosterLines_ = authoritativeRows;
+        m4ReconnectStreamMask_ = 0x07U;
+        m4ReconnectMode_ = QStringLiteral("SELECTED");
+        emit m4ReconnectModeChanged();
         emit m4DeploymentChanged();
         return true;
     }

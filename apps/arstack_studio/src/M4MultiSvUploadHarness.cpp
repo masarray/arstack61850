@@ -77,6 +77,8 @@ void advanceThroughChunks(M4MultiSvUploadTransaction& x) {
 void happyPath(const QByteArray& image) {
     M4MultiSvUploadTransaction x;
     check(x.start(image, kBoot), "begin validated transaction");
+    check(x.selectedReadbackStreamLines().isEmpty(),
+          "no SHOW identity proof before verified SELECT");
     check(x.takeCommand() == QStringLiteral("MULTISV STATUS"), "preflight status first");
     ack(x, status(false, 0, 8));
     check(x.takeCommand() == QStringLiteral("MULTISV BEGIN 9 ") +
@@ -107,6 +109,11 @@ void happyPath(const QByteArray& image) {
     ack(x, QStringLiteral("MULTISV TXMODE selected=1; next verified START uses THREE_SV"));
     check(x.verified() && x.generation() == 17 && x.takeCommand().isEmpty(),
           "three verified stream identities and selected firmware roster");
+    check(x.selectedReadbackStreamLines() == QStringList{stream(1), stream(2), stream(3)} &&
+          M4MultiSvUploadTransaction::matchesBoardRoster(
+              image, x.identityHash(), x.selectedReadbackStreamLines()),
+          "selected exact firmware SHOW replaces any stale reconnect SCD roster");
+
 }
 void reconnectRosterSclMatch(const QByteArray& image) {
     M4MultiSvUploadTransaction tx;

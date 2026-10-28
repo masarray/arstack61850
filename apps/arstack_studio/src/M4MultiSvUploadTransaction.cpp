@@ -33,6 +33,7 @@ bool M4MultiSvUploadTransaction::start(
     offset_ = 0;
     expectedReceived_ = 0;
     rowsVerified_ = 0;
+    verifiedStreamLines_.clear();
     statusVerified_ = false;
     return true;
 }
@@ -48,6 +49,7 @@ void M4MultiSvUploadTransaction::fail(const QString& reason) {
     if (!active()) return;
     error_ = reason;
     pendingCommand_.clear();
+    verifiedStreamLines_.clear();
     stage_ = Stage::failed;
 }
 
@@ -169,6 +171,7 @@ bool M4MultiSvUploadTransaction::validateStream(const QString& line) {
         present != static_cast<unsigned>(profile.vlan_present) ||
         vid != profile.vlan_id || pcp != profile.vlan_priority) return false;
     rowsVerified_ = static_cast<std::uint8_t>(rowsVerified_ | bit);
+    verifiedStreamLines_.push_back(line);
     return true;
 }
 
