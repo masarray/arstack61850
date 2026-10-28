@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "ariec61850/sampled_values/live_signal_transaction.hpp"
 #include "M4MultiSvUploadTransaction.hpp"
 #include "M4ThreeMuScenarioApply.hpp"
 #include "M4ThreeMuBoardReadback.hpp"
-#include "ariec61850/sampled_values/live_signal_transaction.hpp"
 #include "SclProfileModel.hpp"
 
 #include <QCoreApplication>

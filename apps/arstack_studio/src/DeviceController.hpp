@@ -3,10 +3,10 @@
 
 #include "M4MultiSvUploadTransaction.hpp"
 #include "M4ThreeMuScenarioApply.hpp"
-#include "M4ThreeMuBoardReadback.hpp"
 #include <QByteArray>
 #include <QElapsedTimer>
 #include <cstdint>
+#include <memory>
 #include <QObject>
 #include <QStringList>
 #include <QThread>
@@ -16,6 +16,7 @@ namespace ar::iec61850::sampled_values { struct SvLiveChannelState; }
 
 class DeterministicSessionHarness;
 class DeviceIoWorker;
+class M4ThreeMuBoardReadback;
 
 struct DeviceIdentity final {
     QString product;
@@ -540,7 +541,7 @@ private:
     bool m4ScenarioRetiring_{false};
     bool m4ScenariosVerified_{false};
     bool m4ScenarioDispatching_{false};
-    M4ThreeMuBoardReadback m4BoardReadback_;
+    std::unique_ptr<M4ThreeMuBoardReadback> m4BoardReadback_;
     QTimer m4BoardTimer_;
     QVariantList m4BoardSnapshots_;
     QString m4BoardStatus_{QStringLiteral("No board MU snapshot verified")};

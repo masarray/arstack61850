@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "M4ThreeMuBoardReadback.hpp"
 #include "ariec61850/sampled_values/live_signal_transaction.hpp"
+#include "M4ThreeMuBoardReadback.hpp"
 #include <limits>
 
 using namespace ar::iec61850::sampled_values;

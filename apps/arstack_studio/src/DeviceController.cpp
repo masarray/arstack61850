@@ -4,6 +4,7 @@
 #include "ariec61850/sampled_values/profile_identity.hpp"
 #include "ariec61850/time_sync/ptp_power_profile.hpp"
 #include "DeviceController.hpp"
+#include "M4ThreeMuBoardReadback.hpp"
 
 #include "DeviceIoWorker.hpp"
 
@@ -126,6 +127,7 @@ const QRegularExpression kSmpSynchExpression{
 } // namespace
 
 DeviceController::DeviceController(QObject* parent) : QObject(parent) {
+    m4BoardReadback_ = std::make_unique<M4ThreeMuBoardReadback>();
     // A fresh per-process log lives on disk even if Studio closes or crashes.
     // Never use the install directory (often read-only on Windows).
     QString dataRoot = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
@@ -1361,7 +1363,7 @@ bool DeviceController::inspectMultiSvBoard() {
         setError(QStringLiteral("3-MU readback requires an idle verified M4-capable serial session."));
         return false;
     }
-    if (!m4BoardReadback_.start(identity_.bootId)) return false;
+    if (!m4BoardReadback_->start(identity_.bootId)) return false;
     m4BoardSnapshots_.clear();
     m4BoardInspecting_ = true;
     m4BoardSession_ = sessionGeneration_;
@@ -1373,7 +1375,7 @@ bool DeviceController::inspectMultiSvBoard() {
 void DeviceController::cancelM4Board(const QString& why) {
     if (!m4BoardInspecting_ && m4BoardSnapshots_.isEmpty()) return;
     m4BoardTimer_.stop();
-    m4BoardReadback_.cancel(why);
+    m4BoardReadback_->cancel(why);
     m4BoardInFlight_.clear();
     m4BoardInspecting_ = false;
     m4BoardSnapshots_.clear();
@@ -1387,7 +1389,7 @@ bool DeviceController::dispatchM4BoardShow() {
         cancelM4Board(QStringLiteral("3-MU inspection session changed."));
         return false;
     }
-    const QString command=m4BoardReadback_.takeCommand();
+    const QString command=m4BoardReadback_->takeCommand();
     if (command.isEmpty()) {
         cancelM4Board(QStringLiteral("M4 board snapshot did not produce a valid next SHOW."));
         return false;
@@ -1413,17 +1415,17 @@ bool DeviceController::processM4BoardLine(const QString& line) {
         return true;
     }
     if(!m4BoardInFlight_.isEmpty()) return true;
-    const bool handled=m4BoardReadback_.receive(line,identity_.bootId);
+    const bool handled=m4BoardReadback_->receive(line,identity_.bootId);
     if(!handled) return false;
-    if(m4BoardReadback_.stage()==M4ThreeMuBoardReadback::Stage::failed) {
-        cancelM4Board(m4BoardReadback_.error());
-    } else if(m4BoardReadback_.verified()) {
+    if(m4BoardReadback_->stage()==M4ThreeMuBoardReadback::Stage::failed) {
+        cancelM4Board(m4BoardReadback_->error());
+    } else if(m4BoardReadback_->verified()) {
         m4BoardTimer_.stop();
-        m4BoardSnapshots_=m4BoardReadback_.snapshots();
+        m4BoardSnapshots_=m4BoardReadback_->snapshots();
         m4BoardInspecting_=false;
         m4BoardStatus_=QStringLiteral("3/3 firmware banks verified (generation+hash+CT+quality); read-only, not a START proof.");
         emit m4BoardChanged();
-    } else if(m4BoardReadback_.stage()==M4ThreeMuBoardReadback::Stage::send) {
+    } else if(m4BoardReadback_->stage()==M4ThreeMuBoardReadback::Stage::send) {
         m4BoardTimer_.stop();
         static_cast<void>(dispatchM4BoardShow());
     }
