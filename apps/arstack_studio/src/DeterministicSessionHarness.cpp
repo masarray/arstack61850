@@ -4,13 +4,19 @@
 
 #include "DeviceIoWorker.hpp"
 #include "FirmwareManager.hpp"
+#include "FirmwareWorker.hpp"
 #include "SclProfileModel.hpp"
 #include "SmartSessionController.hpp"
 #include "StudioDeviceController.hpp"
 
 #include <QCoreApplication>
 #include <QDebug>
+#include <QEventLoop>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QStringList>
+#include <QThread>
+#include <QTimer>
 
 #ifndef ARSTACK_STUDIO_VERSION
 #define ARSTACK_STUDIO_VERSION "0.1.0"
@@ -20,6 +26,14 @@ class DeterministicSessionHarness final {
 public:
     static int run(int argc, char* argv[]) {
         QCoreApplication app(argc, argv);
+        // A real OS child ensures timeout/cancel tests exercise QProcess
+        // termination rather than a synthetic boolean-only worker model.
+        if (app.arguments().contains(QStringLiteral("--firmware-worker-hang-child"))) {
+            QThread::msleep(8000);
+            return 0;
+        }
+        if (app.arguments().contains(QStringLiteral("--firmware-worker-fast-child")))
+            return 0;
 
         struct CaseResult {
             const char* name;
@@ -29,6 +43,7 @@ public:
         const CaseResult cases[] = {
             {"dual-revision catalog selects only qualified silicon", revisionCatalogFailClosed()},
             {"firmware timeout retains port until flasher exits", firmwarePortReleaseWaitsForWorker()},
+            {"real timed-out firmware subprocess retires before COM release", firmwareWorkerTimeoutAwaitsProcessExit()},
             {"current identity -> READY without recovery", currentIdentityNeverRecovers()},
             {"legacy identity -> firmware update", legacyIdentityOffersUpdate()},
             {"same version missing build ID -> READY with update suggestion", sameVersionMissingBuildOffersUpdate()},
@@ -130,6 +145,75 @@ public:
     }
 
 private:
+    static bool firmwareWorkerTimeoutAwaitsProcessExit() {
+        FirmwareWorker worker;
+        worker.initialize();
+        if (worker.process_ == nullptr) return false;
+
+        QEventLoop loop;
+        QTimer deadline;
+        deadline.setSingleShot(true);
+        QObject::connect(&deadline, &QTimer::timeout, &loop, &QEventLoop::quit);
+
+        bool started = false;
+        bool timedOutAfterExit = false;
+        bool restartedCleanly = false;
+        bool unexpectedTerminal = false;
+        int terminalCount = 0;
+        QObject::connect(&worker, &FirmwareWorker::operationStarted, &loop,
+                         [&](const quint64 generation) {
+            if (generation == 41) started = true;
+        });
+        QObject::connect(&worker, &FirmwareWorker::operationTimedOut, &loop,
+                         [&](const quint64 generation) {
+            ++terminalCount;
+            timedOutAfterExit = generation == 41 && started &&
+                worker.process_->state() == QProcess::NotRunning &&
+                !worker.operationActive_ && worker.generation_ == 0;
+            loop.quit();
+        });
+        QObject::connect(&worker, &FirmwareWorker::operationFinished, &loop,
+                         [&](const quint64 generation, const int code, const bool normal) {
+            ++terminalCount;
+            if (generation == 42) {
+                restartedCleanly = code == 0 && normal &&
+                    worker.process_->state() == QProcess::NotRunning &&
+                    !worker.operationActive_;
+            } else {
+                unexpectedTerminal = true;
+            }
+            loop.quit();
+        });
+        QObject::connect(&worker, &FirmwareWorker::operationLaunchFailed, &loop,
+                         [&](quint64, const QString&) { unexpectedTerminal = true; loop.quit(); });
+        QObject::connect(&worker, &FirmwareWorker::operationLaunchTimedOut, &loop,
+                         [&](quint64) { unexpectedTerminal = true; loop.quit(); });
+        QObject::connect(&worker, &FirmwareWorker::operationCancelled, &loop,
+                         [&](quint64) { unexpectedTerminal = true; loop.quit(); });
+
+        const QString executable = QCoreApplication::applicationFilePath();
+        const QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        worker.startOperation(41, executable, {QStringLiteral("--firmware-worker-hang-child")},
+                              env, 3500, 150);
+        deadline.start(5500);
+        loop.exec();
+        deadline.stop();
+        if (!timedOutAfterExit || unexpectedTerminal || terminalCount != 1) {
+            worker.shutdown();
+            return false;
+        }
+
+        // The worker must accept a second operation only after the first
+        // process has exited and its generation has been fully retired.
+        worker.startOperation(42, executable, {QStringLiteral("--firmware-worker-fast-child")},
+                              env, 3500, 3500);
+        deadline.start(5500);
+        loop.exec();
+        deadline.stop();
+        worker.shutdown();
+        return restartedCleanly && !unexpectedTerminal && terminalCount == 2;
+    }
+
     static bool revisionCatalogFailClosed() {
         FirmwareManager firmware;
         firmware.revisionCatalogAvailable_ = true;

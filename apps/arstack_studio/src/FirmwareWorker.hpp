@@ -44,6 +44,9 @@ signals:
     void operationCancelled(quint64 generation);
 
 private:
+    friend class DeterministicSessionHarness;
+
+    enum class KillCause { none, launchTimeout, operationTimeout };
     void finishProcess(int exitCode, bool normalExit);
     void clearOperation();
 
@@ -55,4 +58,5 @@ private:
     bool shuttingDown_{false};
     bool operationActive_{false};
     bool cancelRequested_{false};
+    KillCause killCause_{KillCause::none};
 };
