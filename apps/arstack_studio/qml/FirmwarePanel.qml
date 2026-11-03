@@ -250,15 +250,10 @@ SurfacePanel {
                     visible: panel.session &&
                              (panel.session.firmwareUpdateRequired || panel.session.firmwareUpdateAvailable || panel.session.firmwareReinstallAvailable)
                     enabled: visible && !panel.firmware.busy &&
-                             !panel.device.running && !panel.device.ptpRunning && !panel.device.ptpStarting
-                    toolTipText: enabled ? "Install the matched firmware" : "Stop active SV/PTP in the main firmware update dialog first"
+                             !panel.session.updatingFirmware
+                    toolTipText: "Studio will stop SV/PTP and verify board readback before firmware installation"
                     tone: panel.session && panel.session.firmwareUpdateRequired ? "accent" : "normal"
-                    onClicked: {
-                        if (panel.session.firmwareUpdateRequired || panel.session.firmwareUpdateAvailable)
-                            panel.session.beginFirmwareUpdate()
-                        else
-                            panel.session.beginFirmwareReinstall()
-                    }
+                    onClicked: firmwareConfirmDialog.open()
                 }
 
 
@@ -360,6 +355,51 @@ SurfacePanel {
             visible: !panel.technicalDetailsVisible
             Layout.fillWidth: true
             Layout.fillHeight: true
+        }
+    }
+
+    Dialog {
+        id: firmwareConfirmDialog
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(400, panel.width - 32)
+        padding: 16
+        closePolicy: Popup.CloseOnEscape
+        title: "Update board firmware"
+        background: Rectangle {
+            color: panel.theme.surface
+            radius: 9
+            border.width: 1
+            border.color: panel.theme.line
+        }
+        contentItem: ColumnLayout {
+            spacing: 12
+            Label {
+                Layout.fillWidth: true
+                text: "Studio will stop SV and PTP, verify both are stopped on the board, then install the matching firmware. If STOP cannot be verified, nothing will be flashed. Output will not restart automatically."
+                wrapMode: Text.WordWrap
+                color: panel.theme.textSoft
+                font.family: panel.uiFont
+                font.pixelSize: 11
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                CalmButton {
+                    theme: panel.theme; uiFont: panel.uiFont; text: "Cancel"
+                    onClicked: firmwareConfirmDialog.close()
+                }
+                CalmButton {
+                    theme: panel.theme; uiFont: panel.uiFont
+                    text: "Stop services & update"; tone: "accent"; implicitWidth: 172
+                    onClicked: {
+                        const ok = (panel.session.firmwareUpdateRequired || panel.session.firmwareUpdateAvailable)
+                            ? panel.session.beginFirmwareUpdate()
+                            : panel.session.beginFirmwareReinstall()
+                        if (ok) firmwareConfirmDialog.close()
+                    }
+                }
+            }
         }
     }
 }

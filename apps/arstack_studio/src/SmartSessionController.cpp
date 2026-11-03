@@ -638,21 +638,27 @@ bool SmartSessionController::beginFirmwareOperation(const QString& portName) {
     setupErrorStatus_.clear();
     lastFirmwareUpdateResult_.clear();
 
-    if (device_->running() || device_->ptpRunning() || device_->ptpStarting()) {
+    if (device_->deviceVerified()) {
+        if (!device_->connected() || portOwner_ != PortOwner::deviceSession) {
+            latchFirmwareFailure(QStringLiteral(
+                "Verified board serial ownership was lost. Firmware write is blocked."));
+            emit firmwareUpdateFinished(false);
+            reconcile();
+            return false;
+        }
+        // Always issue a fresh STOP + readback for BOTH board services.
+        // PREPARING/CFG and STOP_UNVERIFIED are not proof that output is idle.
         updateStage_ = UpdateStage::stopping;
-        const bool stopSv = device_->running();
-        stoppingPtpForFirmware_ = device_->ptpRunning() || device_->ptpStarting();
+        stoppingPtpForFirmware_ = true;
         setPresentation(
             QStringLiteral("UPDATING FIRMWARE"),
-            QStringLiteral("Stopping active SV/PTP test before firmware installation…"),
+            QStringLiteral("Stopping and verifying SV/PTP on the board…"),
             false,
             false);
-        // Both STOP paths are ACK/readback verified by the existing device owner.
-        // An asynchronous STOP acceptance is not evidence of a stopped board.
-        const bool svAccepted = !stopSv || device_->stop();
-        const bool ptpAccepted = !stoppingPtpForFirmware_ || (svAccepted && device_->stopPtp());
-        if (!svAccepted || !ptpAccepted) {
-            latchFirmwareFailure(QStringLiteral("Could not safely stop active SV/PTP output. Firmware access was blocked."));
+        if (!device_->beginFirmwareQuiescence()) {
+            latchFirmwareFailure(QStringLiteral(
+                "The board did not accept the safe SV/PTP stop preflight. "
+                "Nothing was flashed; inspect diagnostics and retry."));
             emit firmwareUpdateFinished(false);
             reconcile();
             return false;
@@ -660,6 +666,8 @@ bool SmartSessionController::beginFirmwareOperation(const QString& portName) {
         return true;
     }
 
+    // Only an explicitly authorized blank-board recovery may probe without
+    // application STOP proof; it still needs ROM identity and isolation gates.
     continueFirmwareUpdate();
     return true;
 }
@@ -786,10 +794,12 @@ bool SmartSessionController::startFirmwareProbe() {
 
 void SmartSessionController::continueFirmwareUpdate() {
     if (!updateRequested_ || device_ == nullptr || firmware_ == nullptr) return;
-    if (device_->running() || device_->ptpRunning() || device_->ptpStarting()) {
-        updateStage_ = UpdateStage::stopping;
-        return;
+    if (updateStage_ == UpdateStage::stopping) {
+        if (!device_->firmwareQuiescenceVerified()) return;
     }
+    if (device_->connected() && device_->deviceVerified() &&
+        (device_->running() || device_->ptpRunning() || device_->ptpStarting() ||
+         !device_->firmwareQuiescenceVerified())) return;
 
     if (portOwner_ == PortOwner::firmwareTool) {
         static_cast<void>(startFirmwareProbe());
@@ -907,19 +917,15 @@ void SmartSessionController::reconnectDeviceSignals() {
             reconcile();
         });
     });
-    connect(device_, &DeviceController::runningChanged, this, [this] {
+    connect(device_, &DeviceController::runningChanged, this, &SmartSessionController::reconcile);
+    connect(device_, &DeviceController::ptpStateChanged, this, &SmartSessionController::reconcile);
+    connect(device_, &DeviceController::firmwareQuiescenceChanged, this, [this] {
         if (updateRequested_ && updateStage_ == UpdateStage::stopping &&
-            device_ != nullptr && !device_->running() &&
-            !device_->ptpRunning() && !device_->ptpStarting()) {
-            QTimer::singleShot(0, this, [this] { continueFirmwareUpdate(); });
-        }
-        reconcile();
-    });
-    connect(device_, &DeviceController::ptpStateChanged, this, [this] {
-        if (updateRequested_ && updateStage_ == UpdateStage::stopping &&
-            device_ != nullptr && !device_->running() &&
-            !device_->ptpRunning() && !device_->ptpStarting()) {
-            QTimer::singleShot(0, this, [this] { continueFirmwareUpdate(); });
+            device_ != nullptr && device_->firmwareQuiescenceVerified()) {
+            QTimer::singleShot(0, this, [this] {
+                if (updateRequested_ && updateStage_ == UpdateStage::stopping)
+                    continueFirmwareUpdate();
+            });
         }
         reconcile();
     });
@@ -1238,6 +1244,7 @@ QString SmartSessionController::diagnosticsText() const {
 void SmartSessionController::latchFirmwareFailure(QString message) {
     reconnectTimer_.stop();
     firmwareTotalTimer_.stop();
+    if (device_ != nullptr) device_->endFirmwareQuiescence();
     stoppingPtpForFirmware_ = false;
     const bool optionalOperation = updateWasOptional_;
     updateRequested_ = false;
