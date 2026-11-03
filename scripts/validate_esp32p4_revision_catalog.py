@@ -15,13 +15,14 @@ CAP = 16 * 1024 * 1024
 SCHEMA = "arstack.studio.firmware.catalog.v2"
 
 
-def header_revision_bounds(image: bytes) -> tuple[int, int]:
-    # ESP-IDF esp_image_header_t: min_chip_rev_full @15, max @17,
-    # little-endian; merged raw images contain the bootloader at offset 0.
-    if len(image) < 24 or image[0] != 0xE9:
-        raise ValueError("missing ESP image bootloader header at offset zero")
-    minimum = int.from_bytes(image[15:17], "little")
-    maximum = int.from_bytes(image[17:19], "little")
+def header_revision_bounds(image: bytes, offset: int) -> tuple[int, int]:
+    # ESP32-P4 ROM loads bootloader from flash 0x2000; the default factory
+    # application lives at 0x10000. The merged raw image begins at flash 0.
+    # ESP-IDF esp_image_header_t: min_chip_rev_full @15, max @17.
+    if len(image) < offset + 24 or image[offset] != 0xE9:
+        raise ValueError(f"missing ESP32-P4 image header at flash 0x{offset:x}")
+    minimum = int.from_bytes(image[offset + 15:offset + 17], "little")
+    maximum = int.from_bytes(image[offset + 17:offset + 19], "little")
     if minimum > maximum:
         raise ValueError("inverted chip revision bounds in bootloader")
     return minimum, maximum
@@ -68,13 +69,16 @@ def verify(root: Path) -> None:
             raise ValueError("image SHA256 mismatch")
         if catalog["sourceCommit"][:16].encode("ascii") not in payload:
             raise ValueError("image does not identify the exact source commit")
-        minimum, maximum = header_revision_bounds(payload)
-        if not (minimum <= low <= high <= maximum):
-            raise ValueError(f"{policy}: bootloader incompatible with approved revision {low}..{high} (header {minimum}..{maximum})")
-        if policy == "pre-v3" and (name != legacy["image"] or sha != legacy["sha256"] or maximum >= 300):
-            raise ValueError("legacy header incorrectly enables v3 silicon")
-        if policy == "v3.x" and minimum < 300:
-            raise ValueError("v3 bootloader incorrectly enables pre-v3 silicon")
+        for offset, label in ((0x2000, "bootloader"), (0x10000, "application")):
+            minimum, maximum = header_revision_bounds(payload, offset)
+            if not (minimum <= low <= high <= maximum):
+                raise ValueError(f"{policy}: {label} incompatible with approved revision {low}..{high} (header {minimum}..{maximum})")
+            if policy == "pre-v3" and maximum >= 300:
+                raise ValueError(f"legacy {label} incorrectly enables v3 silicon")
+            if policy == "v3.x" and minimum < 300:
+                raise ValueError(f"v3 {label} incorrectly enables pre-v3 silicon")
+        if policy == "pre-v3" and (name != legacy["image"] or sha != legacy["sha256"]):
+            raise ValueError("legacy manifest and catalog disagree")
     if policies != {"pre-v3", "v3.x"}:
         raise ValueError("missing silicon variant")
     print("Revision-aware firmware package: PASS (two disjoint images, headers, source and SHA)")

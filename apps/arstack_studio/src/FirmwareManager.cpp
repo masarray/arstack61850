@@ -31,6 +31,28 @@ constexpr auto kV3Policy = "v3.x";
 constexpr auto kCatalogName = "firmware-catalog.json";
 constexpr auto kCatalogSchema = "arstack.studio.firmware.catalog.v2";
 constexpr qint64 kMaxFirmwareSize = 16 * 1024 * 1024;
+
+// ESP32-P4 ROM bootloader and the default factory application locations.
+// Verify *both* headers, not the 0x0 fill in idf.py's merged raw image.
+bool imageHeadersAcceptRevision(const QString& imagePath, const int minRevision,
+                                const int maxRevision, const bool isV3) {
+    QFile file{imagePath};
+    if (!file.open(QIODevice::ReadOnly)) return false;
+    for (const qint64 offset : {qint64{0x2000}, qint64{0x10000}}) {
+        if (!file.seek(offset)) return false;
+        const QByteArray header = file.read(24);
+        if (header.size() != 24 || static_cast<quint8>(header[0]) != 0xE9) return false;
+        const auto word = [&header](const int at) -> int {
+            return static_cast<quint8>(header[at]) |
+                (static_cast<int>(static_cast<quint8>(header[at + 1])) << 8);
+        };
+        const int declaredMin = word(15);
+        const int declaredMax = word(17);
+        if (declaredMin > minRevision || declaredMax < maxRevision ||
+            (isV3 && declaredMin < 300) || (!isV3 && declaredMax >= 300)) return false;
+    }
+    return true;
+}
 constexpr qsizetype kMaxOperationOutput = 65536;
 constexpr qsizetype kTrimmedOperationOutput = 49152;
 constexpr qsizetype kMaxProgressOutputTail = 2048;
@@ -395,7 +417,8 @@ bool FirmwareManager::loadRevisionCatalog(
         QFile imageFile{imageInfo.canonicalFilePath()};
         QCryptographicHash hasher{QCryptographicHash::Sha256};
         if (!imageFile.open(QIODevice::ReadOnly) || !hasher.addData(&imageFile) ||
-            QString::fromLatin1(hasher.result().toHex()) != hash) {
+            QString::fromLatin1(hasher.result().toHex()) != hash ||
+            !imageHeadersAcceptRevision(imageInfo.canonicalFilePath(), minRevision, maxRevision, v3)) {
             bundleStatus_ = QStringLiteral("Firmware catalog SHA-256 verification failed.");
             return false;
         }
@@ -430,6 +453,10 @@ bool FirmwareManager::probeTarget(const QString& portName) {
     if (!bundleReady_ || !flasherAvailable_) refreshBundle();
     if (!flasherAvailable_) {
         fail(QStringLiteral("Bundled espflash executable is unavailable."));
+        return false;
+    }
+    if (!bundleReady_) {
+        fail(bundleStatus_);
         return false;
     }
     const QString port = portName.trimmed();
