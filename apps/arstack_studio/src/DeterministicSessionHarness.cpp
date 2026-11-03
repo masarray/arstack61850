@@ -44,6 +44,7 @@ public:
             {"dual-revision catalog selects only qualified silicon", revisionCatalogFailClosed()},
             {"firmware timeout retains port until flasher exits", firmwarePortReleaseWaitsForWorker()},
             {"firmware update waits for fresh SV and PTP STOP readback", firmwareStopProofPreventsEarlyFlash()},
+            {"slow firmware STOP suspends ordinary health teardown, resumes afterward", maintenanceStopDoesNotTriggerHealthDisconnect()},
             {"real timed-out firmware subprocess retires before COM release", firmwareWorkerTimeoutAwaitsProcessExit()},
             {"current identity -> READY without recovery", currentIdentityNeverRecovers()},
             {"legacy identity -> firmware update", legacyIdentityOffersUpdate()},
@@ -216,6 +217,42 @@ private:
     }
 
 
+    static bool maintenanceStopDoesNotTriggerHealthDisconnect() {
+        Fixture f;
+        if (!f.profileReady) return false;
+        seedVerified(f, identity(), QStringLiteral("COM7"), false);
+        auto& d = f.device;
+        d.controlHealthTimer_.stop();
+        d.controlResponsive_ = true;
+        d.healthProbeOutstanding_ = true;
+        d.missedHealthReplies_ = 1;
+        d.firmwareQuiescenceActive_ = true;
+        d.firmwareQuiescenceSession_ = d.sessionGeneration_;
+        d.firmwareQuiescenceBoot_ = d.identity_.bootId;
+        bool failed = false;
+        QObject::connect(&d, &StudioDeviceController::controlHealthFailed, &d,
+                         [&failed] { failed = true; });
+        // The same two health ticks that previously tore down COM must not
+        // compete with supervised STOP. No fake STOP proof is synthesized.
+        d.serviceControlHealth();
+        d.serviceControlHealth();
+        const bool protectedDuringStop =
+            !failed && d.connected_ && d.deviceVerified_ &&
+            d.controlResponsive_ && d.missedHealthReplies_ == 0 &&
+            !d.healthProbeOutstanding_ && !d.firmwareQuiescenceVerified();
+        const bool boundedProof =
+            DeviceController::firmwarePtpStopProofDeadlineMs() == 40000 &&
+            SmartSessionController::firmwareVerifiedStopDeadlineMs() == 45000 &&
+            SmartSessionController::firmwareTotalDeadlineMs() == 300000;
+        d.endFirmwareQuiescence();
+        // Ordinary health monitoring resumes on the original controller.
+        // An unresponsive board is still rejected outside maintenance.
+        d.healthProbeOutstanding_ = true;
+        d.serviceControlHealth();
+        return protectedDuringStop && boundedProof && !failed &&
+            d.missedHealthReplies_ == 1 && !d.controlResponsive_;
+    }
+
     static bool firmwareStopProofPreventsEarlyFlash() {
         Fixture f;
         if (!f.profileReady) return false;
@@ -231,11 +268,16 @@ private:
         d.ptpRunning_ = true;
         d.ptpStartStage_ = DeviceController::PtpStartStage::stop_unconfirmed;
         d.scenarioStage_ = DeviceController::ScenarioStage::awaiting_commit;
+        d.deferredShow_ = true;
+        d.deferredPtpShow_ = true;
+        d.deferredProfileShow_ = true;
         const bool started = s.beginFirmwareUpdate();
         const bool safeStage = started && s.updateRequested_ &&
             s.updateStage_ == SmartSessionController::UpdateStage::stopping &&
             s.portOwner_ == SmartSessionController::PortOwner::deviceSession &&
             d.scenarioStage_ == DeviceController::ScenarioStage::idle &&
+            !d.deferredShow_ && !d.deferredPtpShow_ &&
+            !d.deferredProfileShow_ &&
             !d.firmwareQuiescenceVerified() && !f.firmware.busy_;
         if (!safeStage) {
             s.updateRequested_ = false;

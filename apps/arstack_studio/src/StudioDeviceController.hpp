@@ -243,6 +243,24 @@ private:
             return;
         }
 
+        // Firmware STOP is an explicitly authorized exclusive safety phase.
+        // Field evidence: ordinary SHOW health missed twice and disconnected
+        // COM four seconds after STOP, but the firmware finally acknowledged
+        // STOP about twelve seconds later. While maintenance STOP owns the
+        // serial proof lane, ordinary SHOW probes MUST NOT retire the port.
+        // Clear a pre-existing outstanding probe as it belongs to the old
+        // transaction; keep the 700 ms heartbeat and physical USB/OS error
+        // monitoring active in DeviceIoWorker. Normal health resumes after
+        // endFirmwareQuiescence(), without carrying stale misses.
+        if (firmwareQuiescenceActive()) {
+            healthProbeOutstanding_ = false;
+            if (missedHealthReplies_ != 0) {
+                missedHealthReplies_ = 0;
+                emit controlHealthChanged();
+            }
+            return;
+        }
+
         // Canonical BIN and CFG scenario transactions both own the serial
         // console. Suppress only probe accounting during known exclusivity,
         // never the worker's independent safety heartbeat/STOP. Resume
