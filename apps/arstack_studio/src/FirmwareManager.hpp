@@ -41,6 +41,9 @@ public:
     [[nodiscard]] int flashProgress() const noexcept { return flashProgress_; }
     [[nodiscard]] QString selectedPort() const { return selectedPort_; }
     [[nodiscard]] QString targetChip() const { return targetChip_; }
+    // Factory eFuse MAC from the authorized ROM probe. Used to pin a physical
+    // device across COM renumbering and exact-build postboot verification.
+    [[nodiscard]] QString targetDeviceMac() const { return targetDeviceMac_; }
     [[nodiscard]] QString firmwareVersion() const { return firmwareVersion_; }
     [[nodiscard]] QString firmwareBuildId() const { return firmwareBuildId_; }
     [[nodiscard]] QString expectedProtocol() const { return expectedProtocol_; }
@@ -53,6 +56,7 @@ public:
     [[nodiscard]] bool workerAffinityValid() const noexcept { return workerAffinityValid_; }
 
     [[nodiscard]] static bool parseEsp32P4Revision(const QString& output, int& major, int& minor);
+    [[nodiscard]] static QString parseEsp32P4Mac(const QString& output);
     [[nodiscard]] static bool supportsEsp32P4Revision(int major, int minor) noexcept;
     [[nodiscard]] static bool revisionInRange(int major, int minor, int minRevision, int maxRevision) noexcept;
     [[nodiscard]] static int parseFlashProgress(const QString& output);
@@ -128,6 +132,7 @@ private:
     // operation log or creating another process/parser owner.
     QString progressOutputTail_;
     QString selectedPort_;
+    QString targetDeviceMac_;
     QString targetChip_{QStringLiteral("Not checked")};
     QString firmwareVersion_{QStringLiteral("-")};
     QString firmwareBuildId_;

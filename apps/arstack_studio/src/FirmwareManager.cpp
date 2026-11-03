@@ -169,6 +169,24 @@ bool FirmwareManager::parseEsp32P4Revision(const QString& output, int& major, in
     return true;
 }
 
+QString FirmwareManager::parseEsp32P4Mac(const QString& output) {
+    // espflash v4.5 board-info reports "MAC address: aa:bb:cc:dd:ee:ff".
+    // Require one unambiguous ROM eFuse MAC; unrelated lines are diagnostics,
+    // and a recycled COM number is never a physical identity.
+    static const QRegularExpression macExpression{
+        QStringLiteral(R"(^[ \t]*MAC address:[ \t]*((?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2})[ \t]*$)"),
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption};
+    auto matches = macExpression.globalMatch(output);
+    if (!matches.hasNext()) return {};
+    QString mac = matches.next().captured(1);
+    if (matches.hasNext()) return {}; // Contradictory/duplicated evidence.
+    mac.remove(QLatin1Char(':'));
+    mac = mac.toUpper();
+    if (mac == QStringLiteral("000000000000") || mac == QStringLiteral("FFFFFFFFFFFF"))
+        return {};
+    return mac;
+}
+
 bool FirmwareManager::supportsEsp32P4Revision(const int major, const int minor) noexcept {
     return major >= 0 && major < 3 && minor >= 0;
 }
@@ -242,6 +260,7 @@ void FirmwareManager::refreshBundle() {
     revisionImages_.clear();
     revisionCatalogAvailable_ = false;
     targetVerified_ = false;
+    targetDeviceMac_.clear();
     flashProgress_ = -1;
     progressOutputTail_.clear();
 
@@ -471,6 +490,7 @@ bool FirmwareManager::probeTarget(const QString& portName) {
 
     selectedPort_ = port;
     targetVerified_ = false;
+    targetDeviceMac_.clear();
     bootloaderHelpNeeded_ = false;
     flashProgress_ = -1;
     progressOutputTail_.clear();
@@ -762,8 +782,11 @@ void FirmwareManager::finishOperation(const int exitCode, const bool normalExit)
         const bool p4WithRevision = success && parseEsp32P4Revision(operationOutput_, major, minor);
         const bool anyChipAnswered = success && operationOutput_.contains(
             QRegularExpression{QStringLiteral(R"(Chip\s+type:)"), QRegularExpression::CaseInsensitiveOption});
-        const bool supportedRevision = p4WithRevision && selectFirmwareForRevision(major, minor);
+        const QString romMac = p4WithRevision ? parseEsp32P4Mac(operationOutput_) : QString{};
+        const bool supportedRevision = p4WithRevision && !romMac.isEmpty() &&
+            selectFirmwareForRevision(major, minor);
 
+        targetDeviceMac_ = supportedRevision ? romMac : QString{};
         targetVerified_ = supportedRevision;
         bootloaderHelpNeeded_ = !success;
         if (p4WithRevision) {
@@ -777,6 +800,8 @@ void FirmwareManager::finishOperation(const int exitCode, const bool normalExit)
         if (supportedRevision) {
             setStatus(QStringLiteral("ESP32-P4 v%1.%2 verified. Matching %3 firmware selected.")
                 .arg(major).arg(minor).arg(revisionPolicy_));
+        } else if (p4WithRevision && romMac.isEmpty()) {
+            setStatus(QStringLiteral("The board responded, but its factory identity could not be verified. Installation is blocked."));
         } else if (p4WithRevision) {
             setStatus(QStringLiteral("ESP32-P4 v%1.%2 is not supported by this firmware package. Installation is blocked.")
                 .arg(major).arg(minor));

@@ -951,6 +951,19 @@ void SmartSessionController::reconnectFirmwareSignals() {
 
         if (updateStage_ == UpdateStage::probing && !firmware_->busy()) {
             if (firmware_->targetVerified()) {
+                const QString romMac = firmware_->targetDeviceMac();
+                if (romMac.isEmpty() ||
+                    (!updateExpectedDeviceId_.isEmpty() &&
+                     !recoveryIdentityMatches(updateExpectedDeviceId_, romMac))) {
+                    latchFirmwareFailure(QStringLiteral(
+                        "ROM identity does not match the selected ARStack board. No firmware was written."));
+                    emit firmwareUpdateFinished(false);
+                    reconcile();
+                    return;
+                }
+                // A fresh board has no application identity yet. This ROM
+                // eFuse MAC pins its identity for the subsequent boot proof.
+                updateExpectedDeviceId_ = romMac;
                 updateStage_ = UpdateStage::flashing;
                 setPresentation(
                     QStringLiteral("UPDATING FIRMWARE"),
