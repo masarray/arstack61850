@@ -158,6 +158,22 @@ bool FirmwareManager::parseEsp32P4Revision(const QString& output, int& major, in
     static const QRegularExpression expression{
         QStringLiteral(R"(Chip\s+type:\s*ESP32[-_ ]?P4\s*\(revision\s+v(\d+)\.(\d+)\))"),
         QRegularExpression::CaseInsensitiveOption};
+    // Ignore no chip or contradictory chip labels. Only one ROM identity is
+    // admissible, even if a second line has a different ESP chip name.
+    static const QRegularExpression chipLabel{
+        QStringLiteral(R"(Chip\s+type:)"), QRegularExpression::CaseInsensitiveOption};
+    auto labels = chipLabel.globalMatch(output);
+    if (!labels.hasNext()) {
+        major = -1;
+        minor = -1;
+        return false;
+    }
+    labels.next();
+    if (labels.hasNext()) {
+        major = -1;
+        minor = -1;
+        return false;
+    }
     const auto match = expression.match(output);
     if (!match.hasMatch()) {
         major = -1;
@@ -180,8 +196,15 @@ QString FirmwareManager::parseEsp32P4Mac(const QString& output) {
     // espflash v4.5 board-info reports "MAC address: aa:bb:cc:dd:ee:ff".
     // Require one unambiguous ROM eFuse MAC; unrelated lines are diagnostics,
     // and a recycled COM number is never a physical identity.
+    static const QRegularExpression macLabel{
+        QStringLiteral(R"(^[ \t]*MAC address:)"),
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption};
+    auto labels = macLabel.globalMatch(output);
+    if (!labels.hasNext()) return {};
+    labels.next();
+    if (labels.hasNext()) return {}; // Conflicting valid/invalid MAC labels.
     static const QRegularExpression macExpression{
-        QStringLiteral(R"(^[ \t]*MAC address:[ \t]*((?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2})[ \t]*$)"),
+        QStringLiteral(R"(^[ \t]*MAC address:[ \t]*((?:[0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2})[ \t\r]*$)"),
         QRegularExpression::CaseInsensitiveOption | QRegularExpression::MultilineOption};
     auto matches = macExpression.globalMatch(output);
     if (!matches.hasNext()) return {};

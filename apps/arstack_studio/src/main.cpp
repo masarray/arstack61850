@@ -268,13 +268,15 @@ int checkFirmwareContract(int argc, char* argv[]) {
 
     const bool macIdentityContract =
         FirmwareManager::parseEsp32P4Mac(QStringLiteral(
-            "Chip type:         esp32p4 (revision v3.2)\n"
-            "MAC address:       c8:f0:9e:50:8a:d0\n")) ==
+            "Chip type:         esp32p4 (revision v3.2)\r\n"
+            "MAC address:       c8:f0:9e:50:8a:d0\r\n")) ==
             QStringLiteral("C8F09E508AD0") &&
         FirmwareManager::parseEsp32P4Mac(QStringLiteral("MAC address: 00:00:00:00:00:00")).isEmpty() &&
         FirmwareManager::parseEsp32P4Mac(QStringLiteral("MAC address: bad")).isEmpty() &&
         FirmwareManager::parseEsp32P4Mac(QStringLiteral(
-            "MAC address: c8:f0:9e:50:8a:d0\nMAC address: aa:bb:cc:dd:ee:ff")).isEmpty();
+            "MAC address: c8:f0:9e:50:8a:d0\nMAC address: aa:bb:cc:dd:ee:ff")).isEmpty() &&
+        FirmwareManager::parseEsp32P4Mac(QStringLiteral(
+            "MAC address: c8:f0:9e:50:8a:d0\nMAC address: invalid")).isEmpty();
 
     const bool revisionPolicy =
         FirmwareManager::supportsEsp32P4Revision(0, 0) &&
