@@ -249,7 +249,9 @@ SurfacePanel {
                         : "Reinstall current"
                     visible: panel.session &&
                              (panel.session.firmwareUpdateRequired || panel.session.firmwareUpdateAvailable || panel.session.firmwareReinstallAvailable)
-                    enabled: visible && !panel.firmware.busy
+                    enabled: visible && !panel.firmware.busy &&
+                             !panel.device.running && !panel.device.ptpRunning && !panel.device.ptpStarting
+                    toolTipText: enabled ? "Install the matched firmware" : "Stop active SV/PTP in the main firmware update dialog first"
                     tone: panel.session && panel.session.firmwareUpdateRequired ? "accent" : "normal"
                     onClicked: {
                         if (panel.session.firmwareUpdateRequired || panel.session.firmwareUpdateAvailable)

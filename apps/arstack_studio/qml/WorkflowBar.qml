@@ -545,9 +545,11 @@ SurfacePanel {
             spacing: 12
             Label {
                 Layout.fillWidth: true
-                text: smartSession.firmwareUpdateRequired
-                    ? "Update is required before SV injection."
-                    : "Current firmware works. Updating is optional."
+                text: (device.running || device.ptpRunning || device.ptpStarting)
+                    ? "This will stop the active SV/PTP test before installing firmware. Continue only when the test may be interrupted."
+                    : (smartSession.firmwareUpdateRequired
+                        ? "Update is required before SV injection."
+                        : "Current firmware works. Updating is optional.")
                 color: ribbon.theme.textSoft
                 font.family: ribbon.uiFont
                 font.pixelSize: 11
@@ -567,7 +569,9 @@ SurfacePanel {
                     onClicked: { ribbon.updatePromptDeferred = true; updateDialog.close() }
                 }
                 CalmButton {
-                    theme: ribbon.theme; uiFont: ribbon.uiFont; text: "Update firmware"; tone: "accent"; implicitWidth: 138
+                    theme: ribbon.theme; uiFont: ribbon.uiFont
+                    text: (device.running || device.ptpRunning || device.ptpStarting) ? "Stop test & update" : "Update firmware"
+                    tone: "accent"; implicitWidth: 154
                     onClicked: {
                         if (smartSession.beginFirmwareUpdate()) {
                             ribbon.updatePromptDeferred = false
