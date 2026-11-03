@@ -43,6 +43,7 @@ public:
         const CaseResult cases[] = {
             {"dual-revision catalog selects only qualified silicon", revisionCatalogFailClosed()},
             {"firmware timeout retains port until flasher exits", firmwarePortReleaseWaitsForWorker()},
+            {"firmware update waits for fresh SV and PTP STOP readback", firmwareStopProofPreventsEarlyFlash()},
             {"real timed-out firmware subprocess retires before COM release", firmwareWorkerTimeoutAwaitsProcessExit()},
             {"current identity -> READY without recovery", currentIdentityNeverRecovers()},
             {"legacy identity -> firmware update", legacyIdentityOffersUpdate()},
@@ -212,6 +213,55 @@ private:
         deadline.stop();
         worker.shutdown();
         return restartedCleanly && !unexpectedTerminal && terminalCount == 2;
+    }
+
+
+    static bool firmwareStopProofPreventsEarlyFlash() {
+        Fixture f;
+        if (!f.profileReady) return false;
+        auto stale = identity();
+        stale.buildId = QStringLiteral("fedcba9876543210");
+        seedVerified(f, stale, QStringLiteral("COM7"), false);
+        auto& d = f.device;
+        auto& s = f.session;
+        // Reproduce field condition: not RUNNING, but a stale SV START
+        // transaction and an unverified PTP STOP block the GUI path.
+        d.ioWorkerReady_ = true;
+        d.ptpAvailable_ = true;
+        d.ptpRunning_ = true;
+        d.ptpStartStage_ = DeviceController::PtpStartStage::stop_unconfirmed;
+        d.scenarioStage_ = DeviceController::ScenarioStage::awaiting_commit;
+        const bool started = s.beginFirmwareUpdate();
+        const bool safeStage = started && s.updateRequested_ &&
+            s.updateStage_ == SmartSessionController::UpdateStage::stopping &&
+            s.portOwner_ == SmartSessionController::PortOwner::deviceSession &&
+            d.scenarioStage_ == DeviceController::ScenarioStage::idle &&
+            !d.firmwareQuiescenceVerified() && !f.firmware.busy_;
+        if (!safeStage) {
+            s.updateRequested_ = false;
+            d.endFirmwareQuiescence();
+            return false;
+        }
+
+        d.processLine(QStringLiteral("STOP accepted: SV transmission suppressed"));
+        // SV STOP accepted is insufficient without a fresh board SHOW.
+        const bool ackOnlyBlocked = d.firmwareSvStopAck_ &&
+            !d.firmwareQuiescenceVerified();
+        d.processLine(QStringLiteral(
+            "SVLIFE state=STOPPED stop_cause=OPERATOR_STOP stop_seq=1"));
+        const bool stillWaitingForPtp = d.firmwareSvStoppedReadback_ &&
+            !d.firmwareQuiescenceVerified();
+        d.processLine(QStringLiteral("PTP stop requested"));
+        d.processLine(QStringLiteral(
+            "PTP status=STOPPED Announce=0 Sync=0 FollowUp=0 PdelayFrames=0 TXfail=0"));
+        const bool proof = d.firmwareQuiescenceVerified();
+        d.ptpRunning_ = true;
+        const bool rejectsReactivation = !d.firmwareQuiescenceVerified();
+        s.updateRequested_ = false;
+        s.firmwareTotalTimer_.stop();
+        d.endFirmwareQuiescence();
+        return ackOnlyBlocked && stillWaitingForPtp && proof &&
+            rejectsReactivation && !d.firmwareQuiescenceVerified();
     }
 
     static bool revisionCatalogFailClosed() {

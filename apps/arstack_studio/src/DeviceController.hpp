@@ -313,6 +313,11 @@ public:
     bool startPtp();
     bool startPtpConfigured(const QString& role, const QVariantMap& profile);
     bool stopPtp();
+    // One supervised firmware-update safety gate. This is not a second
+    // serial owner: the existing STOP/PTP STOP/readback paths remain authoritative.
+    bool beginFirmwareQuiescence();
+    void endFirmwareQuiescence() noexcept;
+    [[nodiscard]] bool firmwareQuiescenceVerified() const noexcept;
     bool configurePtp(const QVariantMap& profile);
 
     bool setPtpRole(const QString& requestedRole) {
@@ -373,6 +378,7 @@ signals:
     void m4BoardChanged();
     void m4ReconnectModeChanged();
     void ptpStateChanged();
+    void firmwareQuiescenceChanged();
     void deviceMessage(const QString& message);
     void scenarioStateChanged();
     void scenarioApplicationFinished();
@@ -513,6 +519,12 @@ private:
     int highConfidenceCount_{0};
     bool running_{false};
     bool operatorStopPending_{false};
+    bool firmwareQuiescenceActive_{false};
+    bool firmwareSvStopAck_{false};
+    bool firmwareSvStoppedReadback_{false};
+    bool firmwarePtpStoppedReadback_{false};
+    quint64 firmwareQuiescenceSession_{0};
+    QString firmwareQuiescenceBoot_;
     QString svStopReason_;
     QString svLastStopCause_;
     // Only an observed unexpected RUNNING -> STOPPED edge in this Studio
