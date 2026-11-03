@@ -144,6 +144,7 @@ public:
 
     [[nodiscard]] static constexpr int firmwareStopAckTimeoutMs() noexcept { return 3500; }
     [[nodiscard]] static constexpr int firmwareReleaseAckTimeoutMs() noexcept { return 2000; }
+    [[nodiscard]] static constexpr int firmwareTotalDeadlineMs() noexcept { return 300000; }
 
     [[nodiscard]] static constexpr bool generationIsCurrent(
         const quint64 activeGeneration,
@@ -229,7 +230,7 @@ public:
 
     Q_INVOKABLE bool beginFirmwareUpdate();
     Q_INVOKABLE bool beginFirmwareReinstall();
-    Q_INVOKABLE bool beginFirmwareInstall();
+    Q_INVOKABLE bool beginFirmwareInstall(bool supportedBoardAndIsolationConfirmed);
     Q_INVOKABLE bool retryFirmwareUpdate();
     Q_INVOKABLE bool cancelFirmwareUpdate();
     Q_INVOKABLE bool retryFirmwareSetup();
@@ -265,7 +266,9 @@ private:
             return owner_->updateStage_ == UpdateStage::releasingPort && owner_->pendingReleaseGeneration_ != 0;
         }
         [[nodiscard]] int timeoutForStage(const UpdateStage stage) const noexcept {
-            return stage == UpdateStage::stopping ? firmwareStopAckTimeoutMs() : firmwareReleaseAckTimeoutMs();
+            return stage == UpdateStage::stopping
+                ? (owner_ != nullptr && owner_->stoppingPtpForFirmware_ ? 12000 : firmwareStopAckTimeoutMs())
+                : firmwareReleaseAckTimeoutMs();
         }
         void synchronize() {
             if (!waitingForAck()) {
@@ -405,6 +408,7 @@ private:
     QTimer discoveryTimer_;
     QTimer prepareTimer_;
     QTimer reconnectTimer_;
+    QTimer firmwareTotalTimer_;
     QTimer profileSyncTimer_;
     QTimer profileRetryTimer_;
     QTimer profileSyncTotalTimer_;
@@ -413,6 +417,8 @@ private:
     QString deviceFirmwareVersion_;
     QString deviceFirmwareBuildId_;
     QString updatePort_;
+    QString updateExpectedDeviceId_;
+    QString updateExpectedBootId_;
     QString blankBoardPort_;
     QString setupErrorStatus_;
     QString lastFirmwareUpdateResult_;
@@ -429,6 +435,10 @@ private:
     bool m4Mode_{false}; // suppress V1 automatic profile sync after M4 operator intent
     bool updateRequested_{false};
     bool updateWasOptional_{false};
+    bool stoppingPtpForFirmware_{false};
+    // Do not transfer serial authority until an asynchronously cancelled
+    // flasher has actually exited and FirmwareManager has cleared busy().
+    bool firmwareProcessRetirementPending_{false};
     bool blankBoardDetected_{false};
     bool manualRecoveryArmed_{false};
     bool setupError_{false};

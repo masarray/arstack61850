@@ -9,6 +9,11 @@ on:
         default: false
         required: false
   workflow_dispatch:
+    inputs:
+      dual_revision_preview:
+        description: 'Also build the v3.2 engineering-preview image and catalog'
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -69,7 +74,9 @@ jobs:
       CCACHE_MAXSIZE: 350M
       CCACHE_COMPILERCHECK: content
     container:
-      image: espressif/idf:v5.5.4
+      # v5.5.6 contains later P4 v3.2 watchdog fixes; both profiles use the
+      # same locked toolchain but separate generated sdkconfig/build outputs.
+      image: espressif/idf:v5.5.6
     defaults:
       run:
         shell: bash
@@ -90,6 +97,10 @@ jobs:
           key: esp32p4-idf554-ccache-v1-${{ runner.os }}-${{ hashFiles('embedded/esp32p4_smv_injector/**', 'include/ariec61850/asn1/**', 'include/ariec61850/ethernet/**', 'include/ariec61850/mms/utc_time.hpp', 'include/ariec61850/time_sync/**', 'include/ariec61850/sampled_values/**', 'src/asn1/**', 'src/ethernet/**', 'src/mms/utc_time.cpp', 'src/time_sync/**', 'src/sampled_values/**', '.github/workflows/esp32p4-smv-injector.yml') }}
           restore-keys: |
             esp32p4-idf554-ccache-v1-${{ runner.os }}-
+
+      - name: Validate dual-revision package verifier negative fixtures
+        shell: bash
+        run: python3 "$GITHUB_WORKSPACE/tests/test_esp32p4_revision_catalog.py"
 
       - name: Guard autonomous publisher and explicit Ethernet STOP policy
         shell: bash
@@ -289,7 +300,7 @@ jobs:
               "flashOffset": 0,
               "image": image,
               "sha256": sha256,
-              "espIdf": "5.5.4",
+              "espIdf": "5.5.6",
               "sourceCommit": source_commit,
               "buildId": source_commit[:16],
               "phaseSyncPreview": candidate,
@@ -330,13 +341,80 @@ jobs:
           print(f"Firmware package: PASS · {manifest['image']} · PTP-P2 · pre-v3 · SHA-256 {actual}")
           PY
 
+      # Only purpose-built engineering previews pay for a second IDF compile.
+      # Historical v1 single-image release pipelines stay unchanged.
+      - name: Build independent ESP32-P4 revision v3.2 preview image
+        if: ${{ inputs.phase_sync_preview == true || inputs.dual_revision_preview == true }}
+        run: |
+          set -euo pipefail
+          source /opt/esp/idf/export.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          cfg = Path('sdkconfig.defaults').read_text(encoding='utf-8')
+          old = 'CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y'
+          assert cfg.count(old) == 1, 'legacy silicon selector changed'
+          cfg = cfg.replace(old, '# CONFIG_ESP32P4_SELECTS_REV_LESS_V3 is not set\nCONFIG_ESP32P4_REV_MIN_300=y')
+          Path('sdkconfig.v3x.defaults').write_text(cfg, encoding='utf-8')
+          PY
+          # Never allow the first profile's sdkconfig/build cache to be reused.
+          test ! -e sdkconfig.v3x
+          idf.py -B build-v3x -DSDKCONFIG="$PWD/sdkconfig.v3x" \
+              -DSDKCONFIG_DEFAULTS="$PWD/sdkconfig.v3x.defaults" set-target esp32p4
+          grep -qx '# CONFIG_ESP32P4_SELECTS_REV_LESS_V3 is not set' sdkconfig.v3x
+          grep -qx 'CONFIG_ESP32P4_REV_MIN_300=y' sdkconfig.v3x
+          idf.py -B build-v3x build
+          # Fail if the effective revision configuration was silently reset.
+          grep -qx '# CONFIG_ESP32P4_SELECTS_REV_LESS_V3 is not set' sdkconfig.v3x
+          grep -qx 'CONFIG_ESP32P4_REV_MIN_300=y' sdkconfig.v3x
+          image="arstack-esp32p4-smv-${ARSTACK_FIRMWARE_VERSION}-v3x.bin"
+          idf.py -B build-v3x merge-bin -o "$image" -f raw
+          test -s "build-v3x/$image"
+
+      - name: Generate revision-aware catalog with distinct exact-SHA images
+        if: ${{ inputs.phase_sync_preview == true || inputs.dual_revision_preview == true }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib
+          root = pathlib.Path('build')
+          legacy = json.loads((root/'firmware-manifest.json').read_text(encoding='utf-8'))
+          image = f"arstack-esp32p4-smv-{os.environ['ARSTACK_FIRMWARE_VERSION']}-v3x.bin"
+          payload = (pathlib.Path('build-v3x')/image).read_bytes()
+          old = (root/legacy['image']).read_bytes()
+          assert payload != old, 'two revisions accidentally contain identical firmware'
+          assert legacy['sourceCommit'][:16].encode('ascii') in payload, 'v3x build-id does not match checkout'
+          assert legacy['espIdf'] == '5.5.6'
+          catalog = {
+            'schema': 'arstack.studio.firmware.catalog.v2',
+            'chip': 'esp32p4',
+            'version': legacy['version'],
+            'protocol': legacy['protocol'],
+            'sourceCommit': legacy['sourceCommit'],
+            'releaseChannel': 'engineering-preview',
+            'images': [
+              {'policy': 'pre-v3', 'minRevision': 100, 'maxRevision': 199,
+               'image': legacy['image'], 'sha256': legacy['sha256']},
+              {'policy': 'v3.x', 'minRevision': 302, 'maxRevision': 302,
+               'image': image, 'sha256': hashlib.sha256(payload).hexdigest()}
+            ]
+          }
+          assert hashlib.sha256(old).hexdigest() == legacy['sha256']
+          (root/'firmware-catalog.json').write_text(
+            json.dumps(catalog, sort_keys=True, indent=2)+'\n', encoding='utf-8')
+          PY
+
       - name: Stage Studio firmware package
         run: |
           set -euo pipefail
           mkdir -p build/studio-firmware
           cp "build/arstack-esp32p4-smv-${ARSTACK_FIRMWARE_VERSION}.bin" build/studio-firmware/
           cp build/firmware-manifest.json build/studio-firmware/
-          sha256sum build/studio-firmware/* > build/studio-firmware/SHA256SUMS.txt
+          if [[ -f build/firmware-catalog.json ]]; then
+            cp "build-v3x/arstack-esp32p4-smv-${ARSTACK_FIRMWARE_VERSION}-v3x.bin" build/studio-firmware/
+            cp build/firmware-catalog.json build/studio-firmware/
+            python3 "$GITHUB_WORKSPACE/scripts/validate_esp32p4_revision_catalog.py" build/studio-firmware
+          fi
+          (cd build/studio-firmware && sha256sum *.bin *.json > SHA256SUMS.txt)
 
       - name: Upload ESP32-P4 firmware package
         uses: actions/upload-artifact@v4

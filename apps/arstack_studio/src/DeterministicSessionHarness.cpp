@@ -27,6 +27,8 @@ public:
         };
 
         const CaseResult cases[] = {
+            {"dual-revision catalog selects only qualified silicon", revisionCatalogFailClosed()},
+            {"firmware timeout retains port until flasher exits", firmwarePortReleaseWaitsForWorker()},
             {"current identity -> READY without recovery", currentIdentityNeverRecovers()},
             {"legacy identity -> firmware update", legacyIdentityOffersUpdate()},
             {"same version missing build ID -> READY with update suggestion", sameVersionMissingBuildOffersUpdate()},
@@ -128,6 +130,29 @@ public:
     }
 
 private:
+    static bool revisionCatalogFailClosed() {
+        FirmwareManager firmware;
+        firmware.revisionCatalogAvailable_ = true;
+        firmware.revisionImages_ = {
+            {QStringLiteral("pre-v3"), QStringLiteral("legacy.bin"), QStringLiteral("a"), 100, 199},
+            {QStringLiteral("v3.x"), QStringLiteral("v3.bin"), QStringLiteral("b"), 302, 302},
+        };
+        const bool legacy = firmware.selectFirmwareForRevision(1, 3) &&
+            firmware.revisionPolicy_ == QStringLiteral("pre-v3") &&
+            firmware.firmwareImagePath_ == QStringLiteral("legacy.bin");
+        const bool v3 = firmware.selectFirmwareForRevision(3, 2) &&
+            firmware.revisionPolicy_ == QStringLiteral("v3.x") &&
+            firmware.firmwareImagePath_ == QStringLiteral("v3.bin");
+        const bool rejectsUnknown = !firmware.selectFirmwareForRevision(3, 1) &&
+            !firmware.selectFirmwareForRevision(4, 0);
+        firmware.revisionImages_.push_back(
+            {QStringLiteral("overlap"), QStringLiteral("duplicate.bin"), QStringLiteral("c"), 302, 302});
+        const bool rejectsOverlap = !firmware.selectFirmwareForRevision(3, 2);
+        const bool deadline = SmartSessionController::firmwareTotalDeadlineMs() == 300000;
+        firmware.shutdown();
+        return legacy && v3 && rejectsUnknown && rejectsOverlap && deadline;
+    }
+
     struct Fixture {
         SclProfileModel profiles;
         FirmwareManager firmware;
@@ -149,6 +174,27 @@ private:
             firmware.shutdown();
         }
     };
+
+    static bool firmwarePortReleaseWaitsForWorker() {
+        Fixture fixture;
+        quiesce(fixture.session, fixture.device);
+        auto& s = fixture.session;
+        auto& f = fixture.firmware;
+        s.updateRequested_ = true;
+        s.updateStage_ = SmartSessionController::UpdateStage::flashing;
+        s.portOwner_ = SmartSessionController::PortOwner::firmwareTool;
+        f.busy_ = true;
+        s.latchFirmwareFailure(QStringLiteral("Deadline reached"));
+        const bool retained = s.portOwner_ == SmartSessionController::PortOwner::firmwareTool &&
+            s.firmwareProcessRetirementPending_ && !s.updateRequested_ &&
+            !s.startDeviceDiscovery();
+        f.busy_ = false;
+        emit f.stateChanged(); // Emulate QProcess cancellation acknowledgement.
+        const bool released = !s.firmwareProcessRetirementPending_ &&
+            s.portOwner_ == SmartSessionController::PortOwner::none &&
+            s.setupError_;
+        return retained && released;
+    }
 
     static void quiesce(SmartSessionController& session, StudioDeviceController& device) {
         session.discoveryTimer_.stop();
