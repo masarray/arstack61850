@@ -36,7 +36,8 @@ def verify(root: Path) -> None:
             or legacy.get("chip") != "esp32p4"
             or catalog.get("sourceCommit") != legacy.get("sourceCommit")
             or catalog.get("version") != legacy.get("version")
-            or catalog.get("protocol") != legacy.get("protocol")):
+            or catalog.get("protocol") != legacy.get("protocol")
+            or catalog.get("releaseChannel") != "engineering-preview"):
         raise ValueError("catalog identity mismatch")
     images = catalog.get("images")
     if not isinstance(images, list) or len(images) != 2:

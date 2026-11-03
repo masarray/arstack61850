@@ -164,6 +164,13 @@ bool FirmwareManager::parseEsp32P4Revision(const QString& output, int& major, in
         minor = -1;
         return false;
     }
+    // Multiple chip-identity lines must not permit cherry-picking a
+    // compatible revision from contradictory/flaky ROM probe output.
+    if (expression.match(output, match.capturedEnd()).hasMatch()) {
+        major = -1;
+        minor = -1;
+        return false;
+    }
     major = match.captured(1).toInt();
     minor = match.captured(2).toInt();
     return true;
@@ -389,6 +396,7 @@ bool FirmwareManager::loadRevisionCatalog(
         object.value(QStringLiteral("sourceCommit")).toString() != sourceCommit ||
         object.value(QStringLiteral("version")).toString() != firmwareVersion_ ||
         object.value(QStringLiteral("protocol")).toInt(-1) != expectedProtocol_.toInt() ||
+        object.value(QStringLiteral("releaseChannel")).toString() != QStringLiteral("engineering-preview") ||
         images.size() != 2) {
         bundleStatus_ = QStringLiteral("Firmware catalog identity/schema or image count is incompatible.");
         return false;

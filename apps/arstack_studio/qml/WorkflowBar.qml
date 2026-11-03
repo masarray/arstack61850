@@ -507,10 +507,18 @@ SurfacePanel {
             }
             Label {
                 Layout.fillWidth: true
-                text: "Keep USB connected until verification finishes."
+                text: "Keep USB connected. Use only Waveshare ESP32-P4-ETH-M, isolated from energized process-bus equipment."
                 color: ribbon.theme.muted
                 font.family: ribbon.uiFont
                 font.pixelSize: 10
+                wrapMode: Text.WordWrap
+            }
+            CheckBox {
+                id: recoveryBoardConfirmed
+                text: "I confirmed the supported board and safe lab connection"
+                font.family: ribbon.uiFont
+                font.pixelSize: 11
+                checked: false
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -521,6 +529,7 @@ SurfacePanel {
                 }
                 CalmButton {
                     theme: ribbon.theme; uiFont: ribbon.uiFont; text: "Install firmware"; tone: "accent"; implicitWidth: 142
+                    enabled: recoveryBoardConfirmed.checked
                     onClicked: {
                         if (smartSession.beginFirmwareInstall()) {
                             ribbon.installPromptDeferred = false

@@ -260,7 +260,11 @@ int checkFirmwareContract(int argc, char* argv[]) {
     const bool rejectsWrongChip = !FirmwareManager::parseEsp32P4Revision(
         QStringLiteral("Chip type:         esp32s3 (revision v0.2)\n"),
         wrongMajor,
-        wrongMinor);
+        wrongMinor) &&
+        !FirmwareManager::parseEsp32P4Revision(
+            QStringLiteral("Chip type: esp32p4 (revision v1.3)\nChip type: esp32p4 (revision v3.2)"),
+            wrongMajor,
+            wrongMinor);
 
     const bool macIdentityContract =
         FirmwareManager::parseEsp32P4Mac(QStringLiteral(

@@ -36,7 +36,7 @@ class CatalogTest(unittest.TestCase):
                              sourceCommit=SOURCE, image="old.bin", sha256=a)
         self.catalog = dict(schema="arstack.studio.firmware.catalog.v2",
                             chip="esp32p4", version="0.1.1", protocol=1,
-                            sourceCommit=SOURCE, images=[
+                            sourceCommit=SOURCE, releaseChannel="engineering-preview", images=[
                                 dict(policy="pre-v3", image="old.bin", sha256=a, minRevision=100, maxRevision=199),
                                 dict(policy="v3.x", image="new.bin", sha256=b, minRevision=302, maxRevision=302),
                             ])

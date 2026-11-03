@@ -650,13 +650,33 @@ bool SmartSessionController::beginFirmwareOperation(const QString& portName) {
 }
 
 bool SmartSessionController::retryFirmwareUpdate() {
-    if (device_ == nullptr || firmware_ == nullptr || updatePort_.isEmpty() || firmware_->busy()) return false;
+    if (device_ == nullptr || firmware_ == nullptr || updatePort_.isEmpty() ||
+        firmware_->busy() || (updateRequested_ && updateStage_ != UpdateStage::waitingForBootloader))
+        return false;
+
+    const QString preservedMac = updateExpectedDeviceId_;
+    if (!preservedMac.isEmpty() && device_->deviceVerified() &&
+        !recoveryIdentityMatches(preservedMac, device_->deviceId())) {
+        // An unrelated board might have appeared on the same COM number.
+        return false;
+    }
+
+    if (!updateRequested_) {
+        // A terminal failure restarts through the *same* safe SV/PTP STOP and
+        // port-owner preflight as an initial operator-authorized installation.
+        // Do not bypass active PTP/SV simply because this button says Retry.
+        if (!beginFirmwareOperation(updatePort_)) return false;
+        if (updateExpectedDeviceId_.isEmpty())
+            updateExpectedDeviceId_ = preservedMac;
+        return true;
+    }
+
+    // Explicit user retry after Download-mode guidance. No implicit replay,
+    // and a fresh ROM probe is still required before every write attempt.
     setupError_ = false;
     setupErrorStatus_.clear();
     lastFirmwareUpdateResult_.clear();
     blankBoardDetected_ = false;
-    updateRequested_ = true;
-    stoppingPtpForFirmware_ = false;
     firmwareTotalTimer_.start();
     updateReconnectAttempts_ = 0;
     pendingReleaseGeneration_ = 0;
