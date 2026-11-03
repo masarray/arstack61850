@@ -138,6 +138,16 @@ Rectangle {
                 onClicked: capture.openCaptureSupportHelp()
             }
         }
+        Label {
+            Layout.fillWidth: true
+            text: adapter.currentIndex >= 0 && adapter.currentIndex < capture.interfaceDetails.length
+                ? capture.interfaceDetails[adapter.currentIndex]
+                : "Select the physical Ethernet port receiving SV/PTP packets."
+            wrapMode: Text.WordWrap
+            color: panel.theme.textSoft
+            font.family: panel.uiFont
+            font.pixelSize: 9
+        }
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
