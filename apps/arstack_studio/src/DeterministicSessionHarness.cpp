@@ -46,6 +46,7 @@ public:
             {"firmware update waits for fresh SV and PTP STOP readback", firmwareStopProofPreventsEarlyFlash()},
             {"retry after unverified STOP cannot probe ROM without renewed consent", unverifiedFirmwareRetryNeverProbesRom()},
             {"slow firmware STOP suspends ordinary health teardown, resumes afterward", maintenanceStopDoesNotTriggerHealthDisconnect()},
+            {"firmware STOP proof readbacks survive M4 exclusive retirement", maintenanceProofReadbackSurvivesM4Retirement()},
             {"real timed-out firmware subprocess retires before COM release", firmwareWorkerTimeoutAwaitsProcessExit()},
             {"current identity -> READY without recovery", currentIdentityNeverRecovers()},
             {"legacy identity -> firmware update", legacyIdentityOffersUpdate()},
@@ -217,6 +218,37 @@ private:
         return restartedCleanly && !unexpectedTerminal && terminalCount == 2;
     }
 
+
+    static bool maintenanceProofReadbackSurvivesM4Retirement() {
+        Fixture f;
+        if (!f.profileReady) return false;
+        seedVerified(f, identity(), QStringLiteral("COM7"), false);
+        auto& d = f.device;
+        d.ioWorkerReady_ = true;
+        d.firmwareQuiescenceActive_ = true;
+        d.firmwareQuiescenceSession_ = d.sessionGeneration_;
+        d.firmwareQuiescenceBoot_ = d.identity_.bootId;
+        d.firmwareSvStopAck_ = true;
+        d.ptpStartStage_ = DeviceController::PtpStartStage::awaiting_stop_readback;
+        d.ptpRunning_ = true;
+        d.m4ScenarioRetiring_ = true;
+        d.deferredShow_ = true;
+        d.deferredPtpShow_ = true;
+        d.deferredProfileShow_ = true;
+        d.flushDeferredReadbacks();
+        const bool waitForSerialRetirement =
+            d.deferredShow_ && d.deferredPtpShow_ &&
+            !d.firmwareQuiescenceVerified();
+        d.m4ScenarioRetiring_ = false;
+        d.flushDeferredReadbacks();
+        const bool proofsRetried =
+            !d.deferredShow_ && !d.deferredPtpShow_ &&
+            !d.deferredProfileShow_ &&
+            d.ptpStartStage_ == DeviceController::PtpStartStage::awaiting_stop_readback &&
+            !d.firmwareQuiescenceVerified();
+        d.endFirmwareQuiescence();
+        return waitForSerialRetirement && proofsRetried;
+    }
 
     static bool unverifiedFirmwareRetryNeverProbesRom() {
         Fixture f;

@@ -2383,14 +2383,29 @@ bool DeviceController::sendCommandBatch(const QStringList& commands, const bool 
 }
 
 void DeviceController::flushDeferredReadbacks() {
-    // STOP/PTP STOP and their fresh authoritative readbacks have the sole
-    // serial proof lane while a firmware handoff is active. Never replay old
-    // PROFILE SHOW / telemetry from a retired transaction into this window.
-    if (firmwareQuiescenceActive_ ||
-        m4BoardInspecting_ || m4Deploying_ || m4ScenarioApplying_ || m4ScenarioRetiring_ || profileDeploying_ || binaryProfileStage_ != BinaryProfileStage::idle ||
+    if (m4BoardInspecting_ || m4Deploying_ || m4ScenarioApplying_ || m4ScenarioRetiring_ || profileDeploying_ || binaryProfileStage_ != BinaryProfileStage::idle ||
         scenarioStage_ != ScenarioStage::idle ||
         !connected_ || !ioWorkerReady_ || ioWorker_ == nullptr || sessionGeneration_ == 0)
         return;
+    if (firmwareQuiescenceActive_) {
+        // The queued STOP-proof SHOW/PTP SHOW were created *after* their
+        // respective current-boot ACKs: entry already discarded all old
+        // deferred reads. During exclusive M4 retirement, preserve these
+        // two proof reads until that serial lease is actually retired.
+        // Never replay unrelated PROFILE SHOW into firmware maintenance.
+        deferredProfileShow_ = false;
+        if (std::exchange(deferredPtpShow_, false) &&
+            ptpStartStage_ == PtpStartStage::awaiting_stop_readback &&
+            !sendQuietCommand(QStringLiteral("PTP SHOW"))) {
+            markPtpStopUnconfirmed(QStringLiteral(
+                "Firmware PTP STOP proof readback could not be queued."));
+        }
+        if (std::exchange(deferredShow_, false) && firmwareSvStopAck_ &&
+            !sendQuietCommand(QStringLiteral("SHOW"))) {
+            setError(QStringLiteral("Firmware SV STOP proof readback could not be queued."));
+        }
+        return;
+    }
     // At most one of each telemetry/readback type. No competing serial writer.
     if (std::exchange(deferredPtpShow_, false)) {
         if (!sendQuietCommand(QStringLiteral("PTP SHOW")) &&
