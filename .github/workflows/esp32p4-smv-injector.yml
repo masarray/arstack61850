@@ -98,6 +98,10 @@ jobs:
           restore-keys: |
             esp32p4-idf554-ccache-v1-${{ runner.os }}-
 
+      - name: Validate dual-revision package verifier negative fixtures
+        shell: bash
+        run: python3 "$GITHUB_WORKSPACE/tests/test_esp32p4_revision_catalog.py"
+
       - name: Guard autonomous publisher and explicit Ethernet STOP policy
         shell: bash
         run: python3 "$GITHUB_WORKSPACE/tests/test_board_autonomous_publisher_contract.py"
