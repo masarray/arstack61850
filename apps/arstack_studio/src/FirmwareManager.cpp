@@ -27,6 +27,10 @@ constexpr auto kManifestName = "firmware-manifest.json";
 constexpr auto kManifestSchema = "arstack.studio.firmware.v1";
 constexpr auto kExpectedChip = "esp32p4";
 constexpr auto kPreV3Policy = "pre-v3";
+constexpr auto kV3Policy = "v3.x";
+constexpr auto kCatalogName = "firmware-catalog.json";
+constexpr auto kCatalogSchema = "arstack.studio.firmware.catalog.v2";
+constexpr qint64 kMaxFirmwareSize = 16 * 1024 * 1024;
 constexpr qsizetype kMaxOperationOutput = 65536;
 constexpr qsizetype kTrimmedOperationOutput = 49152;
 constexpr qsizetype kMaxProgressOutputTail = 2048;
@@ -147,6 +151,14 @@ bool FirmwareManager::supportsEsp32P4Revision(const int major, const int minor) 
     return major >= 0 && major < 3 && minor >= 0;
 }
 
+bool FirmwareManager::revisionInRange(const int major, const int minor,
+                                      const int minRevision, const int maxRevision) noexcept {
+    if (major < 0 || minor < 0 || minor >= 100 || major > 99 ||
+        minRevision < 0 || maxRevision < minRevision) return false;
+    const int revision = major * 100 + minor;
+    return revision >= minRevision && revision <= maxRevision;
+}
+
 int FirmwareManager::parseFlashProgress(const QString& output) {
     // Keep this parser pure so deterministic fixtures exercise the exact
     // production token rules. Stream reassembly remains bounded in
@@ -205,6 +217,9 @@ void FirmwareManager::refreshBundle() {
     revisionPolicy_.clear();
     firmwareSha256_.clear();
     firmwareImagePath_.clear();
+    revisionImages_.clear();
+    revisionCatalogAvailable_ = false;
+    targetVerified_ = false;
     flashProgress_ = -1;
     progressOutputTail_.clear();
 
@@ -220,8 +235,11 @@ void FirmwareManager::refreshBundle() {
         return;
     }
     bundleReady_ = true;
-    bundleStatus_ = QStringLiteral("Ready · firmware v%1 · build %2 · ESP32-P4 pre-v3 · PTP-P2 · SHA-256 verified")
-        .arg(firmwareVersion_, firmwareBuildId_);
+    bundleStatus_ = revisionCatalogAvailable_
+        ? QStringLiteral("Ready · pre-v3 + v3.2 preview · firmware v%1 · build %2 · SHA-256 verified")
+              .arg(firmwareVersion_, firmwareBuildId_)
+        : QStringLiteral("Ready · firmware v%1 · build %2 · ESP32-P4 pre-v3 · PTP-P2 · SHA-256 verified")
+              .arg(firmwareVersion_, firmwareBuildId_);
     emit stateChanged();
 }
 
@@ -273,7 +291,7 @@ bool FirmwareManager::loadManifest() {
     if (imageName.isEmpty() || QFileInfo(imageName).fileName() != imageName ||
         expectedHash.size() != 64 || version.isEmpty() || protocol < 1 || flashOffset != 0 ||
         !QRegularExpression(QStringLiteral("^[0-9a-f]{16}$")).match(buildId).hasMatch() ||
-        !sourceCommit.startsWith(buildId, Qt::CaseInsensitive) ||
+        !QRegularExpression(QStringLiteral("^[0-9a-f]{40}$")).match(sourceCommit).hasMatch() ||
         revisionPolicy != QString::fromLatin1(kPreV3Policy) || !productionCapabilities) {
         bundleStatus_ = QStringLiteral("Firmware manifest fields/capabilities are incomplete or unsafe.");
         return false;
@@ -303,6 +321,107 @@ bool FirmwareManager::loadManifest() {
     revisionPolicy_ = revisionPolicy;
     firmwareSha256_ = actualHash;
     firmwareImagePath_ = QDir::cleanPath(imagePath);
+    return loadRevisionCatalog(root, imageName, actualHash, sourceCommit);
+}
+
+bool FirmwareManager::loadRevisionCatalog(
+    const QDir& root, const QString& legacyImage,
+    const QString& legacyHash, const QString& sourceCommit) {
+    const QFileInfo catalogInfo{root.filePath(QString::fromLatin1(kCatalogName))};
+    if (!catalogInfo.exists()) return true; // Immutable historical v1 bundles remain pre-v3 only.
+    QFile catalog{catalogInfo.absoluteFilePath()};
+    if (catalogInfo.isSymLink() || catalogInfo.size() <= 0 || catalogInfo.size() > 65536 ||
+        !catalog.open(QIODevice::ReadOnly)) {
+        bundleStatus_ = QStringLiteral("Firmware catalog could not be read safely.");
+        return false;
+    }
+    QJsonParseError parseError{};
+    const QJsonDocument document = QJsonDocument::fromJson(catalog.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        bundleStatus_ = QStringLiteral("Firmware catalog is invalid JSON.");
+        return false;
+    }
+    const QJsonObject object = document.object();
+    const QJsonArray images = object.value(QStringLiteral("images")).toArray();
+    if (object.value(QStringLiteral("schema")).toString() != QString::fromLatin1(kCatalogSchema) ||
+        object.value(QStringLiteral("chip")).toString() != QString::fromLatin1(kExpectedChip) ||
+        object.value(QStringLiteral("sourceCommit")).toString() != sourceCommit ||
+        object.value(QStringLiteral("version")).toString() != firmwareVersion_ ||
+        object.value(QStringLiteral("protocol")).toInt(-1) != expectedProtocol_.toInt() ||
+        images.size() != 2) {
+        bundleStatus_ = QStringLiteral("Firmware catalog identity/schema or image count is incompatible.");
+        return false;
+    }
+    QVector<RevisionImage> validated;
+    const QString canonicalRoot = QFileInfo(root.absolutePath()).canonicalFilePath();
+    if (canonicalRoot.isEmpty()) {
+        bundleStatus_ = QStringLiteral("Firmware directory could not be resolved.");
+        return false;
+    }
+    for (const auto& value : images) {
+        if (!value.isObject()) {
+            bundleStatus_ = QStringLiteral("Firmware catalog contains an invalid image entry.");
+            return false;
+        }
+        const QJsonObject entry = value.toObject();
+        const QString policy = entry.value(QStringLiteral("policy")).toString();
+        const QString name = entry.value(QStringLiteral("image")).toString();
+        const QString hash = normalizedHash(entry.value(QStringLiteral("sha256")).toString());
+        const int minRevision = entry.value(QStringLiteral("minRevision")).toInt(-1);
+        const int maxRevision = entry.value(QStringLiteral("maxRevision")).toInt(-1);
+        // Qualification is intentionally limited to proven v1.x and the v3.2
+        // engineering-preview target. Do not silently permit future revisions.
+        const bool legacy = policy == QString::fromLatin1(kPreV3Policy) &&
+            minRevision == 100 && maxRevision == 199;
+        const bool v3 = policy == QString::fromLatin1(kV3Policy) &&
+            minRevision == 302 && maxRevision == 302;
+        const QFileInfo imageInfo{root.filePath(name)};
+        if ((!legacy && !v3) || name.isEmpty() || QFileInfo(name).fileName() != name ||
+            !QRegularExpression(QStringLiteral("^[0-9a-f]{64}$")).match(hash).hasMatch() ||
+            imageInfo.isSymLink() || !imageInfo.isFile() || imageInfo.size() <= 0 ||
+            imageInfo.size() > kMaxFirmwareSize ||
+            imageInfo.canonicalPath() != canonicalRoot ||
+            (legacy && (name != legacyImage || hash != legacyHash))) {
+            bundleStatus_ = QStringLiteral("Firmware catalog has an unsafe or incompatible image entry.");
+            return false;
+        }
+        for (const RevisionImage& earlier : validated) {
+            if (earlier.policy == policy || earlier.imagePath == imageInfo.canonicalFilePath() ||
+                !(maxRevision < earlier.minRevision || minRevision > earlier.maxRevision)) {
+                bundleStatus_ = QStringLiteral("Firmware catalog contains duplicate or overlapping images.");
+                return false;
+            }
+        }
+        QFile imageFile{imageInfo.canonicalFilePath()};
+        QCryptographicHash hasher{QCryptographicHash::Sha256};
+        if (!imageFile.open(QIODevice::ReadOnly) || !hasher.addData(&imageFile) ||
+            QString::fromLatin1(hasher.result().toHex()) != hash) {
+            bundleStatus_ = QStringLiteral("Firmware catalog SHA-256 verification failed.");
+            return false;
+        }
+        validated.push_back({policy, imageInfo.canonicalFilePath(), hash, minRevision, maxRevision});
+    }
+    if (validated.size() != 2 || validated[0].policy == validated[1].policy) {
+        bundleStatus_ = QStringLiteral("Firmware catalog must contain two disjoint revision policies.");
+        return false;
+    }
+    revisionImages_ = std::move(validated);
+    revisionCatalogAvailable_ = true;
+    return true;
+}
+
+bool FirmwareManager::selectFirmwareForRevision(const int major, const int minor) {
+    if (!revisionCatalogAvailable_) return supportsEsp32P4Revision(major, minor);
+    const RevisionImage* selected = nullptr;
+    for (const RevisionImage& image : revisionImages_) {
+        if (!revisionInRange(major, minor, image.minRevision, image.maxRevision)) continue;
+        if (selected != nullptr) return false; // Multiple matches must never be resolved by array order.
+        selected = &image;
+    }
+    if (selected == nullptr) return false;
+    revisionPolicy_ = selected->policy;
+    firmwareImagePath_ = selected->imagePath;
+    firmwareSha256_ = selected->sha256;
     return true;
 }
 
@@ -347,7 +466,17 @@ bool FirmwareManager::installFirmware(const QString& portName) {
         return false;
     }
     if (!targetVerified_ || port.isEmpty() || port != selectedPort_) {
-        fail(QStringLiteral("Check and verify a supported ESP32-P4 pre-v3 board before flashing."));
+        fail(QStringLiteral("Identify and verify a supported ESP32-P4 board before installing firmware."));
+        return false;
+    }
+    // Re-hash immediately before the write. A file replaced after preflight
+    // must never be trusted because the catalog was valid earlier.
+    QFile image{firmwareImagePath_};
+    QCryptographicHash hasher{QCryptographicHash::Sha256};
+    if (!image.open(QIODevice::ReadOnly) || !hasher.addData(&image) ||
+        QString::fromLatin1(hasher.result().toHex()) != firmwareSha256_) {
+        targetVerified_ = false;
+        fail(QStringLiteral("Firmware image changed after verification. Installation is blocked."));
         return false;
     }
     if (sessionGeneration_ == 0) {
@@ -606,9 +735,7 @@ void FirmwareManager::finishOperation(const int exitCode, const bool normalExit)
         const bool p4WithRevision = success && parseEsp32P4Revision(operationOutput_, major, minor);
         const bool anyChipAnswered = success && operationOutput_.contains(
             QRegularExpression{QStringLiteral(R"(Chip\s+type:)"), QRegularExpression::CaseInsensitiveOption});
-        const bool supportedRevision = p4WithRevision &&
-            revisionPolicy_ == QString::fromLatin1(kPreV3Policy) &&
-            supportsEsp32P4Revision(major, minor);
+        const bool supportedRevision = p4WithRevision && selectFirmwareForRevision(major, minor);
 
         targetVerified_ = supportedRevision;
         bootloaderHelpNeeded_ = !success;
@@ -621,10 +748,10 @@ void FirmwareManager::finishOperation(const int exitCode, const bool normalExit)
         }
 
         if (supportedRevision) {
-            setStatus(QStringLiteral("ESP32-P4 revision v%1.%2 verified on %3. Ready to install ARStack firmware.")
-                .arg(major).arg(minor).arg(selectedPort_));
+            setStatus(QStringLiteral("ESP32-P4 v%1.%2 verified. Matching %3 firmware selected.")
+                .arg(major).arg(minor).arg(revisionPolicy_));
         } else if (p4WithRevision) {
-            setStatus(QStringLiteral("ESP32-P4 revision v%1.%2 is outside this firmware package (pre-v3). Installation is blocked.")
+            setStatus(QStringLiteral("ESP32-P4 v%1.%2 is not supported by this firmware package. Installation is blocked.")
                 .arg(major).arg(minor));
         } else if (anyChipAnswered) {
             setStatus(QStringLiteral("A chip answered on %1, but it is not an ESP32-P4. Installation is blocked.")

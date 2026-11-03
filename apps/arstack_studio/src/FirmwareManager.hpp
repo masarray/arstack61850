@@ -5,9 +5,11 @@
 #include <QString>
 #include <QStringList>
 #include <QThread>
+#include <QVector>
 
 class DeterministicSessionHarness;
 class FirmwareWorker;
+class QDir;
 
 class FirmwareManager : public QObject {
     Q_OBJECT
@@ -52,6 +54,7 @@ public:
 
     [[nodiscard]] static bool parseEsp32P4Revision(const QString& output, int& major, int& minor);
     [[nodiscard]] static bool supportsEsp32P4Revision(int major, int minor) noexcept;
+    [[nodiscard]] static bool revisionInRange(int major, int minor, int minRevision, int maxRevision) noexcept;
     [[nodiscard]] static int parseFlashProgress(const QString& output);
     [[nodiscard]] static constexpr int launchTimeoutMs() noexcept { return 15000; }
     [[nodiscard]] static constexpr int probeTimeoutMs() noexcept { return 30000; }
@@ -89,10 +92,20 @@ signals:
 private:
     friend class DeterministicSessionHarness;
     enum class Operation { none, probe, flash, reset };
+    struct RevisionImage {
+        QString policy;
+        QString imagePath;
+        QString sha256;
+        int minRevision{-1};
+        int maxRevision{-1};
+    };
 
     [[nodiscard]] QString bundleRoot() const;
     [[nodiscard]] QString flasherPath() const;
     bool loadManifest();
+    bool loadRevisionCatalog(const QDir& root, const QString& legacyImage,
+                             const QString& legacyHash, const QString& sourceCommit);
+    bool selectFirmwareForRevision(int major, int minor);
     bool startEspflash(const QStringList& arguments, Operation operation);
     int operationTimeoutMs(Operation operation) const noexcept;
     void connectWorkerSignals();
@@ -122,6 +135,8 @@ private:
     QString revisionPolicy_;
     QString firmwareSha256_;
     QString firmwareImagePath_;
+    QVector<RevisionImage> revisionImages_;
+    bool revisionCatalogAvailable_{false};
     QString status_{QStringLiteral("Firmware setup ready")};
     QString bundleStatus_{QStringLiteral("Checking firmware package...")};
     QString logText_;
