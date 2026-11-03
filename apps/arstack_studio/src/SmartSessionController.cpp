@@ -937,6 +937,11 @@ void SmartSessionController::reconnectDeviceSignals() {
             return;
         }
         pendingReleaseGeneration_ = 0;
+        // The verified STOP lease ends only AFTER QSerialPort has closed.
+        // Release DeviceController's local mutation guard before the next
+        // firmware boot; retaining it would block START after a successful
+        // update, even though the new board identity is verified.
+        if (device_ != nullptr) device_->endFirmwareQuiescence();
         setPortOwner(PortOwner::none);
         QTimer::singleShot(0, this, [this] { continueFirmwareUpdate(); });
     });
@@ -1567,6 +1572,9 @@ void SmartSessionController::reconcile() {
         }
         firmwareTotalTimer_.stop();
         stoppingPtpForFirmware_ = false;
+        // A rebooted, verified board must never inherit a pre-flash
+        // maintenance lock from the old device session.
+        device_->endFirmwareQuiescence();
         updateRequested_ = false;
         updateWasOptional_ = false;
         updateStage_ = UpdateStage::idle;

@@ -468,6 +468,9 @@ void DeviceController::connectWorkerSignals() {
             !m4ScenarioRetiring_) return;
         m4ScenarioRetiring_ = false;
         emit m4DeploymentChanged();
+        // If an update was waiting for the last old CFG write to retire,
+        // fresh STOP evidence may now complete its verified handoff.
+        if (firmwareQuiescenceActive_) emit firmwareQuiescenceChanged();
     });
 
     connect(ioWorker_, &DeviceIoWorker::commandRejected, this,
