@@ -93,12 +93,14 @@ Item {
             }
 
             Rectangle {
-                implicitWidth: 112
+                implicitWidth: hub.session && hub.session.updatingFirmware ? 144 : 112
                 implicitHeight: 30
                 radius: 15
-                color: hub.device.deviceVerified ? "#10251d" : "#261f13"
+                color: hub.session && hub.session.updatingFirmware
+                    ? "#261f13" : hub.device.deviceVerified ? "#10251d" : "#261f13"
                 border.width: 1
-                border.color: hub.device.deviceVerified ? "#347a59" : "#705827"
+                border.color: hub.session && hub.session.updatingFirmware
+                    ? "#705827" : hub.device.deviceVerified ? "#347a59" : "#705827"
 
                 RowLayout {
                     anchors.centerIn: parent
@@ -107,11 +109,14 @@ Item {
                         width: 7
                         height: 7
                         radius: 4
-                        color: hub.device.deviceVerified ? hub.theme.green : hub.theme.amber
+                        color: hub.session && hub.session.updatingFirmware
+                            ? hub.theme.amber : hub.device.deviceVerified ? hub.theme.green : hub.theme.amber
                     }
                     Label {
-                        text: hub.device.deviceVerified ? "Device ready" : "Setup mode"
-                        color: hub.device.deviceVerified ? hub.theme.green : hub.theme.amber
+                        text: hub.session && hub.session.updatingFirmware
+                            ? "Updating firmware" : hub.device.deviceVerified ? "Device ready" : "Setup mode"
+                        color: hub.session && hub.session.updatingFirmware
+                            ? hub.theme.amber : hub.device.deviceVerified ? hub.theme.green : hub.theme.amber
                         font.family: hub.uiFont
                         font.pixelSize: 10
                         font.weight: Font.DemiBold

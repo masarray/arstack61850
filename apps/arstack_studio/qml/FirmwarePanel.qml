@@ -13,9 +13,10 @@ SurfacePanel {
     property string monoFont: "Inter"
     property bool technicalDetailsVisible: false
     readonly property string firmwareDisplayStatus:
-        panel.session && panel.session.firmwareUpdateResult.length > 0 &&
-        !panel.session.updatingFirmware
-        ? panel.session.firmwareUpdateResult : panel.firmware.status
+        panel.session && panel.session.updatingFirmware
+        ? panel.session.updateStatus
+        : panel.session && panel.session.firmwareUpdateResult.length > 0
+          ? panel.session.firmwareUpdateResult : panel.firmware.status
     readonly property bool verificationFailed:
         panel.session && panel.session.firmwareUpdateResult.length > 0 &&
         !panel.session.firmwareUpdateResult.startsWith("Exact bundled firmware build verified")
@@ -179,14 +180,16 @@ SurfacePanel {
                             id: firmwarePort
                             Layout.preferredWidth: 205
                             model: panel.device.ports
-                            enabled: panel.session && !panel.firmware.busy
+                            enabled: panel.session && !panel.firmware.busy &&
+                                     !panel.session.updatingFirmware
                             onPressedChanged: if (pressed && panel.session) panel.session.requestRefreshPorts()
                         }
                         CalmButton {
                             theme: panel.theme
                             uiFont: panel.uiFont
                             text: "Refresh"
-                            enabled: panel.session && !panel.firmware.busy
+                            enabled: panel.session && !panel.firmware.busy &&
+                                     !panel.session.updatingFirmware
                             onClicked: panel.session.requestRefreshPorts()
                         }
                         Item { Layout.fillWidth: true }
@@ -219,7 +222,8 @@ SurfacePanel {
                     Layout.fillWidth: true
                     spacing: 5
                     Label {
-                        text: panel.firmware.busy ? "Installing firmware" : "Firmware action"
+                        text: panel.session && panel.session.updatingFirmware
+                            ? "Preparing / installing firmware" : "Firmware action"
                         color: panel.theme.text
                         font.family: panel.uiFont
                         font.pixelSize: 12
@@ -227,8 +231,8 @@ SurfacePanel {
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: panel.firmware.busy
-                            ? "Keep USB connected until verification completes."
+                        text: panel.session && panel.session.updatingFirmware
+                            ? "Keep USB connected. Studio is verifying the board and firmware."
                             : (panel.session && panel.session.firmwareUpdateAvailable
                                 ? "Current firmware works; update is optional."
                                 : "Installation and recovery are supervised automatically.")
@@ -396,7 +400,8 @@ SurfacePanel {
                         const ok = (panel.session.firmwareUpdateRequired || panel.session.firmwareUpdateAvailable)
                             ? panel.session.beginFirmwareUpdate()
                             : panel.session.beginFirmwareReinstall()
-                        if (ok) firmwareConfirmDialog.close()
+                        // Never leave an inoperable modal covering the error.
+                        firmwareConfirmDialog.close()
                     }
                 }
             }
