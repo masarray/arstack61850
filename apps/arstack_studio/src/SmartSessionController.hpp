@@ -390,7 +390,7 @@ private:
     void refreshRecoveryOfferFromIdentity();
     void clearBlankBoardContext();
     void latchFirmwareFailure(QString message);
-    bool beginFirmwareOperation(const QString& portName);
+    bool beginFirmwareOperation(const QString& portName, bool authorizedBlankBoardRecovery = false);
     bool ensureDefaultProfile();
     void setPresentation(QString state, QString status, bool startReady, bool firmwareUpdateRequired);
     void refreshFirmwareIdentity();

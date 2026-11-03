@@ -44,6 +44,7 @@ public:
             {"dual-revision catalog selects only qualified silicon", revisionCatalogFailClosed()},
             {"firmware timeout retains port until flasher exits", firmwarePortReleaseWaitsForWorker()},
             {"firmware update waits for fresh SV and PTP STOP readback", firmwareStopProofPreventsEarlyFlash()},
+            {"retry after unverified STOP cannot probe ROM without renewed consent", unverifiedFirmwareRetryNeverProbesRom()},
             {"slow firmware STOP suspends ordinary health teardown, resumes afterward", maintenanceStopDoesNotTriggerHealthDisconnect()},
             {"real timed-out firmware subprocess retires before COM release", firmwareWorkerTimeoutAwaitsProcessExit()},
             {"current identity -> READY without recovery", currentIdentityNeverRecovers()},
@@ -216,6 +217,21 @@ private:
         return restartedCleanly && !unexpectedTerminal && terminalCount == 2;
     }
 
+
+    static bool unverifiedFirmwareRetryNeverProbesRom() {
+        Fixture f;
+        if (!f.profileReady) return false;
+        auto& s = f.session;
+        s.updatePort_ = QStringLiteral("COM7");
+        s.updateExpectedDeviceId_ = QStringLiteral("A1B2C3D4E5F6");
+        s.setupError_ = true;
+        const bool accepted = s.retryFirmwareUpdate();
+        return !accepted && !s.updateRequested_ &&
+            s.portOwner_ != SmartSessionController::PortOwner::firmwareTool &&
+            !f.firmware.busy_ && !f.firmware.targetVerified_ &&
+            s.lastFirmwareUpdateResult_.contains(QStringLiteral("identity was lost"),
+                Qt::CaseInsensitive);
+    }
 
     static bool maintenanceStopDoesNotTriggerHealthDisconnect() {
         Fixture f;
