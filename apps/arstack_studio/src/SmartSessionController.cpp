@@ -595,7 +595,11 @@ bool SmartSessionController::beginFirmwareReinstall() {
     return beginFirmwareOperation(device_->portName());
 }
 
-bool SmartSessionController::beginFirmwareInstall() {
+bool SmartSessionController::beginFirmwareInstall(const bool supportedBoardAndIsolationConfirmed) {
+    // A blank ROM cannot attest the PCB/PHY model or physical isolation.
+    // A confirmation token is required by the sole C++ authorization owner,
+    // not merely used to disable a button in the presentation layer.
+    if (!supportedBoardAndIsolationConfirmed) return false;
     updateWasOptional_ = false;
     refreshRecoveryOfferFromIdentity();
     if (device_ == nullptr || firmware_ == nullptr || !blankBoardDetected_ ||

@@ -230,7 +230,7 @@ public:
 
     Q_INVOKABLE bool beginFirmwareUpdate();
     Q_INVOKABLE bool beginFirmwareReinstall();
-    Q_INVOKABLE bool beginFirmwareInstall();
+    Q_INVOKABLE bool beginFirmwareInstall(bool supportedBoardAndIsolationConfirmed);
     Q_INVOKABLE bool retryFirmwareUpdate();
     Q_INVOKABLE bool cancelFirmwareUpdate();
     Q_INVOKABLE bool retryFirmwareSetup();

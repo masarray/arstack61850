@@ -488,6 +488,7 @@ SurfacePanel {
 
     Dialog {
         id: installDialog
+        onOpened: recoveryBoardConfirmed.checked = false
         modal: true
         anchors.centerIn: Overlay.overlay
         width: 408
@@ -531,7 +532,7 @@ SurfacePanel {
                     theme: ribbon.theme; uiFont: ribbon.uiFont; text: "Install firmware"; tone: "accent"; implicitWidth: 142
                     enabled: recoveryBoardConfirmed.checked
                     onClicked: {
-                        if (smartSession.beginFirmwareInstall()) {
+                        if (smartSession.beginFirmwareInstall(recoveryBoardConfirmed.checked)) {
                             ribbon.installPromptDeferred = false
                             installDialog.close()
                         } else controller.showMessage("Firmware installation could not start. Open Tools > Advanced for recovery details.", true)
