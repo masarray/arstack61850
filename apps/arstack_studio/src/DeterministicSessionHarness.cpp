@@ -28,6 +28,7 @@ public:
 
         const CaseResult cases[] = {
             {"dual-revision catalog selects only qualified silicon", revisionCatalogFailClosed()},
+            {"firmware timeout retains port until flasher exits", firmwarePortReleaseWaitsForWorker()},
             {"current identity -> READY without recovery", currentIdentityNeverRecovers()},
             {"legacy identity -> firmware update", legacyIdentityOffersUpdate()},
             {"same version missing build ID -> READY with update suggestion", sameVersionMissingBuildOffersUpdate()},
@@ -173,6 +174,27 @@ private:
             firmware.shutdown();
         }
     };
+
+    static bool firmwarePortReleaseWaitsForWorker() {
+        Fixture fixture;
+        quiesce(fixture.session, fixture.device);
+        auto& s = fixture.session;
+        auto& f = fixture.firmware;
+        s.updateRequested_ = true;
+        s.updateStage_ = SmartSessionController::UpdateStage::flashing;
+        s.portOwner_ = SmartSessionController::PortOwner::firmwareTool;
+        f.busy_ = true;
+        s.latchFirmwareFailure(QStringLiteral("Deadline reached"));
+        const bool retained = s.portOwner_ == SmartSessionController::PortOwner::firmwareTool &&
+            s.firmwareProcessRetirementPending_ && !s.updateRequested_ &&
+            !s.startDeviceDiscovery();
+        f.busy_ = false;
+        emit f.stateChanged(); // Emulate QProcess cancellation acknowledgement.
+        const bool released = !s.firmwareProcessRetirementPending_ &&
+            s.portOwner_ == SmartSessionController::PortOwner::none &&
+            s.setupError_;
+        return retained && released;
+    }
 
     static void quiesce(SmartSessionController& session, StudioDeviceController& device) {
         session.discoveryTimer_.stop();

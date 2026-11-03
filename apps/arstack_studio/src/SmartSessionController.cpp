@@ -109,8 +109,13 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
     firmwareTotalTimer_.setSingleShot(true);
     connect(&firmwareTotalTimer_, &QTimer::timeout, this, [this] {
         if (!updateRequested_) return;
-        if (firmware_ != nullptr && firmware_->busy()) firmware_->cancel();
-        latchFirmwareFailure(QStringLiteral("Firmware setup reached its safety deadline. The board is not verified; reconnect it and choose Recovery."));
+        if (firmware_ != nullptr && firmware_->busy()) {
+            firmwareProcessRetirementPending_ = true;
+            firmware_->cancel();
+        }
+        latchFirmwareFailure(QStringLiteral(
+            "Firmware setup timed out. Studio is stopping the firmware tool; "
+            "the board is not verified. Use Recovery once the operation ends."));
         emit firmwareUpdateFinished(false);
         reconcile();
     });
@@ -304,6 +309,7 @@ void SmartSessionController::setPortOwner(const PortOwner owner) {
 
 bool SmartSessionController::startDeviceDiscovery() {
     if (device_ == nullptr || portOwner_ == PortOwner::firmwareTool ||
+        firmwareProcessRetirementPending_ || (firmware_ != nullptr && firmware_->busy()) ||
         device_->connected() || device_->discovering()) {
         return false;
     }
@@ -611,7 +617,12 @@ bool SmartSessionController::beginFirmwareInstall(const bool supportedBoardAndIs
 
 bool SmartSessionController::beginFirmwareOperation(const QString& portName) {
     const QString port = portName.trimmed();
-    if (device_ == nullptr || firmware_ == nullptr || port.isEmpty() || firmware_->busy()) return false;
+    if (firmwareProcessRetirementPending_ && firmware_ != nullptr && !firmware_->busy()) {
+        firmwareProcessRetirementPending_ = false;
+        if (portOwner_ == PortOwner::firmwareTool) setPortOwner(PortOwner::none);
+    }
+    if (device_ == nullptr || firmware_ == nullptr || port.isEmpty() ||
+        firmware_->busy() || firmwareProcessRetirementPending_) return false;
 
     updatePort_ = port;
     updateExpectedDeviceId_ = device_->deviceVerified() ? device_->deviceId().trimmed() : QString{};
@@ -963,6 +974,10 @@ void SmartSessionController::reconnectFirmwareSignals() {
     if (firmware_ == nullptr) return;
 
     connect(firmware_, &FirmwareManager::stateChanged, this, [this] {
+        if (firmwareProcessRetirementPending_ && !firmware_->busy()) {
+            firmwareProcessRetirementPending_ = false;
+            if (portOwner_ == PortOwner::firmwareTool) setPortOwner(PortOwner::none);
+        }
         if (!updateRequested_) {
             reconcile();
             return;
@@ -1231,7 +1246,15 @@ void SmartSessionController::latchFirmwareFailure(QString message) {
     updateReconnectAttempts_ = 0;
     pendingReleaseGeneration_ = 0;
     blankBoardDetected_ = false;
-    if (portOwner_ == PortOwner::firmwareTool) setPortOwner(PortOwner::none);
+    if (portOwner_ == PortOwner::firmwareTool) {
+        // QProcess::kill is asynchronous. Busy remains true until its finish
+        // signal; releasing the COM lease earlier would permit another owner
+        // while the flasher can still be touching the board.
+        if (firmware_ != nullptr && firmware_->busy())
+            firmwareProcessRetirementPending_ = true;
+        else
+            setPortOwner(PortOwner::none);
+    }
     message = message.trimmed();
     lastFirmwareUpdateResult_ = message.isEmpty()
         ? QStringLiteral("Firmware verification failed; inspect the firmware-service log.")

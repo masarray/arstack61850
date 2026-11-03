@@ -436,6 +436,9 @@ private:
     bool updateRequested_{false};
     bool updateWasOptional_{false};
     bool stoppingPtpForFirmware_{false};
+    // Do not transfer serial authority until an asynchronously cancelled
+    // flasher has actually exited and FirmwareManager has cleared busy().
+    bool firmwareProcessRetirementPending_{false};
     bool blankBoardDetected_{false};
     bool manualRecoveryArmed_{false};
     bool setupError_{false};
