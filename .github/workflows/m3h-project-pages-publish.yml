@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - 'index.html'
+      - 'assets/screenshots/arstack-studio-windows.png'
+      - 'assets/studio_icon/**'
+      - 'scripts/check_site_visual_assets.py'
       - '.github/workflows/m3h-project-pages-publish.yml'
   workflow_dispatch:
 
@@ -47,10 +50,15 @@ jobs:
           grep -Fq 'ARStack-Studio-win-x64-setup.zip' index.html
           grep -Fq 'firmware-catalog.json' index.html
           grep -Fq 'PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md' index.html
+          python3 scripts/check_site_visual_assets.py
           mkdir -p _site
           cp index.html _site/index.html
+          mkdir -p _site/assets/screenshots _site/assets/studio_icon
+          for asset in android-chrome-192x192.png android-chrome-512x512.png favicon.ico favicon-16x16.png favicon-32x32.png apple-touch-icon.png site.webmanifest; do
+            test -s "assets/studio_icon/$asset"
+            cp "assets/studio_icon/$asset" "_site/assets/studio_icon/$asset"
+          done
           test -s assets/screenshots/arstack-studio-windows.png
-          mkdir -p _site/assets/screenshots
           cp assets/screenshots/arstack-studio-windows.png _site/assets/screenshots/arstack-studio-windows.png
           touch _site/.nojekyll
       - uses: actions/configure-pages@v5
@@ -74,9 +82,15 @@ jobs:
                  grep -Fq 'data-asset="linux"' /tmp/arstack-live.html &&
                  grep -Fq 'Download for Windows' /tmp/arstack-live.html &&
                  grep -Fq 'Download for Linux' /tmp/arstack-live.html &&
+                 grep -Fq 'assets/studio_icon/android-chrome-192x192.png' /tmp/arstack-live.html &&
                  grep -Fq '4,705,090' /tmp/arstack-live.html &&
                  grep -Fq 'processbus-sim-dual-stable-20261105' /tmp/arstack-live.html; then
-                echo 'PASS: latest-release links deployed on the public product URL'
+                for asset in assets/studio_icon/android-chrome-192x192.png assets/studio_icon/android-chrome-512x512.png assets/studio_icon/favicon.ico assets/studio_icon/favicon-16x16.png assets/studio_icon/favicon-32x32.png assets/studio_icon/apple-touch-icon.png assets/studio_icon/site.webmanifest assets/screenshots/arstack-studio-windows.png; do
+                  published="/tmp/arstack-live-$(basename "$asset")"
+                  curl --fail --location --silent --show-error "https://masarray.github.io/arstack61850/$asset?build=$GITHUB_SHA" -o "$published"
+                  cmp --silent "$asset" "$published" || { echo "FAIL: published image differs from repository $asset" >&2; exit 1; }
+                done
+                echo 'PASS: latest release links, original Studio icon family, manifest, and native Qt screenshot live on project Pages'
                 exit 0
               fi
             fi
