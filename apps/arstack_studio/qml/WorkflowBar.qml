@@ -27,9 +27,9 @@ SurfacePanel {
     // A RUNNING live CFG transaction is not a START. Keep 4I4V editors
     // interactive while firmware verifies it; new edits coalesce and drain.
     readonly property bool startQueued: Boolean(
-        startIntentPending || (ribbon.device && ribbon.device.m4GroupStarting) ||
-        (ribbon.device && ribbon.device.scenarioApplying &&
-                               !ribbon.device.running))
+        startIntentPending || (ribbon.device && ribbon.device.scenarioApplying &&
+                               !ribbon.device.running)) ||
+        Boolean(ribbon.device && ribbon.device.m4GroupStarting)
     Timer {
         id: startIntentExpiry
         interval: 6500
