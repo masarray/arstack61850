@@ -101,6 +101,30 @@ class WireAuditTests(unittest.TestCase):
         self.assertEqual(options.get("synchSourceId"), "false")
         self.assertEqual(len(root.findall(".//scl:DataSet/scl:FCDA", ns)), 16)
 
+    def test_priority_tagged_quick_start_metadata_is_deliverable(self):
+        import xml.etree.ElementTree as ET
+        ns = {"scl": "http://www.iec.ch/61850/2003/SCL"}
+        path = ROOT / "apps/arstack_studio/templates/arstack_4i4v_9-2le_metadata_lab.scd"
+        root = ET.parse(path).getroot()
+        control = root.find(".//scl:SampledValueControl", ns)
+        opts = control.find("scl:SmvOpts", ns)
+        self.assertEqual(control.get("smvID"), "ARSTACK_SV01")
+        self.assertEqual(control.get("smpRate"), "4000")
+        self.assertEqual(opts.get("sampleRate"), "true")
+        self.assertEqual(opts.get("dataSet"), "true")
+        self.assertEqual(opts.get("synchSourceId"), "false")
+        address = root.find(".//scl:SMV/scl:Address", ns)
+        fields = {x.get("type"): x.text for x in address}
+        self.assertEqual(fields["VLAN-ID"], "0")
+        self.assertEqual(fields["VLAN-PRIORITY"], "4")
+        self.assertEqual(fields["APPID"], "4000")
+        self.assertEqual(len(root.findall(".//scl:DataSet/scl:FCDA", ns)), 16)
+        # Old strict 9-2LE reference must remain opt-in and unmodified.
+        legacy = ET.parse(ROOT / "apps/arstack_studio/templates/arstack_4i4v_9-2le_reference.scd")
+        legacyopts = legacy.getroot().find(".//scl:SmvOpts", ns)
+        self.assertEqual(legacyopts.get("sampleRate"), "false")
+        self.assertEqual(legacyopts.get("dataSet"), "false")
+
     def test_continuous_stream_and_wrap(self):
         with tempfile.TemporaryDirectory() as directory:
             name = Path(directory) / "ok.pcap"

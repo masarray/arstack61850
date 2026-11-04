@@ -187,12 +187,14 @@ qt_add_resources(arstack_studio "reference_templates"
     PREFIX "/arstack"
     FILES
         templates/arstack_4i4v_9-2le_reference.scd
+        templates/arstack_4i4v_9-2le_metadata_lab.scd
 )
 
 qt_add_resources(arstack_session_harness "session_harness_reference_templates"
     PREFIX "/arstack"
     FILES
         templates/arstack_4i4v_9-2le_reference.scd
+        templates/arstack_4i4v_9-2le_metadata_lab.scd
 )
 
 target_link_libraries(arstack_studio PRIVATE

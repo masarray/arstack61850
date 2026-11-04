@@ -40,8 +40,8 @@ using ar::iec61850::sampled_values::sv_profile_family_resolution_name;
 using ar::iec61850::sampled_values::sv_transport_mode_name;
 
 constexpr std::uint16_t kReferenceCounterModulus = 4000;
-constexpr auto kReferenceResource = ":/arstack/templates/arstack_4i4v_9-2le_reference.scd";
-constexpr auto kReferenceSourceName = "ARStack 4I+4V 9-2LE Reference";
+constexpr auto kReferenceResource = ":/arstack/templates/arstack_4i4v_9-2le_metadata_lab.scd";
+constexpr auto kReferenceSourceName = "ARStack 4I+4V VLAN-0 Metadata Laboratory Reference";
 
 QString qstring(const std::string& value) {
     return QString::fromStdString(value);
@@ -185,7 +185,7 @@ QString SclProfileModel::sourceName() const {
 QString SclProfileModel::documentStatus() const {
     if (!document_.has_value()) return QStringLiteral("No engineering file loaded");
     if (referenceTemplateActive_) {
-        return QStringLiteral("4I+4V 9-2LE reference · %1 resolved SV stream%2")
+        return QStringLiteral("4I+4V VLAN-0 metadata lab · %1 resolved SV stream%2")
             .arg(static_cast<qulonglong>(rows_.size()))
             .arg(rows_.size() == 1U ? QString{} : QStringLiteral("s"));
     }

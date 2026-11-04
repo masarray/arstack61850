@@ -8,8 +8,9 @@ The older analyzer screenshot says `Mode: Live` and `Scope view · Synthetic loc
 ## Standards and profile truth
 IEC 61850-9-2 Ed2.1 ASDU requires svID, smpCnt (two octets), confRev (four octets), smpSynch (one octet), seqData. datSet, smpRate, smpMod and gmIdentity are OPTIONAL on the wire; their field presence must match a supported SCL SmvOpts profile and the receiving device's expected dataset.
 
-- The **untagged ARStack lab Quick Start** now explicitly selects `SmvOpts dataSet=true sampleRate=true`; it emits configured datSet, smpRate=4000, smpMod=1 (SmpPerSec) through the existing immutable binary profile pipeline.
-- The **legacy 9-2LE reference** retains its minimal optional-field policy for receivers that require the fixed legacy shape.
+- The **default 4I+4V Quick Start** now loads `arstack_4i4v_9-2le_metadata_lab.scd`, matching the operator's actual **802.1Q VID 0 / PCP 4** capture; it explicitly selects `SmvOpts dataSet=true sampleRate=true` and emits configured datSet, smpRate=4000, smpMod=1 (SmpPerSec) through the existing immutable binary profile pipeline.
+- `arstack_4i4v_untagged_lab.scd` is separately metadata-enabled for untagged capture networks only; do NOT switch a priority-tagged relay to untagged silently.
+- The original `arstack_4i4v_9-2le_reference.scd` stays minimal for strict legacy receivers and historical PCAP regression. This remains an explicitly selected legacy option, not the Quick Start default.
 - Canonical BER ASDU now encodes smpCnt=2 bytes, confRev=4, smpSynch=1, smpRate=2 and smpMod=2; firmware still prebuilds packet bytes before 4 kHz TX.
 - Do not advertise globally synchronized (2) from an internally generated lab grandmaster. Local measured phase/MAC evidence may support 1, otherwise advertise 0. The unsupported synchSourceId option does not authorize gmIdentity [9]. No real UTC traceability, PTP lock, synchronized MAC egress, accuracy or calibration is claimed.
 - The original capture will not gain fields retroactively. To apply new SCL options, operator must **STOP SV**, load the updated lab SCL profile, inspect compiled values, **Deploy with authoritative readback**, then operator **START**. To apply codec/synchronization changes, a revision-qualified firmware update with full stopped-board proof and physical re-test is separately required; never auto-flash or replace a running board.

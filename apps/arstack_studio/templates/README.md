@@ -1,6 +1,10 @@
 # ARStack Studio reference templates
 
-The first public-release target intentionally ships one built-in Sampled Values reference profile:
+The default 4I+4V Quick Start now uses a metadata-enabled, priority-tagged
+IEC 61850 SV laboratory profile. The previously published minimal 9-2LE
+reference remains unchanged and available for strict legacy interoperability.
+
+The default laboratory reference profile has:
 
 - **4 current + 4 voltage** (`Ia, Ib, Ic, In, Ua, Ub, Uc, Un`)
 - `INT32 value + Quality` for each channel
@@ -13,7 +17,14 @@ The first public-release target intentionally ships one built-in Sampled Values 
 - VLAN VID 0 / PCP 4
 - configuration revision 1
 
-`arstack_4i4v_9-2le_reference.scd` is a convenience engineering source, not a second runtime profile implementation. ARStack Studio loads it through the same `SclParser -> SvPublisherProfileCompiler -> ESP32-P4 support classifier` path used for external SCL/CID/SCD/IID files.
+`arstack_4i4v_9-2le_metadata_lab.scd` is the packaged **Quick Start** source
+(802.1Q priority-tagged VID 0 / PCP 4, dataSet=true, sampleRate=true,
+smpRate=4000, smpMod=SmpPerSec, 16 ordered leaves, one ASDU).
+`arstack_4i4v_9-2le_reference.scd` remains the separate minimal 9-2LE
+compatibility fixture with these optional fields absent. Use the matching SCL
+and wire profile required by the receiving relay/analyzer.
+
+Both are engineering sources, not secondary runtime profile implementations. ARStack Studio loads the selected profile through the same `SclParser -> SvPublisherProfileCompiler -> ESP32-P4 support classifier` path used for external SCL/CID/SCD/IID files.
 
 ## Counter policy
 
