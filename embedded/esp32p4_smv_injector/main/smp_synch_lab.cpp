@@ -106,14 +106,18 @@ void record_transition(const SvSyncLossReason reason,
 }
 
 [[nodiscard]] std::optional<SmpSynchValue> auto_evidence() noexcept {
-    // SOURCE has no receiver discipline object. Its local-sync claim
-    // originates exclusively from the sample phase + canonical TX gate.
-    // Global sync is reserved for measured external time traceability.
+    // SOURCE is an intentional PTP Grandmaster simulator. The simulated
+    // global profile must behave like a GPS-class GM to an IEC 61850 test
+    // subscriber. Neither selecting the profile nor seeing PTP frames is
+    // enough: require the same qualified SV sample/MAC phase AND a fresh
+    // active simulated GM PTP TX lease before advertising smpSynch=2.
     if (g_source_local_qualified.load(std::memory_order_acquire)) {
-        // An internally generated bench GM is not independently traceable
-        // to global time. A measured local sample/MAC phase can justify
-        // smpSynch=1, never smpSynch=2. Keep AUTO fail-closed globally.
-        return SmpSynchValue::local_synchronized;
+        bool simulated_global_gm_ready = false;
+#if defined(ESP_PLATFORM) && CONFIG_AR_PTP_LAB_TX
+        simulated_global_gm_ready = ar_ptp_lab_bench_global_ready();
+#endif
+        return ar::iec61850::time_sync::resolve_emulated_gm_smp_synch(
+            true, simulated_global_gm_ready);
     }
     return ar::iec61850::time_sync::qualified_sv_sync_value(
         measured_value(), g_sv_timeline_phase_qualified.load(
