@@ -376,6 +376,14 @@ ApplicationWindow {
         autoLiveQueuedRevision = -1
         showMessage("Three MU pages ready. Use Deploy 3 MU for verified firmware roster upload; START remains gated.", false)
     }
+    // Flush the active MU editor and compare all three frozen drafts to the
+    // hashes actually COMMITTED+READBACK, never to the visible selected page.
+    function m4StartDrafts() {
+        if (!m4Pages.active || !root.commitFrequencyEditor() ||
+            !currentMatrix.flushPendingEdits() || !voltageMatrix.flushPendingEdits() ||
+            !m4Pages.saveCurrent(root.startScenarioSnapshot(false))) return null
+        return [m4Pages.draftFor(0), m4Pages.draftFor(1), m4Pages.draftFor(2)]
+    }
     function m4SelectPage(slot) {
         if (!m4Pages.active || slot === m4Pages.selectedSlot) return
         // A tab click need not blur the focused NumericField; commit first.
@@ -1376,7 +1384,9 @@ ApplicationWindow {
                 visible: device.m4ReconnectMode === "SELECTED"
                 text: "BOARD ROSTER / SCD · " +
                       (workflowBar.session ? workflowBar.session.m4SclRosterMatch : "NOT VERIFIED") +
-                      " · START GATED"
+                      (device.running ? " · RUNNING" :
+                       (workflowBar.session && workflowBar.session.canStartMultiSv ?
+                        " · READY" : " · START REQUIRES PROOFS"))
                 color: workflowBar.session && workflowBar.session.m4SclRosterMatch === "MATCHED"
                     ? studioTheme.green : studioTheme.amber
                 font.family: root.uiFont
@@ -1385,10 +1395,10 @@ ApplicationWindow {
             Label {
                 visible: m4Pages.active
                 text: device.m4ScenarioApplying ? "APPLYING · MU BANK READBACK REQUIRED"
-                     : device.m4ScenariosVerified && device.m4DeployedHash === sclProfiles.m4ConfigurationHash ? "3/3 MU BANKS VERIFIED · START GATED"
+                     : device.m4ScenariosVerified && device.m4DeployedHash === sclProfiles.m4ConfigurationHash ? "3/3 MU BANKS VERIFIED · CHECK GROUP START"
                      : device.m4Deploying ? "UPLOADING · VERIFIED ACK REQUIRED"
                      : device.m4Ready && device.m4DeployedHash === sclProfiles.m4ConfigurationHash
-                     ? "3 MU ROSTER VERIFIED · START GATED" : "DRAFT · NOT DEPLOYED"
+                     ? "3 MU ROSTER VERIFIED · APPLY BANKS" : "DRAFT · NOT DEPLOYED"
                 color: device.m4Ready && device.m4DeployedHash === sclProfiles.m4ConfigurationHash
                     ? studioTheme.green : studioTheme.amber
                 font.family: root.uiFont

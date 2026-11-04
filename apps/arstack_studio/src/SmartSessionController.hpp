@@ -24,6 +24,7 @@ class SmartSessionController : public QObject {
     Q_PROPERTY(bool canDeployProfile READ canDeployProfile NOTIFY stateChanged)
     Q_PROPERTY(bool canDeployMultiSv READ canDeployMultiSv NOTIFY stateChanged)
     Q_PROPERTY(bool canApplyMultiSvScenarios READ canApplyMultiSvScenarios NOTIFY stateChanged)
+    Q_PROPERTY(bool canStartMultiSv READ canStartMultiSv NOTIFY stateChanged)
     Q_PROPERTY(bool canInspectMultiSvBoard READ canInspectMultiSvBoard NOTIFY stateChanged)
     Q_PROPERTY(QString m4SclRosterMatch READ m4SclRosterMatch NOTIFY stateChanged)
     Q_PROPERTY(bool liveControlReady READ liveControlReady NOTIFY stateChanged)
@@ -83,6 +84,7 @@ public:
     [[nodiscard]] bool canDeployProfile() const noexcept;
     [[nodiscard]] bool canDeployMultiSv() const noexcept;
     [[nodiscard]] bool canApplyMultiSvScenarios() const noexcept;
+    [[nodiscard]] bool canStartMultiSv() const noexcept;
     [[nodiscard]] bool canInspectMultiSvBoard() const noexcept;
     [[nodiscard]] QString m4SclRosterMatch() const { return m4SclRosterMatch_; }
     [[nodiscard]] bool liveControlReady() const noexcept;
@@ -204,6 +206,7 @@ public:
     Q_INVOKABLE bool requestProfileSync();
     Q_INVOKABLE bool requestDeployMultiSv();
     Q_INVOKABLE bool requestApplyMultiSvScenarios(const QVariantList& drafts);
+    Q_INVOKABLE bool requestStartMultiSv(const QVariantList& drafts);
     Q_INVOKABLE bool requestInspectMultiSvBoard();
     Q_INVOKABLE bool requestSetFrequency(double hz);
     Q_INVOKABLE bool requestSetSignal(

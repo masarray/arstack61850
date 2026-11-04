@@ -28,7 +28,8 @@ SurfacePanel {
     // interactive while firmware verifies it; new edits coalesce and drain.
     readonly property bool startQueued: Boolean(
         startIntentPending || (ribbon.device && ribbon.device.scenarioApplying &&
-                               !ribbon.device.running))
+                               !ribbon.device.running)) ||
+        Boolean(ribbon.device && ribbon.device.m4GroupStarting)
     Timer {
         id: startIntentExpiry
         interval: 6500
@@ -341,7 +342,15 @@ SurfacePanel {
 
     function requestStart() {
         if (ribbon.m4DraftOnly) {
-            controller.showMessage("M4 draft pages are not deployed. START blocked until MULTISV deploy/readback is implemented.", true)
+            if (!smartSession.canStartMultiSv) {
+                controller.showMessage("3-MU START blocked: " + device.m4GroupStatus +
+                    ". Deploy the matching SCD and Apply all three MU banks first.", true)
+                return
+            }
+            const drafts = controller.m4StartDrafts()
+            if (!drafts || drafts.length !== 3 ||
+                !smartSession.requestStartMultiSv(drafts))
+                controller.showMessage("3-MU START refused: editor changed or board proof no longer current.", true)
             return
         }
         if (ribbon.injectionRunning || ribbon.startQueued) return
@@ -406,7 +415,7 @@ SurfacePanel {
         }
         // A pending CFG transaction can progress to START: Stop must remain
         // actionable before RUNNING telemetry, not only after it.
-        if (!ribbon.injectionRunning && !ribbon.startQueued) return
+        if (!ribbon.injectionRunning && !ribbon.startQueued && !device.m4GroupNeedsStop) return
         if (!smartSession.requestStop()) {
             controller.showMessage("Studio could not cancel the current device session.", true)
             return

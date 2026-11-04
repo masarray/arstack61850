@@ -113,9 +113,9 @@ Rectangle {
             theme: bar.theme
             uiFont: bar.uiFont
             text: "Stop"
-            tone: (bar.workflow.injectionRunning || bar.device.m4Deploying || bar.device.m4ScenarioApplying) ? "danger" : "neutral"
+            tone: (bar.workflow.injectionRunning || bar.device.m4GroupNeedsStop || bar.device.m4Deploying || bar.device.m4ScenarioApplying) ? "danger" : "neutral"
             iconSource: Qt.resolvedUrl("../assets/material/stop.svg")
-            enabled: (bar.workflow.injectionRunning || bar.workflow.startQueued || bar.controller.offlinePreviewRunning || bar.device.m4Deploying || bar.device.m4ScenarioApplying)
+            enabled: (bar.workflow.injectionRunning || bar.workflow.startQueued || bar.controller.offlinePreviewRunning || bar.device.m4Deploying || bar.device.m4ScenarioApplying || bar.device.m4GroupNeedsStop)
                 && !bar.session.updatingFirmware
             toolTipText: ""
             onClicked: {

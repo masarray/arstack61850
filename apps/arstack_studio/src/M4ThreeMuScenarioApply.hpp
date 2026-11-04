@@ -25,6 +25,13 @@ public:
     [[nodiscard]] QString error() const { return error_; }
     [[nodiscard]] int slot() const noexcept { return slot_ + 1; }
     [[nodiscard]] int verifiedSlots() const noexcept { return verifiedSlots_; }
+    // A UI draft must still equal the three applied wire-bank hashes at START.
+    // Validation uses the SAME canonical encoder as the actual CFG upload.
+    [[nodiscard]] bool matchesDrafts(const QVariantList& drafts) const;
+    [[nodiscard]] std::uint64_t hash(int slot) const noexcept {
+        return verified() && slot >= 0 && slot < 3
+            ? slots_[static_cast<std::size_t>(slot)].hash : 0U;
+    }
     [[nodiscard]] std::uint64_t generation(int slot) const noexcept {
         return slot >= 0 && slot < 3 ? slots_[static_cast<std::size_t>(slot)].generation : 0;
     }

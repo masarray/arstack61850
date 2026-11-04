@@ -123,6 +123,18 @@ bool M4ThreeMuScenarioApply::start(const QVariantList& scenarios, const QString&
     stage_ = Stage::send_batch;
     return true;
 }
+bool M4ThreeMuScenarioApply::matchesDrafts(const QVariantList& drafts) const {
+    if (!verified() || drafts.size() != 3) return false;
+    for (int i = 0; i != 3; ++i) {
+        Slot candidate{};
+        QString error;
+        if (!buildSlot(drafts.at(i).toMap(), i + 1, candidate, error) ||
+            candidate.hash != slots_[static_cast<std::size_t>(i)].hash ||
+            slots_[static_cast<std::size_t>(i)].generation == 0U) return false;
+    }
+    return true;
+}
+
 QStringList M4ThreeMuScenarioApply::takeCommands() {
     if (stage_ == Stage::send_batch) {
         stage_ = Stage::wait_commit;
