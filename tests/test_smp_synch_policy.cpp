@@ -45,6 +45,22 @@ void test_auto_accepts_future_measured_state() {
     require(!local.simulated(), "measured decision must not be marked simulated");
 }
 
+void test_simulated_global_gm_requires_live_phase_and_ptp_evidence() {
+    using ar::iec61850::time_sync::resolve_emulated_gm_smp_synch;
+    require(!resolve_emulated_gm_smp_synch(false, false).has_value(),
+            "inactive SOURCE cannot claim local or global sync");
+    require(!resolve_emulated_gm_smp_synch(false, true).has_value(),
+            "simulated GPS GM selection alone cannot claim smpSynch=2");
+    const auto local = resolve_emulated_gm_smp_synch(true, false);
+    require(local == SmpSynchValue::local_synchronized,
+            "qualified local SOURCE without global GM advertises smpSynch=1");
+    const auto global = resolve_emulated_gm_smp_synch(true, true);
+    require(global == SmpSynchValue::global_synchronized,
+            "qualified simulated GPS GM must advertise smpSynch=2");
+    require(!resolve_emulated_gm_smp_synch(false, true).has_value(),
+            "loss of sample/MAC phase revokes simulated global claim");
+}
+
 void test_receiver_auto_requires_fresh_ptp_and_real_timeline() {
     using namespace ar::esp32p4::smv;
     smp_synch_lab_set_mode(SvSyncPolicyMode::honest_unsynchronized);
@@ -173,6 +189,7 @@ void test_labels_are_stable_for_ui_and_evidence() {
 int main() {
     test_auto_is_safe_without_measured_lock();
     test_auto_accepts_future_measured_state();
+    test_simulated_global_gm_requires_live_phase_and_ptp_evidence();
     test_receiver_auto_requires_fresh_ptp_and_real_timeline();
     test_internal_sync_recorder_captures_cause_and_bounded_history();
     test_all_lab_compatibility_modes();

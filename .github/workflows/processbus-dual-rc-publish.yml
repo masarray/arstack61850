@@ -1,0 +1,172 @@
+name: Process Bus Simulator Dual Firmware RC Publisher
+
+# This job PROMOTES a tested exact-PR-head preview. No additional IDF/Qt builds.
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/releases/PROCESSBUS_DUAL_RC_LAUNCH.md
+  workflow_dispatch:
+    inputs:
+      source_pr:
+        description: "Merged source PR number with green native preview"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+  checks: read
+  pull-requests: read
+
+concurrency:
+  group: processbus-dual-rc1-publication
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  RELEASE_TAG: processbus-sim-dual-rc1-20261105
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Resolve merged PR and successful exact-head native preview
+        id: source
+        shell: bash
+        env:
+          SOURCE_PR_INPUT: ${{ inputs.source_pr }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            subject="$(git log -1 --format=%s)"
+            [[ "$subject" == release\(rc\):* ]] || { echo 'Not release(rc) merge' >&2; exit 1; }
+            pr="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '[.[] | select(.merged_at != null)] | last | .number // empty')"
+            if [[ -z "$pr" ]]; then
+              pr="$(printf '%s' "$subject" | grep -oE '#[0-9]+' | tail -1 | tr -d '#' || true)"
+            fi
+          else
+            pr="$SOURCE_PR_INPUT"
+          fi
+          [[ "$pr" =~ ^[0-9]+$ ]] || { echo 'No source PR' >&2; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$pr" > /tmp/source-pr.json
+          jq -e --arg main "$GITHUB_SHA" \
+             '.merged_at != null and .merge_commit_sha == $main and .base.ref == "main"' \
+             /tmp/source-pr.json >/dev/null
+          head="$(jq -r '.head.sha' /tmp/source-pr.json)"
+          [[ "$head" =~ ^[a-f0-9]{40}$ ]] || exit 1
+          gh api "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?per_page=100" > /tmp/checks.json
+          jq -e '.total_count >= 10 and ([.check_runs[] | select(.conclusion != "success")] | length == 0)' \
+             /tmp/checks.json >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/arstack-studio-native-preview.yml/runs?event=pull_request&per_page=100" >/tmp/runs.json
+          run="$(jq -r --arg h "$head" '[.workflow_runs[] | select(.head_sha == $h and .conclusion == "success")] | sort_by(.created_at) | last | .id // empty' /tmp/runs.json)"
+          [[ "$run" =~ ^[0-9]+$ ]] || { echo 'Missing green exact-head native preview' >&2; exit 1; }
+          printf 'pr=%s\nhead=%s\nrun=%s\n' "$pr" "$head" "$run" >>"$GITHUB_OUTPUT"
+          echo "SOURCE PR=$pr HEAD=$head CI_RUN=$run MAIN=$GITHUB_SHA"
+
+      - name: Download already-tested artifact families (no rebuild)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci/windows ci/linux ci/firmware
+          gh run download "${{ steps.source.outputs.run }}" -R "$GITHUB_REPOSITORY" --name \
+            "arstack-studio-native-preview-win-x64-${{ steps.source.outputs.pr }}-${{ steps.source.outputs.head }}" --dir ci/windows
+          gh run download "${{ steps.source.outputs.run }}" -R "$GITHUB_REPOSITORY" --name \
+            arstack-studio-linux-esp32p4-dual-preview --dir ci/linux
+          gh run download "${{ steps.source.outputs.run }}" -R "$GITHUB_REPOSITORY" --name \
+            arstack-esp32p4-smv-firmware --dir ci/firmware
+
+      - name: Prove 2 revision images and paired Windows/Linux simulator artifacts
+        shell: bash
+        env:
+          SOURCE_HEAD: "${{ steps.source.outputs.head }}"
+        run: |
+          set -euo pipefail
+          python3 scripts/validate_esp32p4_revision_catalog.py ci/firmware
+          (cd ci/firmware && sha256sum -c SHA256SUMS.txt)
+          (cd ci/windows && sha256sum -c SHA256SUMS.txt)
+          (cd ci/linux && sha256sum -c ARStack-Studio-linux-x86_64.sha256)
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re, zipfile
+          root=pathlib.Path('ci/firmware')
+          fw=json.loads((root/'firmware-manifest.json').read_text())
+          cat=json.loads((root/'firmware-catalog.json').read_text())
+          head=os.environ['SOURCE_HEAD']
+          assert re.fullmatch('[a-f0-9]{40}',head)
+          assert fw['sourceCommit']==cat['sourceCommit']==head
+          assert fw['buildId']==head[:16]
+          assert fw['phaseSyncPreview'] and fw['bootSimulatedGlobalGmEnabled']
+          assert fw['defaultPtpPolicy']=='INTERNAL_GM_ONLY'
+          assert cat['schema']=='arstack.studio.firmware.catalog.v2'
+          assert len(cat['images'])==2
+          assert {x['policy'] for x in cat['images']}=={'pre-v3','v3.x'}
+          hashes=set()
+          for x in cat['images']:
+              payload=(root/x['image']).read_bytes()
+              assert len(payload)>50000
+              digest=hashlib.sha256(payload).hexdigest()
+              assert digest==x['sha256'] and head[:16].encode() in payload
+              hashes.add(digest)
+          assert len(hashes)==2
+          win=list(pathlib.Path('ci/windows').glob('*-portable.zip'))
+          assert len(win)==1 and len(list(pathlib.Path('ci/windows').glob('*-setup.exe')))==1
+          assert len(list(pathlib.Path('ci/linux').glob('*.AppImage')))==1
+          with zipfile.ZipFile(win[0]) as f:
+              assert 'firmware/firmware-catalog.json' in f.namelist()
+              for x in cat['images']:
+                  assert hashlib.sha256(f.read('firmware/'+x['image'])).hexdigest()==x['sha256']
+          print('PAIRED_DUAL_REVISION_SIMULATED_GM_RC: PASS',head)
+          PY
+
+      - name: Stage public RC assets with verifiable provenance
+        shell: bash
+        env:
+          SOURCE_HEAD: "${{ steps.source.outputs.head }}"
+          SOURCE_PR: "${{ steps.source.outputs.pr }}"
+          SOURCE_RUN: "${{ steps.source.outputs.run }}"
+        run: |
+          set -euo pipefail
+          mkdir release
+          cp ci/windows/*-setup.exe ci/windows/*-portable.zip release/
+          cp ci/linux/*.AppImage ci/linux/*.sha256 release/
+          cp ci/firmware/*.bin ci/firmware/firmware-manifest.json ci/firmware/firmware-catalog.json release/
+          cat >release/RELEASE_NOTES.md <<'NOTES'
+          # ARStack Process Bus Simulator — Dual ESP32-P4 Release Candidate
+          
+          Public lab engineering release candidate: the existing ARStack Studio Qt app injects true Ethernet IEC 61850 SV from configurable SCL virtual 4I+4V Merging Units and emulates a GPS-style PTP Grandmaster with phase-aligned sample counters and simulated source/epoch. A physical GPS antenna or physical MU is not necessary for simulation.
+          
+          Includes tested, matching Windows Inno Setup, Windows portable ZIP, Linux AppImage, separate pre-v3 and v3.x ESP32-P4 firmware images, revision catalog and SHA256 checksums. Studio selects a revision-compatible image from authorized ROM identity. Do not mix binaries from another release.
+          
+          New v3.x PCB model compatibility, interruption recovery and three-MU aggregate throughput still require extended physical field testing, so this is an openly available **prerelease**, not a stable certification claim. Use on isolated test networks, not energized operational process bus equipment. Existing stable M3.H.3 is unchanged.
+          NOTES
+          python3 - <<'PY'
+          import json,os,pathlib
+          p={'schema':'arstack.release.provenance.v1',
+             'tag':os.environ['RELEASE_TAG'],'channel':'public-prerelease',
+             'sourceHead':os.environ['SOURCE_HEAD'],
+             'sourcePR':int(os.environ['SOURCE_PR']),
+             'nativePreviewRun':int(os.environ['SOURCE_RUN']),
+             'mergedMain':os.environ['GITHUB_SHA'],
+             'revisionPolicies':['pre-v3','v3.x']}
+          pathlib.Path('release/release-provenance.json').write_text(json.dumps(p,indent=2,sort_keys=True)+'\n')
+          PY
+          (cd release && sha256sum *.bin *.zip *.exe *.AppImage *.json > SHA256SUMS.txt)
+          ls -lah release
+
+      - name: Publish public prerelease (fail on existing tag)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Immutable tag already exists; abort" >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" release/* -R "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title "ARStack Process Bus Simulator — Dual Firmware RC1" \
+            --notes-file release/RELEASE_NOTES.md
