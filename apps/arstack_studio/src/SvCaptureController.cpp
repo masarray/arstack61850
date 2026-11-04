@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "SvCaptureController.hpp"
+#include "CaptureAdapterCatalog.hpp"
 
 #include <QtConcurrentRun>
 #include <QDateTime>
@@ -14,6 +15,7 @@
 #include <QStandardPaths>
 #include <QStorageInfo>
 #include <QSaveFile>
+#include <QSettings>
 #include <QJsonArray>
 #include <QTextStream>
 #include <QUrl>
@@ -187,38 +189,24 @@ SvCaptureController::SvCaptureController(QObject* parent) : QObject(parent) {
             setStatus(QStringLiteral("Adapter discovery failed. Install Wireshark/Npcap and check capture permissions."));
             return;
         }
-        interfaceIds_.clear();
-        interfaceLabels_.clear();
-        suggestedInterface_ = -1;
-        const QRegularExpression lineRe(QStringLiteral(R"(^\s*\d+\.\s+(\S+)(?:\s+\((.*)\))?)"));
-        const QString output = QString::fromUtf8(discovery_.readAllStandardOutput());
-        for (const auto& line : output.split(QLatin1Char('\n'))) {
-            const auto match = lineRe.match(line);
-            if (!match.hasMatch()) continue;
-            const QString id = match.captured(1);
-            const QString label = match.captured(2).trimmed();
-            interfaceIds_.append(id);
-            interfaceLabels_.append(label.isEmpty() ? id : label + QStringLiteral(" · ") + id);
-        }
-        int eligible = 0;
-        for (int i = 0; i < interfaceLabels_.size(); ++i) {
-            const QString label = interfaceLabels_.at(i).toLower();
-            if (label.contains(QStringLiteral("loopback")) ||
-                label.contains(QStringLiteral("bluetooth")) ||
-                label.contains(QStringLiteral("wan miniport")) ||
-                label.contains(QStringLiteral("wireless")) ||
-                label.contains(QStringLiteral("wi-fi")) ||
-                label.contains(QStringLiteral("wifi"))) continue;
-            ++eligible;
-            suggestedInterface_ = i;
-        }
-        if (eligible != 1) suggestedInterface_ = -1;
+        // Display name comes from Windows, capture ID comes from dumpcap.
+        // Persist only the stable NPF interface ID, never the -D list index.
+        QSettings prefs(QSettings::IniFormat, QSettings::UserScope,
+                        QStringLiteral("ARStack"), QStringLiteral("Studio"));
+        const auto catalog = buildCaptureAdapterCatalog(
+            QString::fromUtf8(discovery_.readAllStandardOutput()),
+            discoverSystemCaptureNics(),
+            prefs.value(QStringLiteral("capture/lastInterface")).toString());
+        interfaceIds_ = catalog.ids;
+        interfaceLabels_ = catalog.labels;
+        interfaceDetails_ = catalog.details;
+        suggestedInterface_ = catalog.suggested;
         emit interfacesChanged();
         setStatus(interfaceIds_.isEmpty()
             ? QStringLiteral("No Npcap capture interfaces found.")
-            : eligible == 1
-                ? QStringLiteral("Ethernet adapter identified. One-click capture is ready.")
-                : QStringLiteral("Select the mirrored/TAP Ethernet interface once; automatic selection is ambiguous."));
+            : suggestedInterface_ >= 0
+                ? QStringLiteral("Adapter identified. Verify actual SV/PTP traffic on this port before acceptance.")
+                : QStringLiteral("Choose the correct Ethernet adapter by its Windows hardware name."));
     });
     connect(&discovery_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
         setStatus(QStringLiteral("Unable to enumerate network capture adapters. Install Wireshark with Npcap."));
@@ -333,6 +321,9 @@ bool SvCaptureController::startCapture(int index, int seconds, const QVariantMap
     activeEvents_ = QDir(outputFolder_).filePath(filename + QStringLiteral("_events.csv"));
     activeJson_ = QDir(outputFolder_).filePath(filename + QStringLiteral("_report.json"));
     activeAdapter_ = interfaceIds_.at(index);
+    QSettings prefs(QSettings::IniFormat, QSettings::UserScope,
+                    QStringLiteral("ARStack"), QStringLiteral("Studio"));
+    prefs.setValue(QStringLiteral("capture/lastInterface"), activeAdapter_);
     activeStudioTelemetry_ = studioTelemetry;
     activeStudioTelemetrySeries_.clear();
     activeStudioTelemetrySeries_.append(studioTelemetry);

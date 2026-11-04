@@ -48,6 +48,8 @@ qt_add_executable(arstack_studio
     src/StudioClipboard.hpp
     src/SvCaptureController.cpp
     src/SvCaptureController.hpp
+    src/CaptureAdapterCatalog.cpp
+    src/CaptureAdapterCatalog.hpp
     ${ARSTACK_STUDIO_CORE_SOURCES}
 )
 
@@ -77,11 +79,17 @@ qt_add_executable(arstack_capture_harness
     src/SvCaptureHarness.cpp
     src/SvCaptureController.cpp
     src/SvCaptureController.hpp
+    src/CaptureAdapterCatalog.cpp
+    src/CaptureAdapterCatalog.hpp
 )
 target_link_libraries(arstack_capture_harness PRIVATE
     Qt6::Core Qt6::Gui Qt6::Concurrent
 )
 target_compile_features(arstack_capture_harness PRIVATE cxx_std_20)
+if(WIN32)
+    target_link_libraries(arstack_studio PRIVATE iphlpapi)
+    target_link_libraries(arstack_capture_harness PRIVATE iphlpapi)
+endif()
 
 # RC2 is a fail-closed evidence evaluator, not a hardware simulator. CI self-tests
 # its acceptance policy; a physical run feeds the same executable a machine-readable
