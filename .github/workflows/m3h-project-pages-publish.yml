@@ -37,9 +37,11 @@ jobs:
           grep -Fq 'data-asset="firmware"' index.html
           grep -Fq 'M3.H' index.html
           grep -Fq '4,705,090' index.html
-          grep -Fq 'processbus-sim-m3h3-20261025' index.html
+          grep -Fq 'processbus-sim-dual-stable-20261105' index.html
           grep -Fq 'Next: multiple virtual Merging Units from one board' index.html
-          grep -Fq 'ARStack-Studio-M3H3-win-x64-setup.exe' index.html
+          grep -Fq 'ARStack-Studio-win-x64-setup.zip' index.html
+          grep -Fq 'firmware-catalog.json' index.html
+          grep -Fq 'PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md' index.html
           mkdir -p _site
           cp index.html _site/index.html
           test -s assets/screenshots/arstack-studio-windows.png
@@ -65,7 +67,7 @@ jobs:
                  grep -Fq 'data-asset="windows"' /tmp/arstack-live.html &&
                  grep -Fq 'data-asset="portable"' /tmp/arstack-live.html &&
                  grep -Fq '4,705,090' /tmp/arstack-live.html &&
-                 grep -Fq 'processbus-sim-m3h3-20261025' /tmp/arstack-live.html; then
+                 grep -Fq 'processbus-sim-dual-stable-20261105' /tmp/arstack-live.html; then
                 echo 'PASS: latest-release links deployed on the public product URL'
                 exit 0
               fi
