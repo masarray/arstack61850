@@ -110,12 +110,9 @@ void record_transition(const SvSyncLossReason reason,
     // originates exclusively from the sample phase + canonical TX gate.
     // Global sync is reserved for measured external time traceability.
     if (g_source_local_qualified.load(std::memory_order_acquire)) {
-#if defined(ESP_PLATFORM) && CONFIG_AR_PTP_LAB_TX
-        // The same measured phase/MAC gate qualifies both local and bench
-        // global simulation. A UI flag alone can never promote AUTO to 2.
-        if (ar_ptp_lab_bench_global_ready())
-            return SmpSynchValue::global_synchronized;
-#endif
+        // An internally generated bench GM is not independently traceable
+        // to global time. A measured local sample/MAC phase can justify
+        // smpSynch=1, never smpSynch=2. Keep AUTO fail-closed globally.
         return SmpSynchValue::local_synchronized;
     }
     return ar::iec61850::time_sync::qualified_sv_sync_value(

@@ -389,6 +389,25 @@ private:
             firmware.firmwareBuildId_ = QStringLiteral("0123456789abcdef");
             firmware.bundleReady_ = true;
             profileReady = profiles.loadReferenceTemplate();
+            if (profileReady) {
+                // Production Quick Start must compile the VLAN0/PCP4 metadata
+                // SCL, NOT silently reuse the older no-datSet/no-rate artifact.
+                const auto metadata = profiles.selectedProfile();
+                profileReady =
+                    metadata.value(QStringLiteral("svId")).toString() == QStringLiteral("ARSTACK_SV01") &&
+                    metadata.value(QStringLiteral("appId")).toInt() == 0x4000 &&
+                    metadata.value(QStringLiteral("vlanPresent")).toBool() &&
+                    metadata.value(QStringLiteral("vlanId")).toInt() == 0 &&
+                    metadata.value(QStringLiteral("vlanPriority")).toInt() == 4 &&
+                    metadata.value(QStringLiteral("includeDataSet")).toBool() &&
+                    metadata.value(QStringLiteral("includeSampleRate")).toBool() &&
+                    metadata.value(QStringLiteral("wireSmpRate")).toULongLong() == 4000ULL &&
+                    metadata.value(QStringLiteral("wireSmpMod")).toInt() == 1 &&
+                    metadata.value(QStringLiteral("payloadBytes")).toULongLong() == 64ULL &&
+                    metadata.value(QStringLiteral("channelLeafCount")).toULongLong() == 16ULL;
+                if (!profileReady)
+                    qCritical() << "Quick Start semantic SCL metadata regression";
+            }
             session.setProfiles(&profiles);
             session.setFirmware(&firmware);
             session.setDevice(&device);

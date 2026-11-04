@@ -100,8 +100,9 @@ constexpr std::uint8_t context_constructed_base = 0xA0U;
         !add_tlv(context_bytes_size(asdu.data_set_reference.size()))) {
         return std::nullopt;
     }
-    if (!add_tlv(context_unsigned_size(asdu.sample_count)) ||
-        !add_tlv(context_unsigned_size(asdu.configuration_revision))) {
+    // IEC 61850-9-2 wire OCTET STRING SIZE(2) and SIZE(4).
+    if (!add_tlv(context_bytes_size(2U)) ||
+        !add_tlv(context_bytes_size(4U))) {
         return std::nullopt;
     }
     if (asdu.reference_time.has_value()) {
@@ -111,18 +112,18 @@ constexpr std::uint8_t context_constructed_base = 0xA0U;
             return std::nullopt;
         }
     }
-    if (!add_tlv(context_unsigned_size(asdu.sample_synchronization))) {
+    if (!add_tlv(context_bytes_size(1U))) {
         return std::nullopt;
     }
     if (asdu.sample_rate.has_value() &&
-        !add_tlv(context_unsigned_size(*asdu.sample_rate))) {
+        !add_tlv(context_bytes_size(2U))) {
         return std::nullopt;
     }
     if (!add_tlv(context_bytes_size(asdu.sample_payload.size()))) {
         return std::nullopt;
     }
     if (asdu.sample_mode.has_value() &&
-        !add_tlv(context_unsigned_size(*asdu.sample_mode))) {
+        !add_tlv(context_bytes_size(2U))) {
         return std::nullopt;
     }
     if (asdu.gm_identity.has_value() &&
@@ -228,6 +229,20 @@ void write_unsigned(
     }
 }
 
+// IEC-specific field widths, not minimal BER integer widths. This runs
+// only when constructing the prebuilt frame, never in the 4 kHz TX hot path.
+void write_unsigned_fixed(
+    const std::span<std::uint8_t> dst, std::size_t& off,
+    const std::uint8_t tag, const std::uint64_t value,
+    const std::size_t width,
+    SampledValuesEncodedFieldRegion* const region = nullptr) noexcept {
+    write_tlv_header(dst, off,
+        static_cast<std::uint8_t>(context_primitive_base | tag), width);
+    if (region != nullptr) *region = {off, width, true};
+    for (std::size_t index = width; index-- > 0U;)
+        dst[off++] = static_cast<std::uint8_t>((value >> (index * 8U)) & 0xFFU);
+}
+
 [[nodiscard]] bool write_asdu(
     const SampledValueAsdu& asdu,
     const std::span<std::uint8_t> destination,
@@ -246,11 +261,11 @@ void write_unsigned(
     if (!asdu.data_set_reference.empty()) {
         write_string(destination, offset, 1U, asdu.data_set_reference);
     }
-    write_unsigned(
-        destination, offset, 2U, asdu.sample_count,
+    write_unsigned_fixed(
+        destination, offset, 2U, asdu.sample_count, 2U,
         layout != nullptr ? &layout->sample_count : nullptr);
-    write_unsigned(
-        destination, offset, 3U, asdu.configuration_revision,
+    write_unsigned_fixed(
+        destination, offset, 3U, asdu.configuration_revision, 4U,
         layout != nullptr ? &layout->configuration_revision : nullptr);
 
     if (asdu.reference_time.has_value()) {
@@ -268,12 +283,12 @@ void write_unsigned(
         write_bytes(destination, offset, timestamp);
     }
 
-    write_unsigned(
-        destination, offset, 5U, asdu.sample_synchronization,
+    write_unsigned_fixed(
+        destination, offset, 5U, asdu.sample_synchronization, 1U,
         layout != nullptr ? &layout->sample_synchronization : nullptr);
     if (asdu.sample_rate.has_value()) {
-        write_unsigned(
-            destination, offset, 6U, *asdu.sample_rate,
+        write_unsigned_fixed(
+            destination, offset, 6U, *asdu.sample_rate, 2U,
             layout != nullptr ? &layout->sample_rate : nullptr);
     }
 
@@ -287,8 +302,8 @@ void write_unsigned(
     write_bytes(destination, offset, asdu.sample_payload);
 
     if (asdu.sample_mode.has_value()) {
-        write_unsigned(
-            destination, offset, 8U, *asdu.sample_mode,
+        write_unsigned_fixed(
+            destination, offset, 8U, *asdu.sample_mode, 2U,
             layout != nullptr ? &layout->sample_mode : nullptr);
     }
     if (asdu.gm_identity.has_value()) {
