@@ -143,6 +143,11 @@ public:
         const QString& observed) noexcept;
 
     [[nodiscard]] static constexpr int firmwareStopAckTimeoutMs() noexcept { return 3500; }
+    // Legacy board console can take >12 s to drain an older PROFILE SHOW
+    // before delivering STOP ACK, PTP STOP and fresh SHOW results. This is
+    // a bounded, operator-authorized maintenance proof stage, never a
+    // waiver of ACK/readback. Global firmware transaction cap stays 300 s.
+    [[nodiscard]] static constexpr int firmwareVerifiedStopDeadlineMs() noexcept { return 45000; }
     [[nodiscard]] static constexpr int firmwareReleaseAckTimeoutMs() noexcept { return 2000; }
     [[nodiscard]] static constexpr int firmwareTotalDeadlineMs() noexcept { return 300000; }
 
@@ -267,7 +272,8 @@ private:
         }
         [[nodiscard]] int timeoutForStage(const UpdateStage stage) const noexcept {
             return stage == UpdateStage::stopping
-                ? (owner_ != nullptr && owner_->stoppingPtpForFirmware_ ? 12000 : firmwareStopAckTimeoutMs())
+                ? (owner_ != nullptr && owner_->stoppingPtpForFirmware_
+                    ? firmwareVerifiedStopDeadlineMs() : firmwareStopAckTimeoutMs())
                 : firmwareReleaseAckTimeoutMs();
         }
         void synchronize() {
@@ -384,7 +390,7 @@ private:
     void refreshRecoveryOfferFromIdentity();
     void clearBlankBoardContext();
     void latchFirmwareFailure(QString message);
-    bool beginFirmwareOperation(const QString& portName);
+    bool beginFirmwareOperation(const QString& portName, bool authorizedBlankBoardRecovery = false);
     bool ensureDefaultProfile();
     void setPresentation(QString state, QString status, bool startReady, bool firmwareUpdateRequired);
     void refreshFirmwareIdentity();

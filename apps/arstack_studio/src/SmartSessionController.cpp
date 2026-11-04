@@ -612,10 +612,13 @@ bool SmartSessionController::beginFirmwareInstall(const bool supportedBoardAndIs
         !firmware_->bundleReady() || firmware_->busy() || blankBoardPort_.isEmpty()) {
         return false;
     }
-    return beginFirmwareOperation(blankBoardPort_);
+    // ROM-only recovery is authorized exclusively from this confirmed entry.
+    // An ordinary Retry after lost application identity must never inherit it.
+    return beginFirmwareOperation(blankBoardPort_, true);
 }
 
-bool SmartSessionController::beginFirmwareOperation(const QString& portName) {
+bool SmartSessionController::beginFirmwareOperation(
+    const QString& portName, const bool authorizedBlankBoardRecovery) {
     const QString port = portName.trimmed();
     if (firmwareProcessRetirementPending_ && firmware_ != nullptr && !firmware_->busy()) {
         firmwareProcessRetirementPending_ = false;
@@ -623,6 +626,22 @@ bool SmartSessionController::beginFirmwareOperation(const QString& portName) {
     }
     if (device_ == nullptr || firmware_ == nullptr || port.isEmpty() ||
         firmware_->busy() || firmwareProcessRetirementPending_) return false;
+    // A lost identity after an interrupted STOP is NOT an authorized blank
+    // board. Retry must first re-identify the same physical device and
+    // repeat the supervised STOP, or obtain explicit isolated-ROM recovery
+    // authorization through beginFirmwareInstall(). Never treat COM15 alone
+    // as a reason to reset a potentially autonomous publisher.
+    if (!device_->deviceVerified() &&
+        (!authorizedBlankBoardRecovery || !blankBoardDetected_ ||
+         blankBoardPort_.trimmed().compare(port, Qt::CaseInsensitive) != 0)) {
+        latchFirmwareFailure(QStringLiteral(
+            "Board identity was lost during firmware setup. Reconnect and identify "
+            "the board before retrying; unverified ROM recovery requires explicit "
+            "supported-board and isolated-bench confirmation. No firmware was written."));
+        emit firmwareUpdateFinished(false);
+        reconcile();
+        return false;
+    }
 
     updatePort_ = port;
     updateExpectedDeviceId_ = device_->deviceVerified() ? device_->deviceId().trimmed() : QString{};

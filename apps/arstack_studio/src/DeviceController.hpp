@@ -317,7 +317,13 @@ public:
     // serial owner: the existing STOP/PTP STOP/readback paths remain authoritative.
     bool beginFirmwareQuiescence();
     void endFirmwareQuiescence() noexcept;
+    [[nodiscard]] bool firmwareQuiescenceActive() const noexcept {
+        return firmwareQuiescenceActive_;
+    }
     [[nodiscard]] bool firmwareQuiescenceVerified() const noexcept;
+    // P1.3: bounded maintenance proof for slow legacy console responses.
+    // Normal operator PTP STOP still retains its independent 5 s deadline.
+    [[nodiscard]] static constexpr int firmwarePtpStopProofDeadlineMs() noexcept { return 40000; }
     bool configurePtp(const QVariantMap& profile);
 
     bool setPtpRole(const QString& requestedRole) {

@@ -707,14 +707,26 @@ def main() -> None:
 
     # The GUI's normal transient conditions are never shown as operator faults.
     # Validate both intended (positive) paths and removed (negative) paths.
+    # Normal STOP remains bounded; the authorized firmware-maintenance STOP
+    # has its own bounded, longer proof window. Importantly, normal SHOW-health
+    # polling must not retire the COM while STOP ACK/readback is still pending.
+    # Preserve the original exclusivity checks and assert the replacement
+    # behavioral contract instead of matching the obsolete 5 s timer syntax.
+    maintenance_controller = (STUDIO / "src/StudioDeviceController.hpp").read_text(encoding="utf-8")
     require("Coalesced %1 until exclusive serial authority is released." in device_cpp
             and "flushDeferredReadbacks()" in device_cpp
             and "std::exchange(deferredPtpShow_, false)" in device_cpp
             and "if (readback) return deferReadback();" in device_cpp
             and "Canonical binary profile transaction owns" not in device_cpp
             and "Could not request PTP STOP readback." not in device_cpp
-            and "ptpStartTimer_.start(profileDeploying_" in device_cpp,
-            "busy device polling must defer quietly; verified STOP has an absolute deadline")
+            and "ptpStartTimer_.start(firmwareQuiescenceActive_" in device_cpp
+            and "firmwarePtpStopProofDeadlineMs()" in device_cpp
+            and "firmwareVerifiedStopDeadlineMs()" in session_h
+            and "if (firmwareQuiescenceActive()) {" in maintenance_controller
+            and "healthProbeOutstanding_ = false;" in maintenance_controller
+            and "deferredProfileShow_ = false;" in device_cpp,
+            "busy device polling must defer quietly; maintenance STOP requires"
+            " bounded fresh ACK/readback and no premature COM retirement")
     require('toolTipText: "Time sync & SV lock details"' in timing_ui
             and 'Accessible.name: "Time sync & SV lock details"' in timing_ui
             and 'objectName: "studioTimingDetails"' in timing_ui

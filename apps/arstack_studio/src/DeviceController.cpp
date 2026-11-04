@@ -1812,6 +1812,13 @@ bool DeviceController::beginFirmwareQuiescence() {
     firmwareQuiescenceActive_ = true;
     firmwareQuiescenceSession_ = sessionGeneration_;
     firmwareQuiescenceBoot_ = identity_.bootId;
+    // Old PROFILE/SHOW readbacks belong to the pre-update session. Priority
+    // STOP retires queued ordinary work in DeviceIoWorker; clear its facade
+    // coalescing flags too, or a stale PTP SHOW can prevent maintenance proof
+    // while triggering a spurious firmware-safety error toast.
+    deferredShow_ = false;
+    deferredProfileShow_ = false;
+    deferredPtpShow_ = false;
 
     // Explicit operator-authorized STOP for BOTH services, independent of
     // cached telemetry. STOP preempts pending SV START in the serial worker.
@@ -1912,8 +1919,14 @@ bool DeviceController::beginPtpStopVerification() {
         return false;
     }
     // Absolute STOP readback deadline; STOP itself uses the worker safety lane.
-    ptpStartTimer_.start(profileDeploying_ || scenarioStage_ != ScenarioStage::idle
-        ? 12000 : 5000);
+    // A verified maintenance STOP may follow a slow legacy PROFILE SHOW
+    // response and an already-backlogged UART console. The field trace
+    // showed the STOP ACK arriving ~12 s after dispatch; 5/12 s cut it off.
+    // Still fail closed on a bounded timer; supervisor owns the 45 s
+    // whole-stage limit and never flashes without fresh STOP proof.
+    ptpStartTimer_.start(firmwareQuiescenceActive_
+        ? firmwarePtpStopProofDeadlineMs()
+        : (profileDeploying_ || scenarioStage_ != ScenarioStage::idle ? 12000 : 5000));
     return true;
 }
 
@@ -2374,6 +2387,25 @@ void DeviceController::flushDeferredReadbacks() {
         scenarioStage_ != ScenarioStage::idle ||
         !connected_ || !ioWorkerReady_ || ioWorker_ == nullptr || sessionGeneration_ == 0)
         return;
+    if (firmwareQuiescenceActive_) {
+        // The queued STOP-proof SHOW/PTP SHOW were created *after* their
+        // respective current-boot ACKs: entry already discarded all old
+        // deferred reads. During exclusive M4 retirement, preserve these
+        // two proof reads until that serial lease is actually retired.
+        // Never replay unrelated PROFILE SHOW into firmware maintenance.
+        deferredProfileShow_ = false;
+        if (std::exchange(deferredPtpShow_, false) &&
+            ptpStartStage_ == PtpStartStage::awaiting_stop_readback &&
+            !sendQuietCommand(QStringLiteral("PTP SHOW"))) {
+            markPtpStopUnconfirmed(QStringLiteral(
+                "Firmware PTP STOP proof readback could not be queued."));
+        }
+        if (std::exchange(deferredShow_, false) && firmwareSvStopAck_ &&
+            !sendQuietCommand(QStringLiteral("SHOW"))) {
+            setError(QStringLiteral("Firmware SV STOP proof readback could not be queued."));
+        }
+        return;
+    }
     // At most one of each telemetry/readback type. No competing serial writer.
     if (std::exchange(deferredPtpShow_, false)) {
         if (!sendQuietCommand(QStringLiteral("PTP SHOW")) &&
