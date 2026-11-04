@@ -1027,11 +1027,14 @@ bool DeviceController::processM4GroupLine(const QString& line) {
         const auto mask=extract(QStringLiteral("mask")).toUInt(&maskOk);
         const auto running=extract(QStringLiteral("running")).toUInt(&runningOk);
         const bool stopping=m4GroupStage_ == M4GroupStage::awaiting_stop_readback;
+        // STOP is authoritative for the shared publisher regardless of
+        // legitimate per-MU TX gating (0..7); START requires all 3 enabled.
+        const bool validMask = maskOk && (stopping ? mask <= 7U : mask == 7U);
         if (!tokOk || (!stopping && token != m4GroupToken_) ||
             !bootOk || boot != m4GroupBoot_.toULongLong(nullptr,16) ||
             !hashOk || roster != m4GroupRoster_.toULongLong(nullptr,16) ||
             !genOk || gen != m4ReconnectRosterGeneration_ ||
-            !selectedOk || selected != 1U || !maskOk || mask != 7U ||
+            !selectedOk || selected != 1U || !validMask ||
             !runningOk || running != (stopping ? 0U : 1U)) {
             failM4Group(QStringLiteral("M4 board state readback rejected: boot/roster/epoch/mask/RUNNING mismatch."));
             return true;

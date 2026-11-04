@@ -25,8 +25,11 @@ roster. No extra timer/task, heap allocation, or work is added to 250us TX.
 On acceptance, the existing publisher task starts the existing 3-SV path.
 Studio waits for exact `M4START accepted token/boot/roster` then sends `M4SHOW`.
 Firmware returns one board-control-plane `M4STATE token/boot/roster/generation/
-selected/mask/running`. Only a matching fresh response marks RUNNING. It does
-**not** prove any packet on physical Ethernet.
+selected/mask/running`. Only a matching fresh response with **all 3 TX-enable bits** marks RUNNING.
+Group STOP requires matching boot/roster and `running=0`, but permits any
+valid 3-bit per-MU mask because independently stopped streams must not block
+verification of the shared publisher STOP. Neither control-plane state proves
+any packet on physical Ethernet.
 
 The existing priority `STOP` cancels a pending group START; Studio retires
 unsent exclusive commands and requires `STOP accepted` plus a fresh

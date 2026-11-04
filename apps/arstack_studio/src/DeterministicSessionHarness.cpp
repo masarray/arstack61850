@@ -2503,6 +2503,13 @@ private:
             d.m4GroupStage_ != DeviceController::M4GroupStage::confirmed_stopped ||
             d.running() || !d.m4GroupStartAllowed() ||
             d.operatorStopPending_) return false;
+        // MU2 may have been disabled independently; group STOP still
+        // verifies the single publisher is STOPPED with that 3-bit mask.
+        d.m4GroupStage_ = DeviceController::M4GroupStage::awaiting_stop_readback;
+        d.operatorStopPending_ = true;
+        if (!d.processM4GroupLine(state(0, 5)) ||
+            d.m4GroupStage_ != DeviceController::M4GroupStage::confirmed_stopped ||
+            d.operatorStopPending_) return false;
         d.m4GroupStage_ = DeviceController::M4GroupStage::awaiting_start_readback;
         d.operatorStopPending_ = true;
         if (!d.processM4GroupLine(state(1)) || !d.running() || d.operatorStopPending_)
