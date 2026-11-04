@@ -4,7 +4,7 @@
 
 Use **ARStack Studio** and one affordable **ESP32-P4 Ethernet board** to generate actual IEC 61850 Sampled Values and PTP traffic for process-bus and digital-substation lab simulation. Give a relay, BCU or analyzer a configurable SV stream to subscribe to, inspect its behavior and troubleshoot engineering configurations without needing a full physical Merging Unit test rack.
 
-[**Download Windows Setup ZIP (recommended)**](https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-win-x64-setup.zip) · [**Latest stable release**](https://github.com/masarray/arstack61850/releases/latest) · [**Getting started**](docs/GETTING_STARTED.md) · [**Product website**](https://masarray.github.io/arstack61850/) · [**Get help**](SUPPORT.md)
+[**🪟 Download for Windows — Setup ZIP**](https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-win-x64-setup.zip) · [**🐧 Download for Linux — AppImage**](https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-linux-x86_64.AppImage) · [**Latest stable release**](https://github.com/masarray/arstack61850/releases/latest) · [**Getting started**](docs/GETTING_STARTED.md) · [**Product website**](https://masarray.github.io/arstack61850/) · [**Get help**](SUPPORT.md)
 
 ## What you can do
 
@@ -16,7 +16,7 @@ Use **ARStack Studio** and one affordable **ESP32-P4 Ethernet board** to generat
 | **Inspect and troubleshoot** | Use Studio or Wireshark to inspect SV/PTP; compare APPID, svID, multicast MAC and VLAN with the subscriber configuration. Other analyzers can be tried with matching filters. |
 | **Try engineering-file profiles** | Import supported SCL/SCD/CID/IID SV engineering configurations; inspect stream identity and deploy supported single-stream 4I+4V profiles. |
 
-**Current stable:** [**Process Bus Simulator — Dual Firmware Stable**](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-dual-stable-20261105) ships Windows Stable Setup (preferred ZIP or direct EXE), Windows Portable ZIP, Linux AppImage, and independent revision-aware ESP32-P4 pre-v3 / v3.x firmware images. The GPS-style PTP Grandmaster and IEC 61850 MU remain intentional simulators. The v3.x firmware retains engineering-preview hardware qualification while broader field tests continue.
+**Current public stable (5 November 2026):** [**Process Bus Simulator — Dual Firmware Stable**](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-dual-stable-20261105) ships Windows Stable Setup (preferred ZIP or direct EXE), Windows Portable ZIP, Linux AppImage, and independent revision-aware ESP32-P4 pre-v3 / v3.x firmware images. The GPS-style PTP Grandmaster and IEC 61850 MU remain intentional simulators. The v3.x image remains an engineering preview for physical board qualification; do not treat historical pre-v3 bench captures as v3.x evidence.
 
 **Historical M3.H.3 single-stream lab benchmark:** **4,705,090 SV frames** captured across **19 min 36 s** at **3,999.886 fps**, with **zero missing, duplicate, reordered or malformed SV frames**. SV and PTP were on the wire, and all received SV carried `smpSynch=2` in the internal lab timing profile. Close Studio and the powered ESP32-P4 keeps publishing; reopen it and Studio adopts the live board state. [Capture details](docs/releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md).
 
@@ -32,7 +32,7 @@ Use **ARStack Studio** and one affordable **ESP32-P4 Ethernet board** to generat
 
 ## Get started in minutes
 
-1. **[Download the stable Windows Setup ZIP](https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-win-x64-setup.zip)**, extract it, then run the Setup EXE inside. The release also provides a direct EXE and Portable ZIP.
+1. **Download Studio** for [Windows (Setup ZIP)](https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-win-x64-setup.zip) or [Linux x86_64 (AppImage)](https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-linux-x86_64.AppImage). Extract the Windows ZIP and run the installer inside, or mark the Linux AppImage executable and launch it. Windows Portable ZIP and direct EXE are also available.
 2. Open Studio and try the built-in **4I+4V Quick Start** profile. You can explore the interface before connecting hardware.
 3. To transmit real Ethernet frames, connect a compatible **ESP32-P4 Ethernet** board over USB and Ethernet. Use **Configuration → Firmware** to install the firmware bundled with **the same release**.
 4. Choose **PTP SOURCE / INTERNAL_GM_ONLY**, set **SMPSYNCH AUTO**, configure voltage/current waveforms, and press **Start**. Studio can be closed while the board stays powered and Ethernet remains connected.
@@ -52,7 +52,7 @@ For active SV/PTP transmission, use an **isolated laboratory Ethernet network**,
 | ESP32-P4 firmware | [Two revision images and catalog](https://github.com/masarray/arstack61850/releases/latest) · use the matching Studio release |
 | Linux AppImage | [Download Linux x86_64](https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-linux-x86_64.AppImage) |
 
-Every published Windows release includes the application dependencies and a matched firmware package; no C++ build environment is required for ordinary installation.
+The current stable Windows installer includes its dependencies and release-matched firmware; no C++ build environment is required for ordinary installation. The Linux AppImage and revision-aware ESP32-P4 images are published alongside it. ZIP packaging does not bypass Windows SmartScreen/antivirus checks of unsigned installers.
 
 ## Community
 
