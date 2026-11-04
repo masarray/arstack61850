@@ -1,37 +1,43 @@
 # Install ARStack Studio
 
-**[M3.H.3 Official Stable Release](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-m3h3-20261025)** · **[Product page](https://masarray.github.io/arstack61850/)**
+**Latest stable:** [Process Bus Simulator — Dual Firmware Stable](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-dual-stable-20261105) (5 November 2026) · [Product website](https://masarray.github.io/arstack61850/) · [Getting started](GETTING_STARTED.md)
 
 ## Windows 10/11 (x64)
 
-Download **[`ARStack-Studio-M3H3-win-x64-setup.exe`](https://github.com/masarray/arstack61850/releases/download/processbus-sim-m3h3-20261025/ARStack-Studio-M3H3-win-x64-setup.exe)** and follow Setup. The matching portable package is `ARStack-Studio-M3H3-win-x64-portable.zip`. The official installer is built from the accepted Windows CI preview binary and retains its historical internal installer identity; it does not silently replace older stable installs.
+**Recommended:** [Download Windows Setup ZIP](https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-win-x64-setup.zip), extract it and run the contained **ARStack-Studio-win-x64-setup.exe**.
 
-To download the newest installer through PowerShell, verify its SHA-256 and open Setup automatically:
+Alternatives: [Windows Portable ZIP](https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-win-x64-portable.zip) (no installer) or [direct Setup EXE](https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-win-x64-setup.exe). The current stable installer uses its own AppId and can coexist with an earlier Preview installation.
 
-```powershell
-$script = Join-Path $env:TEMP 'arstack-install.ps1'
-Invoke-WebRequest 'https://raw.githubusercontent.com/masarray/arstack61850/main/scripts/install-windows.ps1' -OutFile $script
-& $script
-```
-
-To download a verified copy without starting the installer, run `& $script -DownloadOnly`.
+The Setup ZIP helps reduce direct-EXE browser download friction, but **does not bypass SmartScreen, antivirus scanning or code-signing warnings** for unsigned executable installers.
 
 ## Linux (x86_64)
 
-For Linux x86_64, download `ARStack-Studio-linux-x86_64.AppImage` from the [M3.H.3 stable release](https://github.com/masarray/arstack61850/releases/latest). Mark it executable (`chmod +x`) and open it. You can also install it into your home folder with:
+[Download Linux AppImage](https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-linux-x86_64.AppImage).
 
-```bash
-curl -fLsS https://raw.githubusercontent.com/masarray/arstack61850/main/scripts/install-linux.sh -o /tmp/arstack-install-linux.sh
-bash /tmp/arstack-install-linux.sh
-```
+In a terminal in the download directory, run:
 
-The install script verifies the matching published SHA-256. The M3.H.3 official stable release contains the tested Linux AppImage.
+    chmod +x ARStack-Studio-linux-x86_64.AppImage
+    ./ARStack-Studio-linux-x86_64.AppImage
 
-## First lab experiment
+The stable release includes a Linux SHA-256 file and **SHA256SUMS.txt**. Some Linux distributions may require additional AppImage/FUSE runtime support.
 
-1. Open **ARStack Studio** and start from the built-in 4I+4V profile.
-2. To publish actual Ethernet Sampled Values, connect a compatible ESP32-P4 and install the **matched firmware included with that release**.
-3. Select a simulated PTP source, set waveform values, and press **Start**.
-4. Inspect SV and PTP traffic on a dedicated test switch or network segment.
+## Firmware and first Ethernet lab
 
-**Try a relay/BCU Process Bus lab:** configure an SV stream's APPID, MAC, VLAN and svID to match your subscriber's expected inputs, press Start and capture real Layer-2 traffic with Wireshark. ARStack also publishes internal PTP SOURCE traffic for lab timing simulations. With the ESP32-P4 powered, closing Studio does not stop SV; reopening Studio adopts the actual board state. Use the firmware paired with this release. [M3.H.3 on-wire lab capture](releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md).
+The dual stable release includes two separate revision-aware ESP32-P4 firmware images:
+
+- **arstack-esp32p4-smv-0.1.1.bin** — pre-v3 hardware.
+- **arstack-esp32p4-smv-0.1.1-v3x.bin** — v3.x hardware (**engineering-preview physical qualification**).
+
+In **ARStack Studio → Configuration → Firmware**, verify the device and install the image matched to both the board silicon and the **same Studio release**. The release provides a firmware catalog and manifest. Updating the desktop does not update the board automatically.
+
+1. Open Studio and select **4I+4V Quick Start**.
+2. Connect the ESP32-P4 over USB data and isolated lab Ethernet.
+3. Select simulated **PTP SOURCE** and **SMPSYNCH AUTO** for the lab profile.
+4. Start SV publishing, then inspect SV (EtherType 0x88BA) and PTP (0x88F7) in the subscriber/analyzer.
+5. Compare APPID, MAC, VLAN and svID with the subscriber configuration.
+
+The powered ESP32-P4 publishes autonomously; reconnecting Studio adopts the board state.
+
+**Verification boundary:** M4 software integrates SCL-driven three-virtual-MU configuration and group START/STOP. Historical M3.H.3 on-wire evidence measures **one** stream; sustained three-stream aggregate and v3.x PHY testing are not yet proven by that benchmark. See the [M4 engineering roadmap](PROCESS_BUS_MULTI_SV_SCL_NEXT_PHASE.md) and [M3.H.3 capture record](releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md).
+
+Use on an isolated laboratory network, never a production/energized substation process bus.
