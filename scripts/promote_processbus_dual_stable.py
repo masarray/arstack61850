@@ -39,8 +39,13 @@ packaging and release metadata changed. This is not a new firmware build.
 Supports the existing IEC 61850 4I+4V SV simulation, SCL engineering profiles,
 and GPS-style PTP Grandmaster simulation. The dual firmware bundle includes
 separate pre-v3 and v3.x images with a verified revision-aware catalog.
-The M4 three-MU software controls are integrated; expanded multi-MU load tests
-and broad v3.x hardware interoperability remain under field assessment.
+The M4 three-MU software controls are integrated. Sustained 3x4000fps
+field timing acceptance remains separate from the operator-tested RC1 release.
+**The v3.x firmware image is distributed as an ENGINEERING PREVIEW within this
+stable Studio package**: v3.x board/PHY boot, SV/PTP Ethernet capture, recovery,
+autonomous operation and broad hardware compatibility are still undergoing
+physical acceptance. Existing pre-v3 test evidence must not be presented as
+v3.x evidence. The revision-aware catalog retains its original preview channel.
 
 The Windows stable Inno installer has its own AppId; previously installed
 Preview builds can be uninstalled separately after confirming stable works.
@@ -128,7 +133,8 @@ def finish(stage, out):
         "sourceHead": SOURCE_SHA, "mergedMain": MERGED_SHA,
         "applicationFirmwareRecompiled": False, "stableInstallerRepackaged": True,
         "windowsPreferredAsset": zpath.name,
-        "firmwarePolicies": ["pre-v3", "v3.x"]
+        "firmwarePolicies": ["pre-v3", "v3.x"],
+        "v3xHardwareQualification": "engineering-preview; physical acceptance pending"
     }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     files = sorted(x for x in out.iterdir() if x.is_file() and x.name not in ("RELEASE_NOTES.md", "SHA256SUMS.txt"))
     require(len(files) >= 10, "Stable release missing assets")
