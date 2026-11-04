@@ -34,11 +34,16 @@ jobs:
           grep -Fq 'syncLatestRelease' index.html
           grep -Fq 'data-asset="windows"' index.html
           grep -Fq 'data-asset="portable"' index.html
+          grep -Fq 'data-asset="linux"' index.html
+          grep -Fq 'class="actionrow hero-downloads"' index.html
+          grep -Fq 'Download for Windows' index.html
+          grep -Fq 'Download for Linux' index.html
+          grep -Fq 'ARStack-Studio-linux-x86_64.AppImage' index.html
           grep -Fq 'data-asset="firmware"' index.html
           grep -Fq 'M3.H' index.html
           grep -Fq '4,705,090' index.html
           grep -Fq 'processbus-sim-dual-stable-20261105' index.html
-          grep -Fq 'Next: multiple virtual Merging Units from one board' index.html
+          grep -Fq 'Three virtual Merging Units. One ESP32-P4.' index.html
           grep -Fq 'ARStack-Studio-win-x64-setup.zip' index.html
           grep -Fq 'firmware-catalog.json' index.html
           grep -Fq 'PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md' index.html
@@ -66,6 +71,9 @@ jobs:
               if grep -Fq 'syncLatestRelease' /tmp/arstack-live.html &&
                  grep -Fq 'data-asset="windows"' /tmp/arstack-live.html &&
                  grep -Fq 'data-asset="portable"' /tmp/arstack-live.html &&
+                 grep -Fq 'data-asset="linux"' /tmp/arstack-live.html &&
+                 grep -Fq 'Download for Windows' /tmp/arstack-live.html &&
+                 grep -Fq 'Download for Linux' /tmp/arstack-live.html &&
                  grep -Fq '4,705,090' /tmp/arstack-live.html &&
                  grep -Fq 'processbus-sim-dual-stable-20261105' /tmp/arstack-live.html; then
                 echo 'PASS: latest-release links deployed on the public product URL'
