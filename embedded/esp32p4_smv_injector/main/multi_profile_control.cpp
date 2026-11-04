@@ -186,6 +186,9 @@ bool multi_profile_group_start_matches(
     if (roster_hash == 0U || multi_profile_roster_hash_if_selected() != roster_hash ||
         g_multi.uploading() || g_mu_stream_gate.snapshot_mask() != 0x07U) return false;
     for (std::size_t i = 0U; i < generations.size(); ++i) {
+        const auto* const authoritative = g_mu_signals.control_bank_for_serial_writer(i);
+        if (authoritative == nullptr ||
+            !g_mu_transactions[i].verified_current_bank(*authoritative)) return false;
         const auto bank = multi_profile_signal_snapshot(i);
         if (generations[i] == 0U || hashes[i] == 0U ||
             bank.generation != generations[i] ||

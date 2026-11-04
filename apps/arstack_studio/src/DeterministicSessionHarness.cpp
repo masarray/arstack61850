@@ -2478,7 +2478,7 @@ private:
         d.m4GroupStage_ = DeviceController::M4GroupStage::awaiting_start_readback;
         if (!d.processM4GroupLine(state(1, 3)) ||
             d.m4GroupStage_ != DeviceController::M4GroupStage::uncertain ||
-            d.m4GroupStartAllowed()) return false;
+            d.m4GroupStartAllowed() || !d.m4GroupNeedsStop()) return false;
         d.m4GroupStage_ = DeviceController::M4GroupStage::awaiting_start_readback;
         if (!d.processM4GroupLine(state(1, 7, QStringLiteral("DEADBEEFDEADBEEF"))) ||
             d.m4GroupStage_ != DeviceController::M4GroupStage::uncertain) return false;

@@ -42,13 +42,16 @@ int main() {
         check(bank.snapshot().generation == before.generation + 1,
               "one generation for entire scenario");
         check(!tx.can_start(bank, 101, hash, 105), "no START before explicit readback");
+        check(!tx.verified_current_bank(bank), "M4 group blocked before readback");
         check(tx.confirm_readback(bank, 101, 105), "firmware applied-state readback");
+        check(tx.verified_current_bank(bank), "M4 bank proof requires COMMIT + READBACK");
         check(tx.readback_matches(bank, 101, 105) && tx.can_start(bank, 101, hash, 106),
               "ACK/readback and token/hash match");
         check(!tx.can_start(bank, 102, hash, 106) && !tx.can_start(bank, 101, hash ^ 1, 106),
               "stale token and altered hash refuse START");
         tx.consume_start();
         check(!tx.can_start(bank, 101, hash, 106), "token cannot replay after START");
+        check(!tx.verified_current_bank(bank), "consumed bank proof cannot authorize M4");
     }
     {
         SvLiveSignalBank bank;
@@ -104,6 +107,7 @@ int main() {
         unsolicited.channels[2].phase_millidegrees += 1;
         check(bank.publish(unsolicited), "external live edit");
         check(!tx.readback_matches(bank, 601, 105), "unexpected bank generation revokes ticket");
+        check(!tx.verified_current_bank(bank), "changed bank revokes M4 group proof");
         check(!tx.can_start(bank, 601, hash, 105), "unexpected live edit refuses START");
     }
     {
@@ -169,6 +173,8 @@ int main() {
               "running transaction requires exact independent readback");
         check(!tx.can_start(bank, 803, live_hash, 221),
               "live commit cannot rearm START and reset smpCnt/phase");
+        check(!tx.verified_current_bank(bank),
+              "running live edit cannot grant M4 START authority");
     }
     return failures == 0 ? 0 : 1;
 }

@@ -31,7 +31,8 @@ selected/mask/running`. Only a matching fresh response marks RUNNING. It does
 The existing priority `STOP` cancels a pending group START; Studio retires
 unsent exclusive commands and requires `STOP accepted` plus a fresh
 `M4STATE running=0` before calling STOPPED verified. A timeout or transport
-error is **UNCERTAIN**, never fabricated as STOPPED. USB disconnect clears
+error is **UNCERTAIN**, never fabricated as STOPPED. In that case the existing
+STOP action remains available even if RUNNING telemetry was not received. USB disconnect clears
 local proofs without sending STOP or automatically re-arming the board.
 
 ## Acceptance boundary

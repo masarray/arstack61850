@@ -50,6 +50,9 @@ class M4QmlSafetyContract(unittest.TestCase):
         self.assertIn("smartSession.requestStartMultiSv(drafts)", ribbon)
         self.assertIn("m4Pages.saveCurrent(root.startScenarioSnapshot(false))", QML)
         self.assertIn("3-MU START refused", ribbon)
+        self.assertIn("device.m4GroupNeedsStop", ribbon)
+        modern = (ROOT / "apps/arstack_studio/qml/ModernRibbon.qml").read_text(encoding="utf-8")
+        self.assertIn("bar.device.m4GroupNeedsStop", modern)
 
 
 if __name__ == "__main__":

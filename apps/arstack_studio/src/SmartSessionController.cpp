@@ -421,7 +421,7 @@ bool SmartSessionController::requestStop() {
     // ACKed staging transaction may still be advancing toward START.
     if (!device_->running() && !device_->scenarioApplying() &&
         !device_->m4Deploying() && !device_->m4ScenarioApplying() &&
-        !device_->m4GroupStarting()) return true;
+        !device_->m4GroupNeedsStop()) return true;
     if (portOwner_ != PortOwner::deviceSession || updateRequested_) return false;
     return device_->stop();
 }
@@ -1675,8 +1675,23 @@ void SmartSessionController::reconcile() {
     // selected MULTISV roster is still unknown or already selected. A board
     // may continue publishing independently of the USB/Studio lifetime.
     if (device_->m4ReconnectMode() != QStringLiteral("LEGACY")) {
-        if (device_->m4ReconnectMode() == QStringLiteral("SELECTED"))
+        if (device_->m4ReconnectMode() == QStringLiteral("SELECTED")) {
             m4Mode_ = true;
+            if (device_->running()) {
+                setPresentation(QStringLiteral("RUNNING"),
+                    QStringLiteral("Three-MU publisher RUNNING on the board; "
+                                   "wire-level 3x4000 fps acceptance is still pending."),
+                    false, false);
+                return;
+            }
+            if (device_->m4GroupNeedsStop()) {
+                setPresentation(QStringLiteral("M4 STATE UNCONFIRMED"),
+                    device_->m4GroupStatus() +
+                        QStringLiteral(" Use explicit STOP for fail-closed recovery."),
+                    false, false);
+                return;
+            }
+        }
         setPresentation(device_->m4ReconnectMode() == QStringLiteral("PENDING")
             ? QStringLiteral("READING BOARD ROSTER")
             : device_->m4ReconnectMode() == QStringLiteral("SELECTED")

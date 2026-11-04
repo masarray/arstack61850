@@ -84,6 +84,7 @@ class DeviceController : public QObject {
     Q_PROPERTY(bool m4ScenarioApplying READ m4ScenarioApplying NOTIFY m4DeploymentChanged)
     Q_PROPERTY(bool m4ScenariosVerified READ m4ScenariosVerified NOTIFY m4DeploymentChanged)
     Q_PROPERTY(bool m4GroupStarting READ m4GroupStarting NOTIFY m4DeploymentChanged)
+    Q_PROPERTY(bool m4GroupNeedsStop READ m4GroupNeedsStop NOTIFY m4DeploymentChanged)
     Q_PROPERTY(QString m4GroupStatus READ m4GroupStatus NOTIFY m4DeploymentChanged)
     Q_PROPERTY(bool m4BoardInspecting READ m4BoardInspecting NOTIFY m4BoardChanged)
     Q_PROPERTY(QString m4ReconnectMode READ m4ReconnectMode NOTIFY m4ReconnectModeChanged)
@@ -207,6 +208,11 @@ public:
             m4GroupStage_ == M4GroupStage::awaiting_start_readback ||
             m4GroupStage_ == M4GroupStage::awaiting_stop_ack ||
             m4GroupStage_ == M4GroupStage::awaiting_stop_readback;
+    }
+    [[nodiscard]] bool m4GroupNeedsStop() const noexcept {
+        return m4GroupStarting() ||
+            m4GroupStage_ == M4GroupStage::running_confirmed ||
+            m4GroupStage_ == M4GroupStage::uncertain;
     }
     [[nodiscard]] bool m4GroupStartAllowed() const noexcept {
         return m4GroupStage_ == M4GroupStage::idle ||

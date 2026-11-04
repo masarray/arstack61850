@@ -118,6 +118,18 @@ public:
         return readback_seen_;
     }
 
+    // Three-MU activation requires an independent COMMIT + READBACK proof for
+    // each bank. Unlike V1's 8-second START ticket, this remains valid across
+    // sequential MU uploads until the bank generation/hash changes or a
+    // new BEGIN/SELECT resets this transaction. No new state owner.
+    [[nodiscard]] bool verified_current_bank(const SvLiveSignalBank& bank) const noexcept {
+        if (!committed_ || !readback_seen_ || began_running_) return false;
+        const auto observed = bank.snapshot();
+        return observed.generation != 0U &&
+               observed.generation == generation_ &&
+               sv_scenario_hash(observed) == checksum_;
+    }
+
     [[nodiscard]] bool can_start(const SvLiveSignalBank& bank,
                                  const std::uint64_t token,
                                  const std::uint64_t hash,

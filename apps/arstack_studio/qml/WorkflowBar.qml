@@ -415,7 +415,7 @@ SurfacePanel {
         }
         // A pending CFG transaction can progress to START: Stop must remain
         // actionable before RUNNING telemetry, not only after it.
-        if (!ribbon.injectionRunning && !ribbon.startQueued) return
+        if (!ribbon.injectionRunning && !ribbon.startQueued && !device.m4GroupNeedsStop) return
         if (!smartSession.requestStop()) {
             controller.showMessage("Studio could not cancel the current device session.", true)
             return
