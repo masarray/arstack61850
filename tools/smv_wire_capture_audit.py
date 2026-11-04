@@ -63,16 +63,28 @@ def decode_frame(frame):
     for tag, asdu in tlvs(seq):
         if tag != 0x30:
             raise ValueError("unexpected ASDU tag")
-        fields = dict(tlvs(asdu))
-        if 0x82 not in fields or 0x87 not in fields or 0x80 not in fields:
-            raise ValueError("missing smpCnt, seqData or svID")
+        parsed_fields = list(tlvs(asdu))
+        fields = dict(parsed_fields)
+        if len(fields) != len(parsed_fields):
+            raise ValueError("duplicate ASDU field tag")
+        if any(tag not in fields for tag in (0x80, 0x82, 0x83, 0x85, 0x87)):
+            raise ValueError("missing mandatory SV ASDU metadata")
+        for tag, width in ((0x82, 2), (0x83, 4), (0x85, 1),
+                           (0x86, 2), (0x88, 2), (0x89, 8)):
+            if tag in fields and len(fields[tag]) != width:
+                raise ValueError(f"SV field 0x{tag:02X} must be {width} bytes")
         payload = fields[0x87]
         if len(payload) != 64:
             raise ValueError(f"expected 8 x 8 bytes of seqData, got {len(payload)}")
         values = [struct.unpack_from(">iI", payload, i * 8) for i in range(8)]
         records.append({"appid": appid, "sv_id": fields[0x80].decode("ascii"),
                         "count": int.from_bytes(fields[0x82], "big"),
-                        "synch": int.from_bytes(fields.get(0x85, b"\x00"), "big"),
+                        "confRev": int.from_bytes(fields[0x83], "big"),
+                        "synch": int.from_bytes(fields[0x85], "big"),
+                        "dataSet": fields[0x81].decode("ascii") if 0x81 in fields else None,
+                        "smpRate": int.from_bytes(fields[0x86], "big") if 0x86 in fields else None,
+                        "smpMod": int.from_bytes(fields[0x88], "big") if 0x88 in fields else None,
+                        "gmIdentity": fields[0x89].hex() if 0x89 in fields else None,
                         "channels": values})
     if len(records) != 1:
         raise ValueError("9-2LE acceptance expects exactly one ASDU per SV Ethernet frame")
@@ -112,7 +124,8 @@ def frames(path):
             yield seconds + sub / resolution, data
 
 def analyze(path, expected_appid, expected_svid, modulus, min_seconds, expected_fps,
-            signal_frequency_hz=50.0, expected_channels=None):
+            signal_frequency_hz=50.0, expected_channels=None, require_metadata=False,
+            require_unsynchronized=False):
     counts = collections.Counter()
     previous = None
     first_ts = last_ts = None
@@ -156,6 +169,15 @@ def analyze(path, expected_appid, expected_svid, modulus, min_seconds, expected_
                     reversals += 1
         previous = current
         counts["smpSynch_" + str(record["synch"])] += 1
+        for field in ("dataSet", "smpRate", "smpMod", "gmIdentity"):
+            if record[field] is not None:
+                counts["present_" + field] += 1
+        if record["smpRate"] is not None:
+            counts["rate_" + str(record["smpRate"])] += 1
+        if record["smpMod"] is not None:
+            counts["mod_" + str(record["smpMod"])] += 1
+        if record["dataSet"]:
+            counts["dataset_" + record["dataSet"]] += 1
         theta = 2.0 * math.pi * signal_frequency_hz * current / expected_fps
         sin_theta, cos_theta = math.sin(theta), math.cos(theta)
         for i, (value, q) in enumerate(record["channels"]):
@@ -192,6 +214,16 @@ def analyze(path, expected_appid, expected_svid, modulus, min_seconds, expected_
                            if key.startswith("smpSynch_")},
         "streams_seen": [{"appid": appid, "svID": svid, "frames": n}
                          for (appid, svid), n in sorted(sources.items())],
+        "optional_asdu_field_presence": {
+            field: counts["present_" + field] for field in
+            ("dataSet", "smpRate", "smpMod", "gmIdentity")
+        },
+        "sample_rates_on_wire": {key[5:]: value for key, value in counts.items()
+                                 if key.startswith("rate_")},
+        "sample_modes_on_wire": {key[4:]: value for key, value in counts.items()
+                                 if key.startswith("mod_")},
+        "dataset_references_on_wire": {key[8:]: value for key, value in counts.items()
+                                      if key.startswith("dataset_")},
         "channels": [
             {"name": NAMES[i], "min": minimums[i],
              "max": maximums[i],
@@ -215,6 +247,16 @@ def analyze(path, expected_appid, expected_svid, modulus, min_seconds, expected_
         issues.append("average frame rate outside ±2%")
     if sample_counts[0] < 2 or any(n == 0 for n in sample_counts):
         issues.append("incomplete 8-channel wire payload")
+    if require_metadata:
+        for field in ("dataSet", "smpRate", "smpMod"):
+            if counts["present_" + field] != counts["matched"]:
+                issues.append(f"{field} missing in metadata-enabled laboratory profile")
+        if counts["rate_" + str(int(expected_fps))] != counts["matched"]:
+            issues.append("wire smpRate does not match expected samples/second")
+        if counts["mod_1"] != counts["matched"]:
+            issues.append("wire smpMod is not 1 (samples per second)")
+    if require_unsynchronized and counts["smpSynch_0"] != counts["matched"]:
+        issues.append("smpSynch>0 without independently qualified time reference")
     if expected_channels is not None:
         for i, name in enumerate(NAMES):
             expected = expected_channels[name]
@@ -241,6 +283,10 @@ def analyze(path, expected_appid, expected_svid, modulus, min_seconds, expected_
                     delta = (observed["phase_degrees"] - intended_phase + 180) % 360 - 180
                     if abs(delta) > phase_tolerance:
                         issues.append(f"{name}: fundamental phase differs from operator scenario")
+    report["sync_warning"] = (
+        "smpSynch 1/2 is only a publisher claim; verify local/global clock "
+        "traceability independently before accepting synchronization"
+        if counts["smpSynch_1"] or counts["smpSynch_2"] else None)
     report["blocking_findings"] = issues
     report["status"] = "PASS_PCAPPARSER_ONLY" if not issues else "FAIL"
     report["disclaimer"] = (
@@ -258,6 +304,10 @@ def main():
     ap.add_argument("--minimum-seconds", type=float, default=120.0)
     ap.add_argument("--fps", type=float, default=4000.0)
     ap.add_argument("--signal-frequency-hz", type=float, default=50.0)
+    ap.add_argument("--require-metadata", action="store_true",
+                    help="Require datSet, smpRate=expected fps and smpMod=1 in every ASDU")
+    ap.add_argument("--require-unsynchronized", action="store_true",
+                    help="Fail if any SV advertises smpSynch 1/2 in an unqualified lab")
     ap.add_argument("--expected-json", type=Path,
                     help="Scenario JSON containing channels IA..UN with rms_counts and phase_degrees")
     args = ap.parse_args()
@@ -273,7 +323,8 @@ def main():
             if config.get("ct_shaping_enabled", False):
                 raise ValueError("fundamental equivalence with nonlinear CT shaping is not supported")
         report = analyze(args.pcap, args.appid, args.sv_id, args.wrap,
-                         args.minimum_seconds, args.fps, args.signal_frequency_hz, expected)
+                         args.minimum_seconds, args.fps, args.signal_frequency_hz, expected,
+                         args.require_metadata, args.require_unsynchronized)
         print(json.dumps(report, indent=2))
         return 0 if report["status"] == "PASS_PCAPPARSER_ONLY" else 2
     except (ValueError, OSError, KeyError, TypeError) as exc:

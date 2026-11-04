@@ -5,9 +5,11 @@
 #include <QString>
 #include <QStringList>
 #include <QThread>
+#include <QVector>
 
 class DeterministicSessionHarness;
 class FirmwareWorker;
+class QDir;
 
 class FirmwareManager : public QObject {
     Q_OBJECT
@@ -39,6 +41,9 @@ public:
     [[nodiscard]] int flashProgress() const noexcept { return flashProgress_; }
     [[nodiscard]] QString selectedPort() const { return selectedPort_; }
     [[nodiscard]] QString targetChip() const { return targetChip_; }
+    // Factory eFuse MAC from the authorized ROM probe. Used to pin a physical
+    // device across COM renumbering and exact-build postboot verification.
+    [[nodiscard]] QString targetDeviceMac() const { return targetDeviceMac_; }
     [[nodiscard]] QString firmwareVersion() const { return firmwareVersion_; }
     [[nodiscard]] QString firmwareBuildId() const { return firmwareBuildId_; }
     [[nodiscard]] QString expectedProtocol() const { return expectedProtocol_; }
@@ -51,7 +56,9 @@ public:
     [[nodiscard]] bool workerAffinityValid() const noexcept { return workerAffinityValid_; }
 
     [[nodiscard]] static bool parseEsp32P4Revision(const QString& output, int& major, int& minor);
+    [[nodiscard]] static QString parseEsp32P4Mac(const QString& output);
     [[nodiscard]] static bool supportsEsp32P4Revision(int major, int minor) noexcept;
+    [[nodiscard]] static bool revisionInRange(int major, int minor, int minRevision, int maxRevision) noexcept;
     [[nodiscard]] static int parseFlashProgress(const QString& output);
     [[nodiscard]] static constexpr int launchTimeoutMs() noexcept { return 15000; }
     [[nodiscard]] static constexpr int probeTimeoutMs() noexcept { return 30000; }
@@ -89,10 +96,20 @@ signals:
 private:
     friend class DeterministicSessionHarness;
     enum class Operation { none, probe, flash, reset };
+    struct RevisionImage {
+        QString policy;
+        QString imagePath;
+        QString sha256;
+        int minRevision{-1};
+        int maxRevision{-1};
+    };
 
     [[nodiscard]] QString bundleRoot() const;
     [[nodiscard]] QString flasherPath() const;
     bool loadManifest();
+    bool loadRevisionCatalog(const QDir& root, const QString& legacyImage,
+                             const QString& legacyHash, const QString& sourceCommit);
+    bool selectFirmwareForRevision(int major, int minor);
     bool startEspflash(const QStringList& arguments, Operation operation);
     int operationTimeoutMs(Operation operation) const noexcept;
     void connectWorkerSignals();
@@ -115,6 +132,7 @@ private:
     // operation log or creating another process/parser owner.
     QString progressOutputTail_;
     QString selectedPort_;
+    QString targetDeviceMac_;
     QString targetChip_{QStringLiteral("Not checked")};
     QString firmwareVersion_{QStringLiteral("-")};
     QString firmwareBuildId_;
@@ -122,6 +140,8 @@ private:
     QString revisionPolicy_;
     QString firmwareSha256_;
     QString firmwareImagePath_;
+    QVector<RevisionImage> revisionImages_;
+    bool revisionCatalogAvailable_{false};
     QString status_{QStringLiteral("Firmware setup ready")};
     QString bundleStatus_{QStringLiteral("Checking firmware package...")};
     QString logText_;

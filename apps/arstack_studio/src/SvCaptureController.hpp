@@ -11,6 +11,7 @@
 class SvCaptureController : public QObject {
     Q_OBJECT
     Q_PROPERTY(QStringList interfaces READ interfaces NOTIFY interfacesChanged)
+    Q_PROPERTY(QStringList interfaceDetails READ interfaceDetails NOTIFY interfacesChanged)
     Q_PROPERTY(int suggestedInterface READ suggestedInterface NOTIFY interfacesChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(bool capturing READ capturing NOTIFY stateChanged)
@@ -24,6 +25,7 @@ public:
     ~SvCaptureController() override;
 
     [[nodiscard]] QStringList interfaces() const { return interfaceLabels_; }
+    [[nodiscard]] QStringList interfaceDetails() const { return interfaceDetails_; }
     [[nodiscard]] int suggestedInterface() const { return suggestedInterface_; }
     [[nodiscard]] QString status() const { return status_; }
     [[nodiscard]] bool capturing() const { return capture_.state() != QProcess::NotRunning; }
@@ -62,6 +64,7 @@ private:
     QProcess capture_;
     QFutureWatcher<QVariantMap> decoder_;
     QStringList interfaceLabels_;
+    QStringList interfaceDetails_;
     QStringList interfaceIds_;
     int suggestedInterface_{-1};
     QString status_{QStringLiteral("Discover an Ethernet capture adapter to begin.")};

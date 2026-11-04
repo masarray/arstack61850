@@ -13,9 +13,10 @@ SurfacePanel {
     property string monoFont: "Inter"
     property bool technicalDetailsVisible: false
     readonly property string firmwareDisplayStatus:
-        panel.session && panel.session.firmwareUpdateResult.length > 0 &&
-        !panel.session.updatingFirmware
-        ? panel.session.firmwareUpdateResult : panel.firmware.status
+        panel.session && panel.session.updatingFirmware
+        ? panel.session.updateStatus
+        : panel.session && panel.session.firmwareUpdateResult.length > 0
+          ? panel.session.firmwareUpdateResult : panel.firmware.status
     readonly property bool verificationFailed:
         panel.session && panel.session.firmwareUpdateResult.length > 0 &&
         !panel.session.firmwareUpdateResult.startsWith("Exact bundled firmware build verified")
@@ -179,14 +180,16 @@ SurfacePanel {
                             id: firmwarePort
                             Layout.preferredWidth: 205
                             model: panel.device.ports
-                            enabled: panel.session && !panel.firmware.busy
+                            enabled: panel.session && !panel.firmware.busy &&
+                                     !panel.session.updatingFirmware
                             onPressedChanged: if (pressed && panel.session) panel.session.requestRefreshPorts()
                         }
                         CalmButton {
                             theme: panel.theme
                             uiFont: panel.uiFont
                             text: "Refresh"
-                            enabled: panel.session && !panel.firmware.busy
+                            enabled: panel.session && !panel.firmware.busy &&
+                                     !panel.session.updatingFirmware
                             onClicked: panel.session.requestRefreshPorts()
                         }
                         Item { Layout.fillWidth: true }
@@ -219,7 +222,8 @@ SurfacePanel {
                     Layout.fillWidth: true
                     spacing: 5
                     Label {
-                        text: panel.firmware.busy ? "Installing firmware" : "Firmware action"
+                        text: panel.session && panel.session.updatingFirmware
+                            ? "Preparing / installing firmware" : "Firmware action"
                         color: panel.theme.text
                         font.family: panel.uiFont
                         font.pixelSize: 12
@@ -227,8 +231,8 @@ SurfacePanel {
                     }
                     Label {
                         Layout.fillWidth: true
-                        text: panel.firmware.busy
-                            ? "Keep USB connected until verification completes."
+                        text: panel.session && panel.session.updatingFirmware
+                            ? "Keep USB connected. Studio is verifying the board and firmware."
                             : (panel.session && panel.session.firmwareUpdateAvailable
                                 ? "Current firmware works; update is optional."
                                 : "Installation and recovery are supervised automatically.")
@@ -249,14 +253,11 @@ SurfacePanel {
                         : "Reinstall current"
                     visible: panel.session &&
                              (panel.session.firmwareUpdateRequired || panel.session.firmwareUpdateAvailable || panel.session.firmwareReinstallAvailable)
-                    enabled: visible && !panel.firmware.busy
+                    enabled: visible && !panel.firmware.busy &&
+                             !panel.session.updatingFirmware
+                    toolTipText: "Studio will stop SV/PTP and verify board readback before firmware installation"
                     tone: panel.session && panel.session.firmwareUpdateRequired ? "accent" : "normal"
-                    onClicked: {
-                        if (panel.session.firmwareUpdateRequired || panel.session.firmwareUpdateAvailable)
-                            panel.session.beginFirmwareUpdate()
-                        else
-                            panel.session.beginFirmwareReinstall()
-                    }
+                    onClicked: firmwareConfirmDialog.open()
                 }
 
 
@@ -358,6 +359,52 @@ SurfacePanel {
             visible: !panel.technicalDetailsVisible
             Layout.fillWidth: true
             Layout.fillHeight: true
+        }
+    }
+
+    Dialog {
+        id: firmwareConfirmDialog
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        width: Math.min(400, panel.width - 32)
+        padding: 16
+        closePolicy: Popup.CloseOnEscape
+        title: "Update board firmware"
+        background: Rectangle {
+            color: panel.theme.surface
+            radius: 9
+            border.width: 1
+            border.color: panel.theme.line
+        }
+        contentItem: ColumnLayout {
+            spacing: 12
+            Label {
+                Layout.fillWidth: true
+                text: "Studio will stop SV and PTP, verify both are stopped on the board, then install the matching firmware. If STOP cannot be verified, nothing will be flashed. Output will not restart automatically."
+                wrapMode: Text.WordWrap
+                color: panel.theme.textSoft
+                font.family: panel.uiFont
+                font.pixelSize: 11
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                CalmButton {
+                    theme: panel.theme; uiFont: panel.uiFont; text: "Cancel"
+                    onClicked: firmwareConfirmDialog.close()
+                }
+                CalmButton {
+                    theme: panel.theme; uiFont: panel.uiFont
+                    text: "Stop services & update"; tone: "accent"; implicitWidth: 172
+                    onClicked: {
+                        const ok = (panel.session.firmwareUpdateRequired || panel.session.firmwareUpdateAvailable)
+                            ? panel.session.beginFirmwareUpdate()
+                            : panel.session.beginFirmwareReinstall()
+                        // Never leave an inoperable modal covering the error.
+                        firmwareConfirmDialog.close()
+                    }
+                }
+            }
         }
     }
 }

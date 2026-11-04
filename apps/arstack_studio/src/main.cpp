@@ -260,13 +260,35 @@ int checkFirmwareContract(int argc, char* argv[]) {
     const bool rejectsWrongChip = !FirmwareManager::parseEsp32P4Revision(
         QStringLiteral("Chip type:         esp32s3 (revision v0.2)\n"),
         wrongMajor,
-        wrongMinor);
+        wrongMinor) &&
+        !FirmwareManager::parseEsp32P4Revision(
+            QStringLiteral("Chip type: esp32p4 (revision v1.3)\nChip type: esp32p4 (revision v3.2)"),
+            wrongMajor,
+            wrongMinor);
+
+    const bool macIdentityContract =
+        FirmwareManager::parseEsp32P4Mac(QStringLiteral(
+            "Chip type:         esp32p4 (revision v3.2)\r\n"
+            "MAC address:       c8:f0:9e:50:8a:d0\r\n")) ==
+            QStringLiteral("C8F09E508AD0") &&
+        FirmwareManager::parseEsp32P4Mac(QStringLiteral("MAC address: 00:00:00:00:00:00")).isEmpty() &&
+        FirmwareManager::parseEsp32P4Mac(QStringLiteral("MAC address: bad")).isEmpty() &&
+        FirmwareManager::parseEsp32P4Mac(QStringLiteral(
+            "MAC address: c8:f0:9e:50:8a:d0\nMAC address: aa:bb:cc:dd:ee:ff")).isEmpty() &&
+        FirmwareManager::parseEsp32P4Mac(QStringLiteral(
+            "MAC address: c8:f0:9e:50:8a:d0\nMAC address: invalid")).isEmpty();
 
     const bool revisionPolicy =
         FirmwareManager::supportsEsp32P4Revision(0, 0) &&
         FirmwareManager::supportsEsp32P4Revision(1, 3) &&
         FirmwareManager::supportsEsp32P4Revision(2, 99) &&
         !FirmwareManager::supportsEsp32P4Revision(3, 0) &&
+        FirmwareManager::revisionInRange(1, 3, 100, 199) &&
+        !FirmwareManager::revisionInRange(1, 3, 302, 302) &&
+        FirmwareManager::revisionInRange(3, 2, 302, 302) &&
+        !FirmwareManager::revisionInRange(3, 1, 302, 302) &&
+        !FirmwareManager::revisionInRange(3, 99, 302, 302) &&
+        !FirmwareManager::revisionInRange(3, 100, 300, 399) &&
         !FirmwareManager::supportsEsp32P4Revision(-1, 0) &&
         !FirmwareManager::supportsEsp32P4Revision(1, -1);
 
@@ -305,7 +327,7 @@ int checkFirmwareContract(int argc, char* argv[]) {
         firmware.expectedProtocol() == QStringLiteral("1") &&
         firmware.firmwareBuildId().size() == 16 &&
         firmware.firmwareSha256().size() == 64 &&
-        realEspflashFormat && dashedFormat && rejectsWrongChip && revisionPolicy &&
+        realEspflashFormat && dashedFormat && rejectsWrongChip && macIdentityContract && revisionPolicy &&
         flashProgressFormat && recoverySelection && firmwareTimeoutPolicy && firmwareWorkerBoundary;
     if (!valid) {
         qCritical().noquote()
@@ -315,6 +337,7 @@ int checkFirmwareContract(int argc, char* argv[]) {
             << "dashed-format=" << dashedFormat
             << "wrong-chip-rejected=" << rejectsWrongChip
             << "revision-policy=" << revisionPolicy
+            << "rom-mac-contract=" << macIdentityContract
             << "progress-format=" << flashProgressFormat
             << "recovery-selection=" << recoverySelection
             << "timeout-policy=" << firmwareTimeoutPolicy

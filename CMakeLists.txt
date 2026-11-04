@@ -562,10 +562,15 @@ if(ARIEC61850_BUILD_TESTS)
         add_test(NAME ariec61850_ptp_sv_wire_audit_selftest
                  COMMAND ariec61850_ptp_sv_wire_audit --self-test)
         add_test(
-            NAME ariec61850_pcap_interop_smoke
+            NAME ariec61850_pcap_interop_detects_noncanonical_legacy
             COMMAND ariec61850_pcap_interop_check
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/process_bus_csharp_vectors.pcap
                 --json)
+        # Historical fixture has min-width integers; under canonical IEC
+        # widths the audit must reject an exact byte-for-byte re-encode.
+        # The C++ evidence test also asserts the precise mismatch reason/count.
+        set_tests_properties(ariec61850_pcap_interop_detects_noncanonical_legacy
+                             PROPERTIES WILL_FAIL TRUE)
         add_test(
             NAME ariec61850_comtrade_inspect_smoke
             COMMAND ariec61850_comtrade_inspect

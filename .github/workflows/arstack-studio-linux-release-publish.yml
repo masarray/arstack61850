@@ -1,0 +1,68 @@
+name: Publish Verified Linux AppImage to Stable Release
+
+# The read-only reusable AppImage builder MUST NOT request contents:write on
+# pull requests. This separate trusted dispatch is the sole release uploader.
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing published latest stable GitHub release tag'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-verified-linux:
+    uses: ./.github/workflows/arstack-studio-linux-appimage.yml
+    with:
+      release_tag: ${{ inputs.release_tag }}
+      paired_preview: false
+
+  attach-verified-release:
+    name: Attach exact-tag Linux AppImage after independent release checks
+    needs: build-verified-linux
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag }}
+          fetch-depth: 0
+
+      - name: Download the same-run tested Linux build
+        uses: actions/download-artifact@v4
+        with:
+          name: arstack-studio-linux-x86_64
+
+      - name: Verify exact source, release identity and checksum before upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          test -n "$TAG"
+          test "$TAG" != "processbus-sim-m3h-20261024"
+          test "$TAG" != "processbus-sim-m3h3-20261025"
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "$TAG^{commit}")"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$TAG^{commit}" origin/main || {
+            echo "Release source is not integrated in main" >&2
+            exit 1
+          }
+          gh release view "$TAG" --json tagName,isDraft,isPrerelease -q \
+            'select(.tagName == env.TAG and .isDraft == false and .isPrerelease == false)' > release-check.json
+          test -s release-check.json
+          gh api "repos/$GITHUB_REPOSITORY/releases/latest" > latest-release.json
+          python3 - <<'PY'
+          import json, os
+          latest=json.load(open('latest-release.json', encoding='utf-8'))
+          assert latest['tag_name'] == os.environ['TAG'], 'not current stable release'
+          assert not latest['draft'] and not latest['prerelease']
+          PY
+          sha256sum -c ARStack-Studio-linux-x86_64.sha256
+          gh release upload "$TAG" \
+            ARStack-Studio-linux-x86_64.AppImage \
+            ARStack-Studio-linux-x86_64.sha256

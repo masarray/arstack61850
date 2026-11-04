@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Deterministic fixture uses the exact production capture decoder; no Npcap needed.
 #include "SvCaptureController.hpp"
+#include "CaptureAdapterCatalog.hpp"
 
 #include <QCoreApplication>
 #include <QFile>
@@ -79,6 +80,41 @@ public:
     static bool run() {
         QTemporaryDir dir;
         if (!dir.isValid()) return false;
+        // Realtek must be shown instead of Local Area Connection* / GUID.
+        // Reordering dumpcap -D must never change the chosen NPF identity.
+        const QString realId = QStringLiteral(R"(\Device\NPF_{992B837A-63FA-4D5C-9EF1-92B687EA1053})");
+        const QString virtualId = QStringLiteral(R"(\Device\NPF_{00000000-0000-0000-0000-000000000001})");
+        const QVector<CaptureNicMetadata> known{
+            {QStringLiteral("{992B837A-63FA-4D5C-9EF1-92B687EA1053}"),
+             QStringLiteral("Ethernet"), QStringLiteral("Realtek PCIe GbE Family Controller"),
+             CaptureNicKind::Ethernet, true, false},
+            {QStringLiteral("{00000000-0000-0000-0000-000000000001}"),
+             QStringLiteral("vEthernet"), QStringLiteral("Hyper-V Virtual Ethernet"),
+             CaptureNicKind::Ethernet, true, true}
+        };
+        const auto catalog = buildCaptureAdapterCatalog(
+            QStringLiteral("1. ") + virtualId + QStringLiteral(" (Local Area Connection* 10)\n") +
+            QStringLiteral("2. ") + realId + QStringLiteral(" (Local Area Connection* 9)\n"), known);
+        const auto reordered = buildCaptureAdapterCatalog(
+            QStringLiteral("1. ") + realId + QStringLiteral(" (Local Area Connection* 9)\n") +
+            QStringLiteral("2. ") + virtualId + QStringLiteral(" (Local Area Connection* 10)\n"),
+            known, realId);
+        const auto ambiguous = buildCaptureAdapterCatalog(
+            QStringLiteral("1. ") + realId + QStringLiteral(" (LAN)\n") +
+            QStringLiteral("2. ") + virtualId + QStringLiteral(" (LAN)\n"),
+            {{known[0].interfaceKey, known[0].alias, known[0].hardware,
+              CaptureNicKind::Ethernet, true, false},
+             {known[1].interfaceKey, QStringLiteral("Ethernet 2"), QStringLiteral("Intel I225-V"),
+              CaptureNicKind::Ethernet, true, false}});
+        if (catalog.suggested != 0 || catalog.ids[0] != realId ||
+            !catalog.labels[0].contains(QStringLiteral("Realtek PCIe GbE")) ||
+            catalog.labels[0].contains(QStringLiteral("NPF_")) ||
+            reordered.suggested != 0 || reordered.ids[0] != realId ||
+            ambiguous.suggested != -1) {
+            qCritical() << "NIC discovery failed: identity, display or safe selection regression";
+            return false;
+        }
+
         // Regression: actual 2026-10-22 24-byte PCAP despite old cached
         // 3999 FPS. Capture must block while publisher STOPPED, not silently
         // make a successful-looking 30s measurement.

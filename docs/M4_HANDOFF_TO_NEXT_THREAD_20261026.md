@@ -1,5 +1,8 @@
 # HANDOFF — ARStack61850 M4: 3 SCL SV outputs, shared PTP, one Studio GUI
 
+
+> **HANDOFF TERBARU (29 Oktober 2026):** Thread baru **WAJIB mulai dari [M4_HANDOFF_NEXT_THREAD_20261029.md](M4_HANDOFF_NEXT_THREAD_20261029.md)**. Isi handoff 2026-10-26 di bawah hanyalah arsip kronologis dan memuat status PR lama. Selalu periksa ulang live `main`, PR terbuka, CI, dan [Issue #333](https://github.com/masarray/arstack61850/issues/333).
+
 **Snapshot:** 2026-10-26 (Asia/Jakarta). **This file supersedes the obsolete “NEXT P0C1” instructions inside** `docs/M4_EXECUTION_CHECKPOINT_20261025.md`. Verify current GitHub HEAD, PR state and CI before making changes: other threads may work simultaneously.
 
 **Repository:** https://github.com/masarray/arstack61850  

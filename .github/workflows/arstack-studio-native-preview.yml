@@ -29,6 +29,15 @@ jobs:
       # Stable release workflow keeps ordinary firmware until board validation.
       phase_sync_preview: true
 
+  # Windows and Linux must package the SAME firmware artifact. This job
+  # runs after the existing exact-HEAD firmware builder, and adds no IDF jobs.
+  linux-preview:
+    needs: firmware
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    uses: ./.github/workflows/arstack-studio-linux-appimage.yml
+    with:
+      paired_preview: true
+
   windows-preview:
     needs: firmware
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
@@ -249,7 +258,7 @@ jobs:
             guiVersion = '0.1.1-preview'
             firmwareVersion = '0.1.1'
             firmwareSourceCommit = $env:PREVIEW_SHA
-            firmwareCompile = 'ESP-IDF v5.5.4 / exact PR HEAD'
+            firmwareCompile = 'ESP-IDF v5.5.6 / exact PR HEAD'
             pinnedFlasherBasePackageSha256 = $env:BASE_PORTABLE_SHA256
             embeddedExperimentalM3 = $false
             ptpHardwareQualified = $false

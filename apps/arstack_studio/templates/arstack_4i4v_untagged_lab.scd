@@ -1,5 +1,5 @@
 <SCL xmlns="http://www.iec.ch/61850/2003/SCL" xmlns:sxy="http://www.iec.ch/61850/2003/SCLcoordinates" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.iec.ch/61850/2003/SCL SCL.xsd http://www.iec.ch/61850/2003/SCLcoordinates">
-    <Header id="ARStack-4I4V-Untagged-Lab"/>
+    <Header id="ARStack-4I4V-Untagged-Metadata-Interop"/>
     <Communication>
         <SubNetwork name="ProcessBus" desc="ARStack untagged Ethernet SV laboratory profile" type="8-MMS">
             <ConnectedAP iedName="ARSTACK_MU01" apName="LD0">
@@ -36,7 +36,7 @@
                             <FCDA ldInst="MU01" prefix="" lnClass="TVTR" lnInst="4" doName="VolSv" daName="q" fc="MX"/>
                         </DataSet>
                         <SampledValueControl multicast="true" name="MSVCB01" datSet="PhsMeas1" confRev="1" smvID="ARSTACK_SV01" smpRate="4000" smpMod="SmpPerSec" nofASDU="1">
-                            <SmvOpts refreshTime="false" sampleSynchronized="true" sampleRate="false" dataSet="false" security="false" synchSourceId="false"/>
+                            <SmvOpts refreshTime="false" sampleSynchronized="true" sampleRate="true" dataSet="true" security="false" synchSourceId="false"/>
                         </SampledValueControl>
                     </LN0>
                     <LN lnType="CTR-P" lnClass="TCTR" inst="1"/>

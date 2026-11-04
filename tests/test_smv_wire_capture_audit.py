@@ -17,15 +17,21 @@ def tlv(tag, value):
     size = bytes([n]) if n < 128 else bytes([0x82]) + n.to_bytes(2, "big")
     return bytes([tag]) + size + value
 
-def packet(seq=0, change=0, quality=0, samples=None):
+def packet(seq=0, change=0, quality=0, samples=None, metadata=False, synch=1):
     values = samples if samples is not None else [1000 * i + change for i in range(8)]
     payload = b"".join(struct.pack(">iI", value, quality) for value in values)
-    asdu = tlv(0x30,
-               tlv(0x80, b"ARSTACK_SV01") +
-               tlv(0x82, seq.to_bytes(2, "big")) +
-               tlv(0x83, b"\x01") +
-               tlv(0x85, b"\x01") +
-               tlv(0x87, payload))
+    fields = tlv(0x80, b"ARSTACK_SV01")
+    if metadata:
+        fields += tlv(0x81, b"ARSTACK_MU01MU01/LLN0$PhsMeas1")
+    fields += (tlv(0x82, seq.to_bytes(2, "big")) +
+               tlv(0x83, b"\x00\x00\x00\x01") +
+               tlv(0x85, bytes([synch])))
+    if metadata:
+        fields += tlv(0x86, b"\x0f\xa0")
+    fields += tlv(0x87, payload)
+    if metadata:
+        fields += tlv(0x88, b"\x00\x01")
+    asdu = tlv(0x30, fields)
     pdu = tlv(0x60, tlv(0x80, b"\x01") + tlv(0xa2, asdu))
     eth = bytes.fromhex("011ccd04000102000000000188ba")
     return eth + struct.pack(">HHHH", 0x4000, len(pdu) + 8, 0, 0) + pdu
@@ -47,6 +53,77 @@ class WireAuditTests(unittest.TestCase):
         self.assertEqual(len(parsed["channels"]), 8)
         self.assertEqual(parsed["channels"][7], (7000, 0x12345678))
         self.assertEqual(parsed["synch"], 1)
+
+    def test_metadata_enabled_profile_and_strict_gate(self):
+        decoded = module.decode_frame(packet(42, metadata=True, synch=0))
+        self.assertEqual(decoded["confRev"], 1)
+        self.assertEqual(decoded["smpRate"], 4000)
+        self.assertEqual(decoded["smpMod"], 1)
+        self.assertEqual(decoded["dataSet"], "ARSTACK_MU01MU01/LLN0$PhsMeas1")
+        self.assertIsNone(decoded["gmIdentity"])
+        with tempfile.TemporaryDirectory() as directory:
+            good = Path(directory) / "metadata.pcap"
+            write_pcap(good, [(10 + i / 4000, packet(i, metadata=True, synch=0))
+                              for i in range(12)])
+            report = module.analyze(good, 0x4000, "ARSTACK_SV01", 4000, .002, 4000,
+                                    require_metadata=True, require_unsynchronized=True)
+            self.assertEqual(report["status"], "PASS_PCAPPARSER_ONLY", report["blocking_findings"])
+            self.assertEqual(report["optional_asdu_field_presence"]["smpRate"], 12)
+
+            missing = Path(directory) / "legacy.pcap"
+            write_pcap(missing, [(10 + i / 4000, packet(i))
+                                 for i in range(12)])
+            legacy = module.analyze(missing, 0x4000, "ARSTACK_SV01", 4000,
+                                    .002, 4000, require_metadata=True)
+            self.assertEqual(legacy["status"], "FAIL")
+            self.assertTrue(any("smpRate missing" in x for x in legacy["blocking_findings"]))
+            not_synchronized = module.analyze(missing, 0x4000, "ARSTACK_SV01", 4000,
+                                              .002, 4000, require_unsynchronized=True)
+            self.assertEqual(not_synchronized["status"], "FAIL")
+
+    def test_standard_fixed_width_rejects_bad_metadata(self):
+        bad = packet(42).replace(b"\x83\x04\x00\x00\x00\x01",
+                                 b"\x83\x01\x01")
+        with self.assertRaises(ValueError):
+            module.decode_frame(bad)
+
+    def test_untagged_lab_scl_metadata_selection(self):
+        import xml.etree.ElementTree as ET
+        root = ET.parse(ROOT / "apps/arstack_studio/templates/arstack_4i4v_untagged_lab.scd").getroot()
+        ns = {"scl": "http://www.iec.ch/61850/2003/SCL"}
+        ctrl = root.find(".//scl:SampledValueControl", ns)
+        self.assertEqual(ctrl.get("smvID"), "ARSTACK_SV01")
+        self.assertEqual(ctrl.get("smpRate"), "4000")
+        self.assertEqual(ctrl.get("smpMod"), "SmpPerSec")
+        options = ctrl.find("scl:SmvOpts", ns)
+        self.assertEqual(options.get("dataSet"), "true")
+        self.assertEqual(options.get("sampleRate"), "true")
+        self.assertEqual(options.get("synchSourceId"), "false")
+        self.assertEqual(len(root.findall(".//scl:DataSet/scl:FCDA", ns)), 16)
+
+    def test_priority_tagged_quick_start_metadata_is_deliverable(self):
+        import xml.etree.ElementTree as ET
+        ns = {"scl": "http://www.iec.ch/61850/2003/SCL"}
+        path = ROOT / "apps/arstack_studio/templates/arstack_4i4v_9-2le_metadata_lab.scd"
+        root = ET.parse(path).getroot()
+        control = root.find(".//scl:SampledValueControl", ns)
+        opts = control.find("scl:SmvOpts", ns)
+        self.assertEqual(control.get("smvID"), "ARSTACK_SV01")
+        self.assertEqual(control.get("smpRate"), "4000")
+        self.assertEqual(opts.get("sampleRate"), "true")
+        self.assertEqual(opts.get("dataSet"), "true")
+        self.assertEqual(opts.get("synchSourceId"), "false")
+        address = root.find(".//scl:SMV/scl:Address", ns)
+        fields = {x.get("type"): x.text for x in address}
+        self.assertEqual(fields["VLAN-ID"], "0")
+        self.assertEqual(fields["VLAN-PRIORITY"], "4")
+        self.assertEqual(fields["APPID"], "4000")
+        self.assertEqual(len(root.findall(".//scl:DataSet/scl:FCDA", ns)), 16)
+        # Old strict 9-2LE reference must remain opt-in and unmodified.
+        legacy = ET.parse(ROOT / "apps/arstack_studio/templates/arstack_4i4v_9-2le_reference.scd")
+        legacyopts = legacy.getroot().find(".//scl:SmvOpts", ns)
+        self.assertEqual(legacyopts.get("sampleRate"), "false")
+        self.assertEqual(legacyopts.get("dataSet"), "false")
 
     def test_continuous_stream_and_wrap(self):
         with tempfile.TemporaryDirectory() as directory:

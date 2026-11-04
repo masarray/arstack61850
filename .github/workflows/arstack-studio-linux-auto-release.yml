@@ -74,7 +74,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
         run: |
-          gh workflow run arstack-studio-linux-appimage.yml \
+          gh workflow run arstack-studio-linux-release-publish.yml \
             --repo "$GITHUB_REPOSITORY" --ref main \
             --field release_tag="$TAG"
           echo "Dispatched Linux build for release tag: $TAG"

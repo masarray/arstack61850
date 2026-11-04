@@ -4,13 +4,19 @@
 
 #include "DeviceIoWorker.hpp"
 #include "FirmwareManager.hpp"
+#include "FirmwareWorker.hpp"
 #include "SclProfileModel.hpp"
 #include "SmartSessionController.hpp"
 #include "StudioDeviceController.hpp"
 
 #include <QCoreApplication>
 #include <QDebug>
+#include <QEventLoop>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QStringList>
+#include <QThread>
+#include <QTimer>
 
 #ifndef ARSTACK_STUDIO_VERSION
 #define ARSTACK_STUDIO_VERSION "0.1.0"
@@ -20,6 +26,14 @@ class DeterministicSessionHarness final {
 public:
     static int run(int argc, char* argv[]) {
         QCoreApplication app(argc, argv);
+        // A real OS child ensures timeout/cancel tests exercise QProcess
+        // termination rather than a synthetic boolean-only worker model.
+        if (app.arguments().contains(QStringLiteral("--firmware-worker-hang-child"))) {
+            QThread::msleep(8000);
+            return 0;
+        }
+        if (app.arguments().contains(QStringLiteral("--firmware-worker-fast-child")))
+            return 0;
 
         struct CaseResult {
             const char* name;
@@ -27,6 +41,13 @@ public:
         };
 
         const CaseResult cases[] = {
+            {"dual-revision catalog selects only qualified silicon", revisionCatalogFailClosed()},
+            {"firmware timeout retains port until flasher exits", firmwarePortReleaseWaitsForWorker()},
+            {"firmware update waits for fresh SV and PTP STOP readback", firmwareStopProofPreventsEarlyFlash()},
+            {"retry after unverified STOP cannot probe ROM without renewed consent", unverifiedFirmwareRetryNeverProbesRom()},
+            {"slow firmware STOP suspends ordinary health teardown, resumes afterward", maintenanceStopDoesNotTriggerHealthDisconnect()},
+            {"firmware STOP proof readbacks survive M4 exclusive retirement", maintenanceProofReadbackSurvivesM4Retirement()},
+            {"real timed-out firmware subprocess retires before COM release", firmwareWorkerTimeoutAwaitsProcessExit()},
             {"current identity -> READY without recovery", currentIdentityNeverRecovers()},
             {"legacy identity -> firmware update", legacyIdentityOffersUpdate()},
             {"same version missing build ID -> READY with update suggestion", sameVersionMissingBuildOffersUpdate()},
@@ -128,6 +149,234 @@ public:
     }
 
 private:
+    static bool firmwareWorkerTimeoutAwaitsProcessExit() {
+        FirmwareWorker worker;
+        worker.initialize();
+        if (worker.process_ == nullptr) return false;
+
+        QEventLoop loop;
+        QTimer deadline;
+        deadline.setSingleShot(true);
+        QObject::connect(&deadline, &QTimer::timeout, &loop, &QEventLoop::quit);
+
+        bool started = false;
+        bool timedOutAfterExit = false;
+        bool restartedCleanly = false;
+        bool unexpectedTerminal = false;
+        int terminalCount = 0;
+        QObject::connect(&worker, &FirmwareWorker::operationStarted, &loop,
+                         [&](const quint64 generation) {
+            if (generation == 41) started = true;
+        });
+        QObject::connect(&worker, &FirmwareWorker::operationTimedOut, &loop,
+                         [&](const quint64 generation) {
+            ++terminalCount;
+            timedOutAfterExit = generation == 41 && started &&
+                worker.process_->state() == QProcess::NotRunning &&
+                !worker.operationActive_ && worker.generation_ == 0;
+            loop.quit();
+        });
+        QObject::connect(&worker, &FirmwareWorker::operationFinished, &loop,
+                         [&](const quint64 generation, const int code, const bool normal) {
+            ++terminalCount;
+            if (generation == 42) {
+                restartedCleanly = code == 0 && normal &&
+                    worker.process_->state() == QProcess::NotRunning &&
+                    !worker.operationActive_;
+            } else {
+                unexpectedTerminal = true;
+            }
+            loop.quit();
+        });
+        QObject::connect(&worker, &FirmwareWorker::operationLaunchFailed, &loop,
+                         [&](quint64, const QString&) { unexpectedTerminal = true; loop.quit(); });
+        QObject::connect(&worker, &FirmwareWorker::operationLaunchTimedOut, &loop,
+                         [&](quint64) { unexpectedTerminal = true; loop.quit(); });
+        QObject::connect(&worker, &FirmwareWorker::operationCancelled, &loop,
+                         [&](quint64) { unexpectedTerminal = true; loop.quit(); });
+
+        const QString executable = QCoreApplication::applicationFilePath();
+        const QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        worker.startOperation(41, executable, {QStringLiteral("--firmware-worker-hang-child")},
+                              env, 3500, 150);
+        deadline.start(5500);
+        loop.exec();
+        deadline.stop();
+        if (!timedOutAfterExit || unexpectedTerminal || terminalCount != 1) {
+            worker.shutdown();
+            return false;
+        }
+
+        // The worker must accept a second operation only after the first
+        // process has exited and its generation has been fully retired.
+        worker.startOperation(42, executable, {QStringLiteral("--firmware-worker-fast-child")},
+                              env, 3500, 3500);
+        deadline.start(5500);
+        loop.exec();
+        deadline.stop();
+        worker.shutdown();
+        return restartedCleanly && !unexpectedTerminal && terminalCount == 2;
+    }
+
+
+    static bool maintenanceProofReadbackSurvivesM4Retirement() {
+        Fixture f;
+        if (!f.profileReady) return false;
+        seedVerified(f, identity(), QStringLiteral("COM7"), false);
+        auto& d = f.device;
+        d.ioWorkerReady_ = true;
+        d.firmwareQuiescenceActive_ = true;
+        d.firmwareQuiescenceSession_ = d.sessionGeneration_;
+        d.firmwareQuiescenceBoot_ = d.identity_.bootId;
+        d.firmwareSvStopAck_ = true;
+        d.ptpStartStage_ = DeviceController::PtpStartStage::awaiting_stop_readback;
+        d.ptpRunning_ = true;
+        d.m4ScenarioRetiring_ = true;
+        d.deferredShow_ = true;
+        d.deferredPtpShow_ = true;
+        d.deferredProfileShow_ = true;
+        d.flushDeferredReadbacks();
+        const bool waitForSerialRetirement =
+            d.deferredShow_ && d.deferredPtpShow_ &&
+            !d.firmwareQuiescenceVerified();
+        d.m4ScenarioRetiring_ = false;
+        d.flushDeferredReadbacks();
+        const bool proofsRetried =
+            !d.deferredShow_ && !d.deferredPtpShow_ &&
+            !d.deferredProfileShow_ &&
+            d.ptpStartStage_ == DeviceController::PtpStartStage::awaiting_stop_readback &&
+            !d.firmwareQuiescenceVerified();
+        d.endFirmwareQuiescence();
+        return waitForSerialRetirement && proofsRetried;
+    }
+
+    static bool unverifiedFirmwareRetryNeverProbesRom() {
+        Fixture f;
+        if (!f.profileReady) return false;
+        auto& s = f.session;
+        s.updatePort_ = QStringLiteral("COM7");
+        s.updateExpectedDeviceId_ = QStringLiteral("A1B2C3D4E5F6");
+        s.setupError_ = true;
+        const bool accepted = s.retryFirmwareUpdate();
+        return !accepted && !s.updateRequested_ &&
+            s.portOwner_ != SmartSessionController::PortOwner::firmwareTool &&
+            !f.firmware.busy_ && !f.firmware.targetVerified_ &&
+            s.lastFirmwareUpdateResult_.contains(QStringLiteral("identity was lost"),
+                Qt::CaseInsensitive);
+    }
+
+    static bool maintenanceStopDoesNotTriggerHealthDisconnect() {
+        Fixture f;
+        if (!f.profileReady) return false;
+        seedVerified(f, identity(), QStringLiteral("COM7"), false);
+        auto& d = f.device;
+        d.controlHealthTimer_.stop();
+        d.controlResponsive_ = true;
+        d.healthProbeOutstanding_ = true;
+        d.missedHealthReplies_ = 1;
+        d.firmwareQuiescenceActive_ = true;
+        d.firmwareQuiescenceSession_ = d.sessionGeneration_;
+        d.firmwareQuiescenceBoot_ = d.identity_.bootId;
+        bool failed = false;
+        QObject::connect(&d, &StudioDeviceController::controlHealthFailed, &d,
+                         [&failed] { failed = true; });
+        // The same two health ticks that previously tore down COM must not
+        // compete with supervised STOP. No fake STOP proof is synthesized.
+        d.serviceControlHealth();
+        d.serviceControlHealth();
+        const bool protectedDuringStop =
+            !failed && d.connected_ && d.deviceVerified_ &&
+            d.controlResponsive_ && d.missedHealthReplies_ == 0 &&
+            !d.healthProbeOutstanding_ && !d.firmwareQuiescenceVerified();
+        const bool boundedProof =
+            DeviceController::firmwarePtpStopProofDeadlineMs() == 40000 &&
+            SmartSessionController::firmwareVerifiedStopDeadlineMs() == 45000 &&
+            SmartSessionController::firmwareTotalDeadlineMs() == 300000;
+        d.endFirmwareQuiescence();
+        // Ordinary health monitoring resumes on the original controller.
+        // An unresponsive board is still rejected outside maintenance.
+        d.healthProbeOutstanding_ = true;
+        d.serviceControlHealth();
+        return protectedDuringStop && boundedProof && !failed &&
+            d.missedHealthReplies_ == 1 && !d.controlResponsive_;
+    }
+
+    static bool firmwareStopProofPreventsEarlyFlash() {
+        Fixture f;
+        if (!f.profileReady) return false;
+        auto stale = identity();
+        stale.buildId = QStringLiteral("fedcba9876543210");
+        seedVerified(f, stale, QStringLiteral("COM7"), false);
+        auto& d = f.device;
+        auto& s = f.session;
+        // Reproduce field condition: not RUNNING, but a stale SV START
+        // transaction and an unverified PTP STOP block the GUI path.
+        d.ioWorkerReady_ = true;
+        d.ptpAvailable_ = true;
+        d.ptpRunning_ = true;
+        d.ptpStartStage_ = DeviceController::PtpStartStage::stop_unconfirmed;
+        d.scenarioStage_ = DeviceController::ScenarioStage::awaiting_commit;
+        d.deferredShow_ = true;
+        d.deferredPtpShow_ = true;
+        d.deferredProfileShow_ = true;
+        const bool started = s.beginFirmwareUpdate();
+        const bool safeStage = started && s.updateRequested_ &&
+            s.updateStage_ == SmartSessionController::UpdateStage::stopping &&
+            s.portOwner_ == SmartSessionController::PortOwner::deviceSession &&
+            d.scenarioStage_ == DeviceController::ScenarioStage::idle &&
+            !d.deferredShow_ && !d.deferredPtpShow_ &&
+            !d.deferredProfileShow_ &&
+            !d.firmwareQuiescenceVerified() && !f.firmware.busy_;
+        if (!safeStage) {
+            s.updateRequested_ = false;
+            d.endFirmwareQuiescence();
+            return false;
+        }
+
+        d.processLine(QStringLiteral("STOP accepted: SV transmission suppressed"));
+        // SV STOP accepted is insufficient without a fresh board SHOW.
+        const bool ackOnlyBlocked = d.firmwareSvStopAck_ &&
+            !d.firmwareQuiescenceVerified();
+        d.processLine(QStringLiteral(
+            "SVLIFE state=STOPPED stop_cause=OPERATOR_STOP stop_seq=1"));
+        const bool stillWaitingForPtp = d.firmwareSvStoppedReadback_ &&
+            !d.firmwareQuiescenceVerified();
+        d.processLine(QStringLiteral("PTP stop requested"));
+        d.processLine(QStringLiteral(
+            "PTP status=STOPPED Announce=0 Sync=0 FollowUp=0 PdelayFrames=0 TXfail=0"));
+        const bool proof = d.firmwareQuiescenceVerified();
+        d.ptpRunning_ = true;
+        const bool rejectsReactivation = !d.firmwareQuiescenceVerified();
+        s.updateRequested_ = false;
+        s.firmwareTotalTimer_.stop();
+        d.endFirmwareQuiescence();
+        return ackOnlyBlocked && stillWaitingForPtp && proof &&
+            rejectsReactivation && !d.firmwareQuiescenceVerified();
+    }
+
+    static bool revisionCatalogFailClosed() {
+        FirmwareManager firmware;
+        firmware.revisionCatalogAvailable_ = true;
+        firmware.revisionImages_ = {
+            {QStringLiteral("pre-v3"), QStringLiteral("legacy.bin"), QStringLiteral("a"), 100, 199},
+            {QStringLiteral("v3.x"), QStringLiteral("v3.bin"), QStringLiteral("b"), 302, 302},
+        };
+        const bool legacy = firmware.selectFirmwareForRevision(1, 3) &&
+            firmware.revisionPolicy_ == QStringLiteral("pre-v3") &&
+            firmware.firmwareImagePath_ == QStringLiteral("legacy.bin");
+        const bool v3 = firmware.selectFirmwareForRevision(3, 2) &&
+            firmware.revisionPolicy_ == QStringLiteral("v3.x") &&
+            firmware.firmwareImagePath_ == QStringLiteral("v3.bin");
+        const bool rejectsUnknown = !firmware.selectFirmwareForRevision(3, 1) &&
+            !firmware.selectFirmwareForRevision(4, 0);
+        firmware.revisionImages_.push_back(
+            {QStringLiteral("overlap"), QStringLiteral("duplicate.bin"), QStringLiteral("c"), 302, 302});
+        const bool rejectsOverlap = !firmware.selectFirmwareForRevision(3, 2);
+        const bool deadline = SmartSessionController::firmwareTotalDeadlineMs() == 300000;
+        firmware.shutdown();
+        return legacy && v3 && rejectsUnknown && rejectsOverlap && deadline;
+    }
+
     struct Fixture {
         SclProfileModel profiles;
         FirmwareManager firmware;
@@ -140,6 +389,25 @@ private:
             firmware.firmwareBuildId_ = QStringLiteral("0123456789abcdef");
             firmware.bundleReady_ = true;
             profileReady = profiles.loadReferenceTemplate();
+            if (profileReady) {
+                // Production Quick Start must compile the VLAN0/PCP4 metadata
+                // SCL, NOT silently reuse the older no-datSet/no-rate artifact.
+                const auto metadata = profiles.selectedProfile();
+                profileReady =
+                    metadata.value(QStringLiteral("svId")).toString() == QStringLiteral("ARSTACK_SV01") &&
+                    metadata.value(QStringLiteral("appId")).toInt() == 0x4000 &&
+                    metadata.value(QStringLiteral("vlanPresent")).toBool() &&
+                    metadata.value(QStringLiteral("vlanId")).toInt() == 0 &&
+                    metadata.value(QStringLiteral("vlanPriority")).toInt() == 4 &&
+                    metadata.value(QStringLiteral("includeDataSet")).toBool() &&
+                    metadata.value(QStringLiteral("includeSampleRate")).toBool() &&
+                    metadata.value(QStringLiteral("wireSmpRate")).toULongLong() == 4000ULL &&
+                    metadata.value(QStringLiteral("wireSmpMod")).toInt() == 1 &&
+                    metadata.value(QStringLiteral("payloadBytes")).toULongLong() == 64ULL &&
+                    metadata.value(QStringLiteral("channelLeafCount")).toULongLong() == 16ULL;
+                if (!profileReady)
+                    qCritical() << "Quick Start semantic SCL metadata regression";
+            }
             session.setProfiles(&profiles);
             session.setFirmware(&firmware);
             session.setDevice(&device);
@@ -149,6 +417,27 @@ private:
             firmware.shutdown();
         }
     };
+
+    static bool firmwarePortReleaseWaitsForWorker() {
+        Fixture fixture;
+        quiesce(fixture.session, fixture.device);
+        auto& s = fixture.session;
+        auto& f = fixture.firmware;
+        s.updateRequested_ = true;
+        s.updateStage_ = SmartSessionController::UpdateStage::flashing;
+        s.portOwner_ = SmartSessionController::PortOwner::firmwareTool;
+        f.busy_ = true;
+        s.latchFirmwareFailure(QStringLiteral("Deadline reached"));
+        const bool retained = s.portOwner_ == SmartSessionController::PortOwner::firmwareTool &&
+            s.firmwareProcessRetirementPending_ && !s.updateRequested_ &&
+            !s.startDeviceDiscovery();
+        f.busy_ = false;
+        emit f.stateChanged(); // Emulate QProcess cancellation acknowledgement.
+        const bool released = !s.firmwareProcessRetirementPending_ &&
+            s.portOwner_ == SmartSessionController::PortOwner::none &&
+            s.setupError_;
+        return retained && released;
+    }
 
     static void quiesce(SmartSessionController& session, StudioDeviceController& device) {
         session.discoveryTimer_.stop();

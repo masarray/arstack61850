@@ -78,11 +78,11 @@ ByteVector goose_frame() {
 
 ByteVector sampled_values_frame() {
     return from_hex(
-        "010CCD040001020000000002810080C888BA4001006800000000"
-        "605E800101A259305780134D55303146312F4C4C4E30244D535643423031"
-        "81144D55303146312F4C4C4E30245068734D65617331820178830103"
+        "010CCD040001020000000002810080C888BA4001006D00000000"
+        "6063800101A25E305C80134D55303146312F4C4C4E30244D535643423031"
+        "81144D55303146312F4C4C4E30245068734D6561733182020078830400000003"
         "84086A2BDFE40000000085010286020FA087100000006400000001000000C8"
-        "00000003880101");
+        "0000000388020001");
 }
 
 std::vector<ar::iec61850::capture::PcapPacket> reference_packets() {
@@ -129,6 +129,23 @@ void pcap_analyzer_reports_exact_goose_and_sv_round_trips() {
     CHECK(json.find("\"passed\": true") != std::string::npos);
     CHECK(json.find("GOOSE") != std::string::npos);
     CHECK(json.find("Sampled Values") != std::string::npos);
+}
+
+void pcap_analyzer_detects_old_noncanonical_sv_fixed_field_widths() {
+    using namespace ar::iec61850;
+    const auto path = std::filesystem::path{ARIEC61850_SOURCE_DIR} /
+        "tests/fixtures/process_bus_csharp_vectors.pcap";
+    const auto historical = evidence::PcapEquivalenceAnalyzer::analyze(path);
+    // Preserve historical PCAP evidence unchanged. Legacy minimal-width SV
+    // decodes, but cannot exactly re-encode under the corrected IEC contract.
+    CHECK(!historical.passed());
+    CHECK(historical.packet_count == 2U);
+    CHECK(historical.sampled_values_packet_count == 1U);
+    CHECK(historical.malformed_packet_count == 0U);
+    CHECK(historical.reencode_mismatch_count == 1U);
+    CHECK(historical.exact_reencode_match_count == 1U);
+    CHECK(historical.packets[1].decoded);
+    CHECK(!historical.packets[1].exact_reencode_match);
 }
 
 void pcap_analyzer_rejects_malformed_process_bus_packets() {
@@ -182,7 +199,8 @@ void pcap_analyzer_requires_at_least_one_process_bus_packet() {
 int main() {
     const std::vector<std::pair<std::string, std::function<void()>>> tests{
         {"PCAP canonical round trip", pcap_reader_writer_preserves_canonical_process_bus_evidence},
-        {"GOOSE and SV PCAP equivalence", pcap_analyzer_reports_exact_goose_and_sv_round_trips},
+        {"GOOSE and canonical SV PCAP equivalence", pcap_analyzer_reports_exact_goose_and_sv_round_trips},
+        {"Historical SV PCAP is decoded but noncanonical", pcap_analyzer_detects_old_noncanonical_sv_fixed_field_widths},
         {"Malformed process-bus evidence", pcap_analyzer_rejects_malformed_process_bus_packets},
         {"PCAP allocation bounds", pcap_reader_rejects_unbounded_allocation_lengths},
         {"Require process-bus evidence", pcap_analyzer_requires_at_least_one_process_bus_packet}};

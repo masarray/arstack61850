@@ -468,6 +468,9 @@ void DeviceController::connectWorkerSignals() {
             !m4ScenarioRetiring_) return;
         m4ScenarioRetiring_ = false;
         emit m4DeploymentChanged();
+        // If an update was waiting for the last old CFG write to retire,
+        // fresh STOP evidence may now complete its verified handoff.
+        if (firmwareQuiescenceActive_) emit firmwareQuiescenceChanged();
     });
 
     connect(ioWorker_, &DeviceIoWorker::commandRejected, this,
@@ -1811,6 +1814,61 @@ bool DeviceController::startPtp() {
     }
     return sendCommand(QStringLiteral("PTP START"));
 }
+bool DeviceController::beginFirmwareQuiescence() {
+    if (!connected_ || !deviceVerified_ || !ioWorkerReady_ || sessionGeneration_ == 0 ||
+        identity_.bootId.isEmpty()) {
+        setError(QStringLiteral("Firmware update requires a connected, verified board."));
+        return false;
+    }
+
+    // An unfinished PROFILE/CFG transaction can keep the PTP STOP readback
+    // deferred until its deadline. Retire that local work before STOP, even
+    // when RUNNING is false (START may still be pending).
+    endFirmwareQuiescence();
+    if (profileDeploying_) abandonProfileDeployment();
+    firmwareQuiescenceActive_ = true;
+    firmwareQuiescenceSession_ = sessionGeneration_;
+    firmwareQuiescenceBoot_ = identity_.bootId;
+    // Old PROFILE/SHOW readbacks belong to the pre-update session. Priority
+    // STOP retires queued ordinary work in DeviceIoWorker; clear its facade
+    // coalescing flags too, or a stale PTP SHOW can prevent maintenance proof
+    // while triggering a spurious firmware-safety error toast.
+    deferredShow_ = false;
+    deferredProfileShow_ = false;
+    deferredPtpShow_ = false;
+
+    // Explicit operator-authorized STOP for BOTH services, independent of
+    // cached telemetry. STOP preempts pending SV START in the serial worker.
+    const bool svAccepted = stop();
+    const bool ptpAccepted = svAccepted && stopPtp();
+    if (!svAccepted || !ptpAccepted) {
+        endFirmwareQuiescence();
+        setError(QStringLiteral(
+            "Could not request verified SV/PTP STOP. Firmware write remains blocked."));
+        return false;
+    }
+    return true;
+}
+
+void DeviceController::endFirmwareQuiescence() noexcept {
+    firmwareQuiescenceActive_ = false;
+    firmwareSvStopAck_ = false;
+    firmwareSvStoppedReadback_ = false;
+    firmwarePtpStoppedReadback_ = false;
+    firmwareQuiescenceSession_ = 0;
+    firmwareQuiescenceBoot_.clear();
+}
+
+bool DeviceController::firmwareQuiescenceVerified() const noexcept {
+    return firmwareQuiescenceActive_ && connected_ && deviceVerified_ &&
+        firmwareQuiescenceSession_ == sessionGeneration_ &&
+        firmwareQuiescenceBoot_ == identity_.bootId &&
+        firmwareSvStopAck_ && firmwareSvStoppedReadback_ &&
+        firmwarePtpStoppedReadback_ && !running_ && !ptpRunning_ && !ptpStarting() &&
+        scenarioStage_ == ScenarioStage::idle && !profileDeploying_ &&
+        !m4Deploying_ && !m4ScenarioApplying_ && !m4ScenarioRetiring_;
+}
+
 bool DeviceController::stopPtp() {
     if (!connected_ || !ioWorkerReady_ || !deviceVerified_) {
         setError(QStringLiteral("Connect the verified ESP32-P4 before stopping PTP."));
@@ -1878,8 +1936,14 @@ bool DeviceController::beginPtpStopVerification() {
         return false;
     }
     // Absolute STOP readback deadline; STOP itself uses the worker safety lane.
-    ptpStartTimer_.start(profileDeploying_ || scenarioStage_ != ScenarioStage::idle
-        ? 12000 : 5000);
+    // A verified maintenance STOP may follow a slow legacy PROFILE SHOW
+    // response and an already-backlogged UART console. The field trace
+    // showed the STOP ACK arriving ~12 s after dispatch; 5/12 s cut it off.
+    // Still fail closed on a bounded timer; supervisor owns the 45 s
+    // whole-stage limit and never flashes without fresh STOP proof.
+    ptpStartTimer_.start(firmwareQuiescenceActive_
+        ? firmwarePtpStopProofDeadlineMs()
+        : (profileDeploying_ || scenarioStage_ != ScenarioStage::idle ? 12000 : 5000));
     return true;
 }
 
@@ -2027,6 +2091,12 @@ void DeviceController::advancePtpStartup(const QString& line) {
             resetPtpStartup();
             ptpRunning_ = false;
             ptpStatus_ = QStringLiteral("PTP stopped — confirmed by board");
+            if (firmwareQuiescenceActive_ &&
+                firmwareQuiescenceSession_ == sessionGeneration_ &&
+                firmwareQuiescenceBoot_ == identity_.bootId) {
+                firmwarePtpStoppedReadback_ = true;
+                emit firmwareQuiescenceChanged();
+            }
             emit ptpStateChanged();
         } else if (!ptpStopPollTimer_.isActive()) {
             // Firmware stop is asynchronous. Poll on Qt timers without
@@ -2213,6 +2283,18 @@ bool DeviceController::sendQuietCommand(const QString& command) {
 bool DeviceController::sendCommandBatch(const QStringList& commands, const bool quiet, const bool exclusive) {
     const bool single = !exclusive && commands.size() == 1;
     const QString onlyCommand = single ? commands.constFirst() : QString{};
+    // Firmware STOP proof owns the transition to ROM mode. Never allow
+    // a queued UI START/CONFIG transaction to rearm the board in this window.
+    if (firmwareQuiescenceActive_ &&
+        (!single || (onlyCommand != QStringLiteral("STOP") &&
+                     onlyCommand != QStringLiteral("PTP STOP") &&
+                     onlyCommand != QStringLiteral("SHOW") &&
+                     onlyCommand != QStringLiteral("PTP SHOW") &&
+                     onlyCommand != QStringLiteral("HEARTBEAT") &&
+                     !onlyCommand.startsWith(QStringLiteral("PROFILE BINABORT "))))) {
+        setError(QStringLiteral("Firmware update is safely stopping board services."));
+        return false;
+    }
     // PTP STOP has higher safety priority than non-mutating MU inspection;
     // never let the reader postpone STOP readback beyond its own deadline.
     if (m4BoardInspecting_ &&
@@ -2322,6 +2404,25 @@ void DeviceController::flushDeferredReadbacks() {
         scenarioStage_ != ScenarioStage::idle ||
         !connected_ || !ioWorkerReady_ || ioWorker_ == nullptr || sessionGeneration_ == 0)
         return;
+    if (firmwareQuiescenceActive_) {
+        // The queued STOP-proof SHOW/PTP SHOW were created *after* their
+        // respective current-boot ACKs: entry already discarded all old
+        // deferred reads. During exclusive M4 retirement, preserve these
+        // two proof reads until that serial lease is actually retired.
+        // Never replay unrelated PROFILE SHOW into firmware maintenance.
+        deferredProfileShow_ = false;
+        if (std::exchange(deferredPtpShow_, false) &&
+            ptpStartStage_ == PtpStartStage::awaiting_stop_readback &&
+            !sendQuietCommand(QStringLiteral("PTP SHOW"))) {
+            markPtpStopUnconfirmed(QStringLiteral(
+                "Firmware PTP STOP proof readback could not be queued."));
+        }
+        if (std::exchange(deferredShow_, false) && firmwareSvStopAck_ &&
+            !sendQuietCommand(QStringLiteral("SHOW"))) {
+            setError(QStringLiteral("Firmware SV STOP proof readback could not be queued."));
+        }
+        return;
+    }
     // At most one of each telemetry/readback type. No competing serial writer.
     if (std::exchange(deferredPtpShow_, false)) {
         if (!sendQuietCommand(QStringLiteral("PTP SHOW")) &&
@@ -2884,6 +2985,14 @@ void DeviceController::processLine(const QString& rawLine) {
         // local RUNNING -> STOPPED incident may raise a live alarm.
         setRunning(false); // preserve operatorStopPending_ until edge classification
         operatorStopPending_ = false;
+        if (firmwareQuiescenceActive_ && !forced &&
+            firmwareQuiescenceSession_ == sessionGeneration_ &&
+            firmwareQuiescenceBoot_ == identity_.bootId) {
+            firmwareSvStopAck_ = true;
+            // This SHOW is ordered AFTER STOP on the same serial worker;
+            // a plain STOP log or cached running=false is not stop proof.
+            static_cast<void>(sendQuietCommand(QStringLiteral("SHOW")));
+        }
         if (forced && svUnexpectedStopObserved_ &&
             svStopReason_ != QStringLiteral("RUNTIME_FAULT")) {
             svStopReason_ = QStringLiteral("RUNTIME_FAULT");
@@ -2920,6 +3029,13 @@ void DeviceController::processLine(const QString& rawLine) {
         QStringLiteral("SVLIFE state=(RUNNING|STOPPED) stop_cause=([A-Z_]+) stop_seq=(\\d+)"));
     const auto svLife = kSvLife.match(line);
     if (svLife.hasMatch()) {
+        if (firmwareQuiescenceActive_ && firmwareSvStopAck_ &&
+            firmwareQuiescenceSession_ == sessionGeneration_ &&
+            firmwareQuiescenceBoot_ == identity_.bootId) {
+            firmwareSvStoppedReadback_ =
+                svLife.captured(1) == QStringLiteral("STOPPED");
+            emit firmwareQuiescenceChanged();
+        }
         bool seqOk = false;
         const auto seq = svLife.captured(3).toULongLong(&seqOk);
         if (seqOk && (seq >= lastSvStopSeq_ || !deviceVerified_)) {

@@ -6,10 +6,22 @@ on:
       - 'apps/arstack_studio/**'
       - '.github/workflows/arstack-studio-linux-appimage.yml'
       - 'scripts/install-linux.sh'
+  # When invoked by Native Preview, reuse the exact PR-head firmware
+  # artifact already built in that run. Do not compile a third copy of IDF.
+  workflow_call:
+    inputs:
+      paired_preview:
+        type: boolean
+        required: false
+        default: false
+      release_tag:
+        type: string
+        required: false
+        default: ''
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Existing GitHub release tag to build, test and attach Linux AppImage; blank = build artifact only'
+        description: 'Build and test exact-tag Linux package; publishing is owned by the separate release workflow'
         required: false
         type: string
 
@@ -26,7 +38,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag != '' && inputs.release_tag || github.sha }}
+          # A PR's github.sha is usually a synthetic merge commit. The paired
+          # firmware job uses the real PR HEAD: compile the matching GUI.
+          ref: ${{ (inputs.release_tag != '' && inputs.release_tag) || github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
 
       - name: Confirm release identity before packaging
@@ -106,11 +120,83 @@ jobs:
           shutil.copy2(root/'firmware-manifest.json',output/'firmware-manifest.json')
           (output/'SHA256SUMS.txt').write_text(f"{manifest['sha256']}  {manifest['image']}\n")
           PY
-            curl -fLsS https://github.com/esp-rs/espflash/releases/download/v4.5.0/espflash-x86_64-unknown-linux-gnu.zip -o espflash.zip
-            echo 'dcd7fd822f247df18966935bbb10c7cb4b700c87172349633e9e323ee2542717  espflash.zip' | sha256sum -c -
-            unzip -j espflash.zip 'espflash' -d AppDir/usr/bin/tools
-            chmod +x AppDir/usr/bin/tools/espflash
           fi
+
+      - name: Download matched dual-revision firmware from this exact workflow
+        if: ${{ inputs.paired_preview == true }}
+        uses: actions/download-artifact@v4
+        with:
+          name: arstack-esp32p4-smv-firmware
+          path: firmware-package
+
+      - name: Verify and stage pre-v3 + v3.2 preview firmware
+        if: ${{ inputs.paired_preview == true }}
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test -z "${{ inputs.release_tag }}"
+          test -n "$EXPECTED_SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+          (cd firmware-package && sha256sum -c SHA256SUMS.txt)
+          python3 scripts/validate_esp32p4_revision_catalog.py firmware-package
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, shutil
+          root = pathlib.Path('firmware-package')
+          destination = pathlib.Path('AppDir/usr/bin/firmware')
+          destination.mkdir(parents=True, exist_ok=True)
+          legacy = json.loads((root/'firmware-manifest.json').read_text(encoding='utf-8'))
+          catalog = json.loads((root/'firmware-catalog.json').read_text(encoding='utf-8'))
+          expected = os.environ['EXPECTED_SOURCE_SHA']
+          if not (legacy['sourceCommit'] == catalog['sourceCommit'] == expected):
+              raise SystemExit('Linux preview firmware/GUI commits differ')
+          if (not legacy.get('phaseSyncPreview') or
+              not legacy.get('bootSourceAutostartEnabled') or
+              legacy.get('globalGmTraceabilityPhysicallyProven') is not False or
+              catalog.get('releaseChannel') != 'engineering-preview'):
+              raise SystemExit('Unqualified preview firmware or misleading timing evidence')
+          allowed = {entry['image'] for entry in catalog['images']}
+          allowed.update(('firmware-manifest.json', 'firmware-catalog.json', 'SHA256SUMS.txt'))
+          if any(p.name not in allowed for p in root.iterdir()):
+              raise SystemExit('Unexpected files in firmware preview artifact')
+          for name in sorted(allowed):
+              shutil.copy2(root/name, destination/name)
+          provenance = {
+              'schema': 'arstack.studio.linux.preview-provenance.v1',
+              'sourceCommit': expected,
+              'firmwareBuildId': expected[:16],
+              'revisionProfiles': ['pre-v3', 'v3.2'],
+              'firmwareReleaseChannel': 'engineering-preview',
+              'siliconV3PhysicallyQualified': False,
+              'globalGmTraceabilityPhysicallyProven': False,
+              'stableRelease': False,
+          }
+          (pathlib.Path('AppDir/usr/bin')/'PREVIEW-PROVENANCE.json').write_text(
+              json.dumps(provenance, indent=2, sort_keys=True)+'\n', encoding='utf-8')
+          print('Linux paired preview: exact source + both revision images + provenance PASS')
+          PY
+
+      # Both immutable stable-tag and paired-preview paths share one verified
+      # flasher source. The GUI-only PR AppImage never claims firmware support.
+      - name: Bundle verified Linux espflash v4.5.0
+        if: ${{ inputs.release_tag != '' || inputs.paired_preview == true }}
+        run: |
+          set -euo pipefail
+          mkdir -p AppDir/usr/bin/tools
+          curl -fLsS https://github.com/esp-rs/espflash/releases/download/v4.5.0/espflash-x86_64-unknown-linux-gnu.zip -o espflash.zip
+          echo 'dcd7fd822f247df18966935bbb10c7cb4b700c87172349633e9e323ee2542717  espflash.zip' | sha256sum -c -
+          unzip -j espflash.zip 'espflash' -d AppDir/usr/bin/tools
+          chmod +x AppDir/usr/bin/tools/espflash
+          AppDir/usr/bin/tools/espflash --version
+
+      - name: Check matched Linux preview with the production Studio
+        if: ${{ inputs.paired_preview == true }}
+        env:
+          ARSTACK_STUDIO_FIRMWARE_DIR: ${{ github.workspace }}/AppDir/usr/bin/firmware
+          ARSTACK_STUDIO_ESPFLASH: ${{ github.workspace }}/AppDir/usr/bin/tools/espflash
+        run: |
+          set -euo pipefail
+          QT_QPA_PLATFORM=offscreen xvfb-run -a build-studio-linux/arstack_studio --check-firmware-contract
 
       - name: Bundle Qt and create single-file AppImage
         uses: miurahr/install-linuxdeploy-action@v1.8.0
@@ -140,8 +226,10 @@ jobs:
             xvfb-run -a ./ARStack-Studio-linux-x86_64.AppImage --check-reference-template
           APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen \
             xvfb-run -a ./ARStack-Studio-linux-x86_64.AppImage --check-p0-policy
-          if [ -n "${{ inputs.release_tag }}" ]; then
-            APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen \
+          if [ -n "${{ inputs.release_tag }}" ] || [ "${{ inputs.paired_preview }}" = "true" ]; then
+            # Test real extracted AppImage paths, not a developer-env override.
+            env -u ARSTACK_STUDIO_FIRMWARE_DIR -u ARSTACK_STUDIO_ESPFLASH \
+              APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen \
               xvfb-run -a ./ARStack-Studio-linux-x86_64.AppImage --check-firmware-contract
           fi
           sha256sum ARStack-Studio-linux-x86_64.AppImage > ARStack-Studio-linux-x86_64.sha256
@@ -149,44 +237,10 @@ jobs:
       - name: Upload reviewed Linux artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: arstack-studio-linux-x86_64
+          name: ${{ inputs.paired_preview && 'arstack-studio-linux-esp32p4-dual-preview' || 'arstack-studio-linux-x86_64' }}
           path: |
             ARStack-Studio-linux-x86_64.AppImage
             ARStack-Studio-linux-x86_64.sha256
           if-no-files-found: error
           retention-days: 14
 
-  attach-verified-release:
-    name: Attach tested Linux package to exact release tag
-    needs: appimage
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag != '' }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.release_tag }}
-          fetch-depth: 0
-      - name: Download Linux build that passed the AppImage checks
-        uses: actions/download-artifact@v4
-        with:
-          name: arstack-studio-linux-x86_64
-      - name: Verify tag and release before publishing
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.release_tag }}
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$(git rev-parse "$TAG^{commit}")"
-          git fetch --no-tags origin main
-          git merge-base --is-ancestor "$TAG^{commit}" origin/main || {
-            echo "Release source is not integrated into main; refusing Linux package" >&2
-            exit 1
-          }
-          gh release view "$TAG" --json isDraft,isPrerelease -q 'select(.isDraft==false and .isPrerelease==false)' > release-check.json
-          test -s release-check.json
-          sha256sum -c ARStack-Studio-linux-x86_64.sha256
-          gh release upload "$TAG" \
-            ARStack-Studio-linux-x86_64.AppImage \
-            ARStack-Studio-linux-x86_64.sha256

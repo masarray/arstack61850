@@ -106,6 +106,21 @@ SmartSessionController::SmartSessionController(QObject* parent) : QObject(parent
         reconcile();
     });
 
+    firmwareTotalTimer_.setInterval(firmwareTotalDeadlineMs());
+    firmwareTotalTimer_.setSingleShot(true);
+    connect(&firmwareTotalTimer_, &QTimer::timeout, this, [this] {
+        if (!updateRequested_) return;
+        if (firmware_ != nullptr && firmware_->busy()) {
+            firmwareProcessRetirementPending_ = true;
+            firmware_->cancel();
+        }
+        latchFirmwareFailure(QStringLiteral(
+            "Firmware setup timed out. Studio is stopping the firmware tool; "
+            "the board is not verified. Use Recovery once the operation ends."));
+        emit firmwareUpdateFinished(false);
+        reconcile();
+    });
+
     reconnectTimer_.setInterval(3000);
     reconnectTimer_.setSingleShot(true);
     connect(&reconnectTimer_, &QTimer::timeout, this, [this] {
@@ -143,6 +158,7 @@ void SmartSessionController::shutdown() {
     discoveryTimer_.stop();
     prepareTimer_.stop();
     reconnectTimer_.stop();
+    firmwareTotalTimer_.stop();
     profileSyncTimer_.stop();
     profileRetryTimer_.stop();
     profileSyncTotalTimer_.stop();
@@ -253,7 +269,7 @@ QString SmartSessionController::updateStatus() const {
     if (firmware_ == nullptr) return {};
     switch (updateStage_) {
     case UpdateStage::stopping:
-        return QStringLiteral("Stopping SMV output safely…");
+        return QStringLiteral("Stopping output safely before firmware setup…");
     case UpdateStage::releasingPort:
         return QStringLiteral("Releasing the device serial session before firmware access…");
     case UpdateStage::probing:
@@ -294,6 +310,7 @@ void SmartSessionController::setPortOwner(const PortOwner owner) {
 
 bool SmartSessionController::startDeviceDiscovery() {
     if (device_ == nullptr || portOwner_ == PortOwner::firmwareTool ||
+        firmwareProcessRetirementPending_ || (firmware_ != nullptr && firmware_->busy()) ||
         device_->connected() || device_->discovering()) {
         return false;
     }
@@ -585,22 +602,54 @@ bool SmartSessionController::beginFirmwareReinstall() {
     return beginFirmwareOperation(device_->portName());
 }
 
-bool SmartSessionController::beginFirmwareInstall() {
+bool SmartSessionController::beginFirmwareInstall(const bool supportedBoardAndIsolationConfirmed) {
+    // A blank ROM cannot attest the PCB/PHY model or physical isolation.
+    // A confirmation token is required by the sole C++ authorization owner,
+    // not merely used to disable a button in the presentation layer.
+    if (!supportedBoardAndIsolationConfirmed) return false;
     updateWasOptional_ = false;
     refreshRecoveryOfferFromIdentity();
     if (device_ == nullptr || firmware_ == nullptr || !blankBoardDetected_ ||
         !firmware_->bundleReady() || firmware_->busy() || blankBoardPort_.isEmpty()) {
         return false;
     }
-    return beginFirmwareOperation(blankBoardPort_);
+    // ROM-only recovery is authorized exclusively from this confirmed entry.
+    // An ordinary Retry after lost application identity must never inherit it.
+    return beginFirmwareOperation(blankBoardPort_, true);
 }
 
-bool SmartSessionController::beginFirmwareOperation(const QString& portName) {
+bool SmartSessionController::beginFirmwareOperation(
+    const QString& portName, const bool authorizedBlankBoardRecovery) {
     const QString port = portName.trimmed();
-    if (device_ == nullptr || firmware_ == nullptr || port.isEmpty() || firmware_->busy()) return false;
+    if (firmwareProcessRetirementPending_ && firmware_ != nullptr && !firmware_->busy()) {
+        firmwareProcessRetirementPending_ = false;
+        if (portOwner_ == PortOwner::firmwareTool) setPortOwner(PortOwner::none);
+    }
+    if (device_ == nullptr || firmware_ == nullptr || port.isEmpty() ||
+        firmware_->busy() || firmwareProcessRetirementPending_) return false;
+    // A lost identity after an interrupted STOP is NOT an authorized blank
+    // board. Retry must first re-identify the same physical device and
+    // repeat the supervised STOP, or obtain explicit isolated-ROM recovery
+    // authorization through beginFirmwareInstall(). Never treat COM15 alone
+    // as a reason to reset a potentially autonomous publisher.
+    if (!device_->deviceVerified() &&
+        (!authorizedBlankBoardRecovery || !blankBoardDetected_ ||
+         blankBoardPort_.trimmed().compare(port, Qt::CaseInsensitive) != 0)) {
+        latchFirmwareFailure(QStringLiteral(
+            "Board identity was lost during firmware setup. Reconnect and identify "
+            "the board before retrying; unverified ROM recovery requires explicit "
+            "supported-board and isolated-bench confirmation. No firmware was written."));
+        emit firmwareUpdateFinished(false);
+        reconcile();
+        return false;
+    }
 
     updatePort_ = port;
+    updateExpectedDeviceId_ = device_->deviceVerified() ? device_->deviceId().trimmed() : QString{};
+    updateExpectedBootId_ = device_->deviceVerified() ? device_->bootId().trimmed() : QString{};
+    stoppingPtpForFirmware_ = false;
     updateRequested_ = true;
+    firmwareTotalTimer_.start();
     updateReconnectAttempts_ = 0;
     pendingReleaseGeneration_ = 0;
     profileSyncBootId_.clear();
@@ -609,33 +658,69 @@ bool SmartSessionController::beginFirmwareOperation(const QString& portName) {
     setupErrorStatus_.clear();
     lastFirmwareUpdateResult_.clear();
 
-    if (device_->running()) {
+    if (device_->deviceVerified()) {
+        if (!device_->connected() || portOwner_ != PortOwner::deviceSession) {
+            latchFirmwareFailure(QStringLiteral(
+                "Verified board serial ownership was lost. Firmware write is blocked."));
+            emit firmwareUpdateFinished(false);
+            reconcile();
+            return false;
+        }
+        // Always issue a fresh STOP + readback for BOTH board services.
+        // PREPARING/CFG and STOP_UNVERIFIED are not proof that output is idle.
         updateStage_ = UpdateStage::stopping;
+        stoppingPtpForFirmware_ = true;
         setPresentation(
             QStringLiteral("UPDATING FIRMWARE"),
-            QStringLiteral("Stopping SMV output before firmware installation…"),
+            QStringLiteral("Stopping and verifying SV/PTP on the board…"),
             false,
             false);
-        if (!device_->stop()) {
-            updateRequested_ = false;
-            updateStage_ = UpdateStage::idle;
+        if (!device_->beginFirmwareQuiescence()) {
+            latchFirmwareFailure(QStringLiteral(
+                "The board did not accept the safe SV/PTP stop preflight. "
+                "Nothing was flashed; inspect diagnostics and retry."));
+            emit firmwareUpdateFinished(false);
             reconcile();
             return false;
         }
         return true;
     }
 
+    // Only an explicitly authorized blank-board recovery may probe without
+    // application STOP proof; it still needs ROM identity and isolation gates.
     continueFirmwareUpdate();
     return true;
 }
 
 bool SmartSessionController::retryFirmwareUpdate() {
-    if (device_ == nullptr || firmware_ == nullptr || updatePort_.isEmpty() || firmware_->busy()) return false;
+    if (device_ == nullptr || firmware_ == nullptr || updatePort_.isEmpty() ||
+        firmware_->busy() || (updateRequested_ && updateStage_ != UpdateStage::waitingForBootloader))
+        return false;
+
+    const QString preservedMac = updateExpectedDeviceId_;
+    if (!preservedMac.isEmpty() && device_->deviceVerified() &&
+        !recoveryIdentityMatches(preservedMac, device_->deviceId())) {
+        // An unrelated board might have appeared on the same COM number.
+        return false;
+    }
+
+    if (!updateRequested_) {
+        // A terminal failure restarts through the *same* safe SV/PTP STOP and
+        // port-owner preflight as an initial operator-authorized installation.
+        // Do not bypass active PTP/SV simply because this button says Retry.
+        if (!beginFirmwareOperation(updatePort_)) return false;
+        if (updateExpectedDeviceId_.isEmpty())
+            updateExpectedDeviceId_ = preservedMac;
+        return true;
+    }
+
+    // Explicit user retry after Download-mode guidance. No implicit replay,
+    // and a fresh ROM probe is still required before every write attempt.
     setupError_ = false;
     setupErrorStatus_.clear();
     lastFirmwareUpdateResult_.clear();
     blankBoardDetected_ = false;
-    updateRequested_ = true;
+    firmwareTotalTimer_.start();
     updateReconnectAttempts_ = 0;
     pendingReleaseGeneration_ = 0;
     continueFirmwareUpdate();
@@ -645,8 +730,10 @@ bool SmartSessionController::retryFirmwareUpdate() {
 bool SmartSessionController::cancelFirmwareUpdate() {
     if (!firmwareUpdateCanCancel() || device_ == nullptr) return false;
     reconnectTimer_.stop();
+    firmwareTotalTimer_.stop();
     updateRequested_ = false;
     updateWasOptional_ = false;
+    stoppingPtpForFirmware_ = false;
     updateStage_ = UpdateStage::idle;
     updateReconnectAttempts_ = 0;
     pendingReleaseGeneration_ = 0;
@@ -727,10 +814,12 @@ bool SmartSessionController::startFirmwareProbe() {
 
 void SmartSessionController::continueFirmwareUpdate() {
     if (!updateRequested_ || device_ == nullptr || firmware_ == nullptr) return;
-    if (device_->running()) {
-        updateStage_ = UpdateStage::stopping;
-        return;
+    if (updateStage_ == UpdateStage::stopping) {
+        if (!device_->firmwareQuiescenceVerified()) return;
     }
+    if (device_->connected() && device_->deviceVerified() &&
+        (device_->running() || device_->ptpRunning() || device_->ptpStarting() ||
+         !device_->firmwareQuiescenceVerified())) return;
 
     if (portOwner_ == PortOwner::firmwareTool) {
         static_cast<void>(startFirmwareProbe());
@@ -848,10 +937,15 @@ void SmartSessionController::reconnectDeviceSignals() {
             reconcile();
         });
     });
-    connect(device_, &DeviceController::runningChanged, this, [this] {
+    connect(device_, &DeviceController::runningChanged, this, &SmartSessionController::reconcile);
+    connect(device_, &DeviceController::ptpStateChanged, this, &SmartSessionController::reconcile);
+    connect(device_, &DeviceController::firmwareQuiescenceChanged, this, [this] {
         if (updateRequested_ && updateStage_ == UpdateStage::stopping &&
-            device_ != nullptr && !device_->running()) {
-            QTimer::singleShot(0, this, [this] { continueFirmwareUpdate(); });
+            device_ != nullptr && device_->firmwareQuiescenceVerified()) {
+            QTimer::singleShot(0, this, [this] {
+                if (updateRequested_ && updateStage_ == UpdateStage::stopping)
+                    continueFirmwareUpdate();
+            });
         }
         reconcile();
     });
@@ -863,6 +957,11 @@ void SmartSessionController::reconnectDeviceSignals() {
             return;
         }
         pendingReleaseGeneration_ = 0;
+        // The verified STOP lease ends only AFTER QSerialPort has closed.
+        // Release DeviceController's local mutation guard before the next
+        // firmware boot; retaining it would block START after a successful
+        // update, even though the new board identity is verified.
+        if (device_ != nullptr) device_->endFirmwareQuiescence();
         setPortOwner(PortOwner::none);
         QTimer::singleShot(0, this, [this] { continueFirmwareUpdate(); });
     });
@@ -906,6 +1005,10 @@ void SmartSessionController::reconnectFirmwareSignals() {
     if (firmware_ == nullptr) return;
 
     connect(firmware_, &FirmwareManager::stateChanged, this, [this] {
+        if (firmwareProcessRetirementPending_ && !firmware_->busy()) {
+            firmwareProcessRetirementPending_ = false;
+            if (portOwner_ == PortOwner::firmwareTool) setPortOwner(PortOwner::none);
+        }
         if (!updateRequested_) {
             reconcile();
             return;
@@ -918,6 +1021,19 @@ void SmartSessionController::reconnectFirmwareSignals() {
 
         if (updateStage_ == UpdateStage::probing && !firmware_->busy()) {
             if (firmware_->targetVerified()) {
+                const QString romMac = firmware_->targetDeviceMac();
+                if (romMac.isEmpty() ||
+                    (!updateExpectedDeviceId_.isEmpty() &&
+                     !recoveryIdentityMatches(updateExpectedDeviceId_, romMac))) {
+                    latchFirmwareFailure(QStringLiteral(
+                        "ROM identity does not match the selected ARStack board. No firmware was written."));
+                    emit firmwareUpdateFinished(false);
+                    reconcile();
+                    return;
+                }
+                // A fresh board has no application identity yet. This ROM
+                // eFuse MAC pins its identity for the subsequent boot proof.
+                updateExpectedDeviceId_ = romMac;
                 updateStage_ = UpdateStage::flashing;
                 setPresentation(
                     QStringLiteral("UPDATING FIRMWARE"),
@@ -1155,6 +1271,9 @@ QString SmartSessionController::diagnosticsText() const {
 
 void SmartSessionController::latchFirmwareFailure(QString message) {
     reconnectTimer_.stop();
+    firmwareTotalTimer_.stop();
+    if (device_ != nullptr) device_->endFirmwareQuiescence();
+    stoppingPtpForFirmware_ = false;
     const bool optionalOperation = updateWasOptional_;
     updateRequested_ = false;
     updateWasOptional_ = false;
@@ -1162,7 +1281,15 @@ void SmartSessionController::latchFirmwareFailure(QString message) {
     updateReconnectAttempts_ = 0;
     pendingReleaseGeneration_ = 0;
     blankBoardDetected_ = false;
-    if (portOwner_ == PortOwner::firmwareTool) setPortOwner(PortOwner::none);
+    if (portOwner_ == PortOwner::firmwareTool) {
+        // QProcess::kill is asynchronous. Busy remains true until its finish
+        // signal; releasing the COM lease earlier would permit another owner
+        // while the flasher can still be touching the board.
+        if (firmware_ != nullptr && firmware_->busy())
+            firmwareProcessRetirementPending_ = true;
+        else
+            setPortOwner(PortOwner::none);
+    }
     message = message.trimmed();
     lastFirmwareUpdateResult_ = message.isEmpty()
         ? QStringLiteral("Firmware verification failed; inspect the firmware-service log.")
@@ -1466,6 +1593,15 @@ void SmartSessionController::reconcile() {
     // A completed write must verify the exact bundled build. This remains
     // fail-closed even though a pre-existing compatible build may be used.
     if (updateRequested_ && updateStage_ == UpdateStage::reconnecting) {
+        if ((!updateExpectedDeviceId_.isEmpty() &&
+             !recoveryIdentityMatches(updateExpectedDeviceId_, device_->deviceId())) ||
+            (!updateExpectedBootId_.isEmpty() &&
+             updateExpectedBootId_ == device_->bootId().trimmed())) {
+            latchFirmwareFailure(QStringLiteral("A different or stale device identity appeared after firmware setup. Verification was blocked."));
+            emit firmwareUpdateFinished(false);
+            reconcile();
+            return;
+        }
         if (!firmwareIsCurrent()) {
             const QString observed = deviceFirmwareVersion_.isEmpty()
                 ? QStringLiteral("legacy/unknown firmware")
@@ -1483,6 +1619,11 @@ void SmartSessionController::reconcile() {
             reconcile();
             return;
         }
+        firmwareTotalTimer_.stop();
+        stoppingPtpForFirmware_ = false;
+        // A rebooted, verified board must never inherit a pre-flash
+        // maintenance lock from the old device session.
+        device_->endFirmwareQuiescence();
         updateRequested_ = false;
         updateWasOptional_ = false;
         updateStage_ = UpdateStage::idle;

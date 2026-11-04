@@ -488,6 +488,7 @@ SurfacePanel {
 
     Dialog {
         id: installDialog
+        onOpened: recoveryBoardConfirmed.checked = false
         modal: true
         anchors.centerIn: Overlay.overlay
         width: 408
@@ -507,10 +508,18 @@ SurfacePanel {
             }
             Label {
                 Layout.fillWidth: true
-                text: "Keep USB connected until verification finishes."
+                text: "Keep USB connected. Use only Waveshare ESP32-P4-ETH-M, isolated from energized process-bus equipment."
                 color: ribbon.theme.muted
                 font.family: ribbon.uiFont
                 font.pixelSize: 10
+                wrapMode: Text.WordWrap
+            }
+            CheckBox {
+                id: recoveryBoardConfirmed
+                text: "I confirmed the supported board and safe lab connection"
+                font.family: ribbon.uiFont
+                font.pixelSize: 11
+                checked: false
             }
             RowLayout {
                 Layout.fillWidth: true
@@ -521,8 +530,9 @@ SurfacePanel {
                 }
                 CalmButton {
                     theme: ribbon.theme; uiFont: ribbon.uiFont; text: "Install firmware"; tone: "accent"; implicitWidth: 142
+                    enabled: recoveryBoardConfirmed.checked
                     onClicked: {
-                        if (smartSession.beginFirmwareInstall()) {
+                        if (smartSession.beginFirmwareInstall(recoveryBoardConfirmed.checked)) {
                             ribbon.installPromptDeferred = false
                             installDialog.close()
                         } else controller.showMessage("Firmware installation could not start. Open Tools > Advanced for recovery details.", true)
@@ -545,9 +555,11 @@ SurfacePanel {
             spacing: 12
             Label {
                 Layout.fillWidth: true
-                text: smartSession.firmwareUpdateRequired
-                    ? "Update is required before SV injection."
-                    : "Current firmware works. Updating is optional."
+                text: (device.running || device.ptpRunning || device.ptpStarting)
+                    ? "This will stop the active SV/PTP test before installing firmware. Continue only when the test may be interrupted."
+                    : (smartSession.firmwareUpdateRequired
+                        ? "Update is required before SV injection."
+                        : "Current firmware works. Updating is optional.")
                 color: ribbon.theme.textSoft
                 font.family: ribbon.uiFont
                 font.pixelSize: 11
@@ -567,7 +579,9 @@ SurfacePanel {
                     onClicked: { ribbon.updatePromptDeferred = true; updateDialog.close() }
                 }
                 CalmButton {
-                    theme: ribbon.theme; uiFont: ribbon.uiFont; text: "Update firmware"; tone: "accent"; implicitWidth: 138
+                    theme: ribbon.theme; uiFont: ribbon.uiFont
+                    text: (device.running || device.ptpRunning || device.ptpStarting) ? "Stop test & update" : "Update firmware"
+                    tone: "accent"; implicitWidth: 154
                     onClicked: {
                         if (smartSession.beginFirmwareUpdate()) {
                             ribbon.updatePromptDeferred = false

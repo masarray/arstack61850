@@ -145,7 +145,13 @@ public:
         const QString& observed) noexcept;
 
     [[nodiscard]] static constexpr int firmwareStopAckTimeoutMs() noexcept { return 3500; }
+    // Legacy board console can take >12 s to drain an older PROFILE SHOW
+    // before delivering STOP ACK, PTP STOP and fresh SHOW results. This is
+    // a bounded, operator-authorized maintenance proof stage, never a
+    // waiver of ACK/readback. Global firmware transaction cap stays 300 s.
+    [[nodiscard]] static constexpr int firmwareVerifiedStopDeadlineMs() noexcept { return 45000; }
     [[nodiscard]] static constexpr int firmwareReleaseAckTimeoutMs() noexcept { return 2000; }
+    [[nodiscard]] static constexpr int firmwareTotalDeadlineMs() noexcept { return 300000; }
 
     [[nodiscard]] static constexpr bool generationIsCurrent(
         const quint64 activeGeneration,
@@ -231,7 +237,7 @@ public:
 
     Q_INVOKABLE bool beginFirmwareUpdate();
     Q_INVOKABLE bool beginFirmwareReinstall();
-    Q_INVOKABLE bool beginFirmwareInstall();
+    Q_INVOKABLE bool beginFirmwareInstall(bool supportedBoardAndIsolationConfirmed);
     Q_INVOKABLE bool retryFirmwareUpdate();
     Q_INVOKABLE bool cancelFirmwareUpdate();
     Q_INVOKABLE bool retryFirmwareSetup();
@@ -267,7 +273,10 @@ private:
             return owner_->updateStage_ == UpdateStage::releasingPort && owner_->pendingReleaseGeneration_ != 0;
         }
         [[nodiscard]] int timeoutForStage(const UpdateStage stage) const noexcept {
-            return stage == UpdateStage::stopping ? firmwareStopAckTimeoutMs() : firmwareReleaseAckTimeoutMs();
+            return stage == UpdateStage::stopping
+                ? (owner_ != nullptr && owner_->stoppingPtpForFirmware_
+                    ? firmwareVerifiedStopDeadlineMs() : firmwareStopAckTimeoutMs())
+                : firmwareReleaseAckTimeoutMs();
         }
         void synchronize() {
             if (!waitingForAck()) {
@@ -384,7 +393,7 @@ private:
     void refreshRecoveryOfferFromIdentity();
     void clearBlankBoardContext();
     void latchFirmwareFailure(QString message);
-    bool beginFirmwareOperation(const QString& portName);
+    bool beginFirmwareOperation(const QString& portName, bool authorizedBlankBoardRecovery = false);
     bool ensureDefaultProfile();
     void setPresentation(QString state, QString status, bool startReady, bool firmwareUpdateRequired);
     void refreshFirmwareIdentity();
@@ -408,6 +417,7 @@ private:
     QTimer discoveryTimer_;
     QTimer prepareTimer_;
     QTimer reconnectTimer_;
+    QTimer firmwareTotalTimer_;
     QTimer profileSyncTimer_;
     QTimer profileRetryTimer_;
     QTimer profileSyncTotalTimer_;
@@ -416,6 +426,8 @@ private:
     QString deviceFirmwareVersion_;
     QString deviceFirmwareBuildId_;
     QString updatePort_;
+    QString updateExpectedDeviceId_;
+    QString updateExpectedBootId_;
     QString blankBoardPort_;
     QString setupErrorStatus_;
     QString lastFirmwareUpdateResult_;
@@ -434,6 +446,10 @@ private:
     QString m4SclRosterCacheKey_;
     bool updateRequested_{false};
     bool updateWasOptional_{false};
+    bool stoppingPtpForFirmware_{false};
+    // Do not transfer serial authority until an asynchronously cancelled
+    // flasher has actually exited and FirmwareManager has cleared busy().
+    bool firmwareProcessRetirementPending_{false};
     bool blankBoardDetected_{false};
     bool manualRecoveryArmed_{false};
     bool setupError_{false};

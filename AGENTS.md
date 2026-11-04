@@ -312,6 +312,26 @@ Rules:
 
 If a patch cannot explain how it preserves this single-model contract, stop and redesign before coding.
 
+## 21. Mandatory ESP32-P4 firmware provisioning contract (dual silicon families)
+
+Before changing `FirmwareManager`, `FirmwareWorker`, `SmartSessionController`, ESP32-P4 `sdkconfig`, manifest/package workflows, flasher version, ROM probe logic or setup UI, read:
+- [`docs/PRD_REVISION_AWARE_ESP32P4_FIRMWARE.md`](docs/PRD_REVISION_AWARE_ESP32P4_FIRMWARE.md) — electrical engineer UX, release scope and acceptance;
+- [`docs/ARD_REVISION_AWARE_ESP32P4_FIRMWARE.md`](docs/ARD_REVISION_AWARE_ESP32P4_FIRMWARE.md) — ownership, typed policy, revision evidence, safety state machine, CI/HIL gates;
+- [`docs/SMV_STUDIO_DEVICE_SUPERVISOR_ARCHITECTURE.md`](docs/SMV_STUDIO_DEVICE_SUPERVISOR_ARCHITECTURE.md) — existing single-owner serial/session lifecycle.
+
+**Non-negotiable:**
+1. **Two incompatible silicon families, two immutable image outputs**: pre-v3 and v3.x; separate generated sdkconfig/build dirs; inspect bootloader + app image revision headers and packaged manifest. Never turn pre-v3 build into a generic v3.x image by broadening a GUI boolean, and never modify an already published stable M3.H.3 tag/asset.
+2. **The existing supervisor owns all firmware writes.** One `SmartSessionController` authority, `DeviceIoWorker` serial owner, `FirmwareManager` policy, `FirmwareWorker` process. No new flashing process owner, second QSerialPort, concurrent updater, hidden QML state machine or duplicated revision parser.
+3. **ROM-revision proof + qualified board profile + one exact image + integrity and provenance + exclusive COM handoff + explicit operator intent must ALL precede writes.** No guessing from COM port, firmware log, marketing model, silent timeout, or partial probe. Never `--force`, `erase-all`, alter eFuse/security, auto-flash on connect or overwrite an autonomously running board.
+4. **Running output is protected.** Before any reset/flash, require operator authorization for interruption and authoritative STOPPED proof of SV and PTP (and M4 group where applicable). Unknown board/operating state is not proof of safety; fail closed and guide recovery instead of auto-reset. Firmware installation never auto-STARTs SV/PTP or silently restores an editor draft.
+5. **Bound the entire attempt, not just each QProcess.** Typed stages, monotonic hard deadlines, cancelled/stale session suppression, one terminal state and controlled retry; never an endless spinner. If a merged-image write is interrupted, mark outcome uncertain and offer manual/assisted ROM recovery; do not claim atomic rollback.
+6. **Success requires the same board to BOOT the exact expected build**, with fresh semantic `IDENTIFY` / boot and capability proof; flasher exit 0 or 100% progress is insufficient. Unknown chip/board revision, incomplete package, mismatched ID or misleading UI state are errors, never READY.
+7. **Electrical-engineer interface:** a compact status and one contextual action ('Set up board' / 'Update firmware'), no raw COM/bootloader/hash jargon unless in expandable Details. Do not add heavy/noisy cards or fake percentages. Same offline behavior on Windows and Linux.
+8. **Evidence before stable:** CI covers v1/v3 catalog, wrong-revision rejection, concurrency, unplug/re-enumeration, boot mismatch and packaging. Physical v1.3+v3.2 HIL must verify boot/recovery/EMAC SV/PTP and preserved autonomy before v3.x stable claims. Check the bundled Rust `espflash` independently; the vendor `esptool` advisory does not automatically validate it.
+9. **CI economy and change isolation:** reuse existing firmware/Studio workflows and native tests; request targeted revision lanes with separate caches, not an always-on duplicated matrix. Do not collide with in-flight M4 multi-SV or LAN autonomy work.
+
+**Execution sequencing:** design docs are a contract, **not evidence of implemented or tested compatibility**. Never report v3.2 as supported until an exact packaged image/Studio flow plus physical board passes the documented gates.
+
 ## Final rule
 
 Think like the engineer responsible for a protocol stack and embedded device under sustained field load for years, not like a prototype generator trying to make one packet or screenshot pass.
