@@ -1,0 +1,114 @@
+name: Process Bus Dual Firmware Stable Promotion
+
+# Repackage tested RC1. NO firmware or Qt compilation.
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/releases/PROCESSBUS_DUAL_STABLE_LAUNCH.md
+
+permissions:
+  contents: write
+
+concurrency:
+  group: arstack-dual-stable-20261105
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  RC_TAG: processbus-sim-dual-rc1-20261105
+  STABLE_TAG: processbus-sim-dual-stable-20261105
+  RC_MERGED_MAIN: 525902548504aa997f868c43f51208fb13beecaf
+
+jobs:
+  verified-stable-publication:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - name: Checkout verified stable Inno script
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Download pinned tested RC1 and verify exact firmware Studio Linux
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $rc = Join-Path $env:RUNNER_TEMP 'arstack-dual-rc1'
+          New-Item -ItemType Directory -Force -Path $rc | Out-Null
+          & gh release download $env:RC_TAG --repo $env:GITHUB_REPOSITORY --dir $rc
+          if ($LASTEXITCODE -ne 0) { throw 'RC1 download failed' }
+          $meta = Join-Path $env:RUNNER_TEMP 'arstack-rc1-release.json'
+          & gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:RC_TAG" | Out-File -LiteralPath $meta -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw 'RC1 metadata failed' }
+          python scripts/promote_processbus_dual_stable.py prepare --rc $rc --release-meta $meta --stage (Join-Path $env:RUNNER_TEMP 'arstack-stable-stage') --out (Join-Path $PWD 'dist-stable')
+          if ($LASTEXITCODE -ne 0) { throw 'Provenance / dual-revision validation failed' }
+
+      - name: Compile Stable Inno installer from identical tested RC1 binaries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install innosetup --version 6.7.1 -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup unavailable' }
+          $compiler = Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Inno Setup 6\ISCC.exe'
+          $iss = (Resolve-Path 'apps\arstack_studio\packaging\ARStackStudio.iss').Path
+          $stage = Join-Path $env:RUNNER_TEMP 'arstack-stable-stage'
+          $out = Join-Path $PWD 'dist-stable'
+          & $compiler '/DSTUDIO_VERSION=0.1.1' "/DSTAGE_DIR=$stage" "/O$out" $iss
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $out 'ARStack-Studio-win-x64-setup.exe'))) {
+            throw 'Stable-channel installer missing'
+          }
+
+      - name: Windows Stable AppId install firmware contract and clean uninstall
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Join-Path $PWD 'dist-stable\ARStack-Studio-win-x64-setup.exe'
+          $target = Join-Path $env:RUNNER_TEMP 'ARStackStableInstall'
+          $arguments = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS',("/DIR=" + $target))
+          $process = Start-Process -FilePath $installer -ArgumentList $arguments -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Stable installer execution failed' }
+          $app = Join-Path $target 'ARStackStudio.exe'
+          $stableKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ARStack61850.Studio.Stable_is1'
+          $previewKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\ARStack61850.Studio.Preview_is1'
+          if (-not (Test-Path $app) -or -not (Test-Path $stableKey) -or (Test-Path $previewKey)) {
+            throw 'Stable installer AppId is incorrect'
+          }
+          $source = Join-Path $env:RUNNER_TEMP 'arstack-stable-stage\ARStackStudio.exe'
+          if ((Get-FileHash $app -Algorithm SHA256).Hash -ne (Get-FileHash $source -Algorithm SHA256).Hash) {
+            throw 'Installed executable is not the RC1 executable'
+          }
+          $env:ARSTACK_STUDIO_FIRMWARE_DIR = Join-Path $target 'firmware'
+          $env:ARSTACK_STUDIO_ESPFLASH = Join-Path $target 'tools\espflash.exe'
+          $env:ESPFLASH_SKIP_UPDATE_CHECK = 'true'
+          foreach ($check in @('--check-firmware-contract','--check-p0-policy','--check-reference-template','--check-app-lifecycle')) {
+            $probe = Start-Process -FilePath $app -ArgumentList $check -Wait -PassThru
+            if ($probe.ExitCode -ne 0) { throw "Stable Studio failed $check" }
+          }
+          $remover = Join-Path $target 'unins000.exe'
+          $gone = Start-Process -FilePath $remover -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -Wait -PassThru
+          if ($gone.ExitCode -ne 0 -or (Test-Path $app) -or (Test-Path $stableKey)) { throw 'Stable uninstall failed' }
+          Write-Host 'STABLE_INSTALL_SMOKE: PASS'
+
+      - name: Create preferred Setup ZIP and verify all release hashes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python scripts/promote_processbus_dual_stable.py finish --rc (Join-Path $env:RUNNER_TEMP 'arstack-dual-rc1') --release-meta (Join-Path $env:RUNNER_TEMP 'arstack-rc1-release.json') --stage (Join-Path $env:RUNNER_TEMP 'arstack-stable-stage') --out (Join-Path $PWD 'dist-stable')
+          if ($LASTEXITCODE -ne 0) { throw 'Preferred ZIP hash verification failed' }
+
+      - name: Publish immutable stable GitHub release as latest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = Join-Path $PWD 'dist-stable'
+          $assets = @(Get-ChildItem -LiteralPath $out -File | ForEach-Object { $_.FullName })
+          if ($assets.Count -lt 11) { throw 'Incomplete stable assets' }
+          $arguments = @('release','create',$env:STABLE_TAG) + $assets + @('--repo',$env:GITHUB_REPOSITORY,'--target',$env:RC_MERGED_MAIN,'--title','ARStack Process Bus Simulator - Dual Firmware Stable','--notes-file',(Join-Path $out 'RELEASE_NOTES.md'),'--latest')
+          & gh @arguments
+          if ($LASTEXITCODE -ne 0) { throw 'Stable publishing failed or immutable tag already exists' }
+          $published = (& gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$env:STABLE_TAG" | ConvertFrom-Json)
+          if ($published.draft -or $published.prerelease -or $published.assets.Count -ne $assets.Count) {
+            throw 'Stable release not fully published'
+          }
+          Write-Host "STABLE_RELEASE_URL=$($published.html_url)"
