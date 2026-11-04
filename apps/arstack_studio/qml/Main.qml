@@ -1337,7 +1337,8 @@ ApplicationWindow {
             id: m4PaginationStrip
             visible: sclProfiles.m4DraftSupported || m4Pages.active ||
                      (workflowBar.session && workflowBar.session.canInspectMultiSvBoard) ||
-                     device.m4BoardInspecting || device.m4BoardSnapshots.length === 3
+                     device.m4BoardInspecting || device.m4BoardSnapshots.length === 3 ||
+                     device.m4ReconnectMode === "SELECTED"
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 31 : 0
             spacing: 5
@@ -1371,6 +1372,16 @@ ApplicationWindow {
                 }
             }
             Item { Layout.fillWidth: true }
+            Label {
+                visible: device.m4ReconnectMode === "SELECTED"
+                text: "BOARD ROSTER / SCD · " +
+                      (workflowBar.session ? workflowBar.session.m4SclRosterMatch : "NOT VERIFIED") +
+                      " · START GATED"
+                color: workflowBar.session && workflowBar.session.m4SclRosterMatch === "MATCHED"
+                    ? studioTheme.green : studioTheme.amber
+                font.family: root.uiFont
+                font.pixelSize: 9
+            }
             Label {
                 visible: m4Pages.active
                 text: device.m4ScenarioApplying ? "APPLYING · MU BANK READBACK REQUIRED"
