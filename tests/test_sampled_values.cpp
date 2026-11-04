@@ -81,16 +81,16 @@ ar::iec61850::sampled_values::SampledValueAsdu make_reference_asdu() {
         std::nullopt};
 }
 
-void sampled_values_pdu_matches_csharp_golden_vector() {
+void sampled_values_pdu_encodes_fixed_iec_widths() {
     using namespace ar::iec61850::sampled_values;
 
     const SampledValuesPdu pdu{{make_reference_asdu()}};
     const auto encoded = SampledValuesPduCodec::encode(pdu);
     CHECK(to_hex(encoded) ==
-          "605E800101A259305780134D55303146312F4C4C4E30244D535643423031"
-          "81144D55303146312F4C4C4E30245068734D65617331820178830103"
+          "6063800101A25E305C80134D55303146312F4C4C4E30244D535643423031"
+          "81144D55303146312F4C4C4E30245068734D6561733182020078830400000003"
           "84086A2BDFE40000000085010286020FA087100000006400000001000000C8"
-          "00000003880101");
+          "0000000388020001");
 
     SampledValuesPdu decoded;
     CHECK(SampledValuesPduCodec::try_decode(encoded, decoded));
@@ -119,20 +119,23 @@ void sampled_values_frame_round_trips_vlan_process_bus_header() {
     CHECK(layout_result.bytes_written == encoded.size());
     CHECK(encoded_with_layout == encoded);
     CHECK(frame_layout[0].sample_count.present);
-    CHECK(frame_layout[0].sample_count.value_size == 1U);
-    CHECK(encoded[frame_layout[0].sample_count.value_offset] == 120U);
+    CHECK(frame_layout[0].sample_count.value_size == 2U);
+    CHECK(encoded[frame_layout[0].sample_count.value_offset] == 0U);
+    CHECK(encoded[frame_layout[0].sample_count.value_offset + 1U] == 120U);
     CHECK(frame_layout[0].configuration_revision.present);
-    CHECK(frame_layout[0].configuration_revision.value_size == 1U);
-    CHECK(encoded[frame_layout[0].configuration_revision.value_offset] == 3U);
+    CHECK(frame_layout[0].configuration_revision.value_size == 4U);
+    CHECK(encoded[frame_layout[0].configuration_revision.value_offset + 3U] == 3U);
     CHECK(frame_layout[0].reference_time.present);
     CHECK(frame_layout[0].reference_time.value_size == 8U);
     CHECK(frame_layout[0].sample_synchronization.present);
     CHECK(frame_layout[0].sample_synchronization.value_size == 1U);
     CHECK(encoded[frame_layout[0].sample_synchronization.value_offset] == 2U);
     CHECK(frame_layout[0].sample_rate.present);
+    CHECK(frame_layout[0].sample_rate.value_size == 2U);
     CHECK(frame_layout[0].sample_payload.present);
     CHECK(frame_layout[0].sample_payload.value_size == 16U);
     CHECK(frame_layout[0].sample_mode.present);
+    CHECK(frame_layout[0].sample_mode.value_size == 2U);
 
     auto untagged_frame = frame;
     untagged_frame.vlan.reset();
@@ -148,11 +151,11 @@ void sampled_values_frame_round_trips_vlan_process_bus_header() {
           untagged_layout[0].sample_payload.value_offset + 4U);
 
     CHECK(to_hex(encoded) ==
-          "010CCD040001020000000002810080C888BA4001006800000000"
-          "605E800101A259305780134D55303146312F4C4C4E30244D535643423031"
-          "81144D55303146312F4C4C4E30245068734D65617331820178830103"
+          "010CCD040001020000000002810080C888BA4001006D00000000"
+          "6063800101A25E305C80134D55303146312F4C4C4E30244D535643423031"
+          "81144D55303146312F4C4C4E30245068734D6561733182020078830400000003"
           "84086A2BDFE40000000085010286020FA087100000006400000001000000C8"
-          "00000003880101");
+          "0000000388020001");
 
     SampledValuesFrame decoded;
     CHECK(SampledValuesFrameCodec::try_decode(encoded, decoded));
@@ -718,7 +721,7 @@ void sampled_values_gm_identity_matches_ptp_and_rejects_truncation() {
 
 int main() {
     const std::vector<std::pair<std::string, std::function<void()>>> tests{
-        {"SV PDU golden vector", sampled_values_pdu_matches_csharp_golden_vector},
+        {"SV canonical fixed-width BER", sampled_values_pdu_encodes_fixed_iec_widths},
         {"SV Ed2.1 GM source identity", sampled_values_gm_identity_matches_ptp_and_rejects_truncation},
         {"SV Ethernet frame", sampled_values_frame_round_trips_vlan_process_bus_header},
         {"SV malformed input", sampled_values_codec_handles_multiple_asdus_and_rejects_malformed_input},

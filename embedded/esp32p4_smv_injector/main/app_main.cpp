@@ -370,37 +370,10 @@ SampledValuesFrame make_runtime_frame(
     }
     asdu.sample_payload = make_4i4v_payload();
 
-#if CONFIG_AR_PTP_LAB_TX
-    // IEC 61850-9-2 Ed2.1 optional gmIdentity / SynchSrcID. The eight
-    // bytes MUST equal the GrandmasterIdentity in Announce. On the
-    // simulated GM bench this is the board's own clock identity; in
-    // RECEIVER mode it is the measured selected external source.
-    // Keep legacy 9-2LE unchanged unless a bench GM is selected.
-    if (!diagnostic_mirror) {
-        ar_ptp_lab_config_t ptp_config{};
-        ar_ptp_timing_authority_t authority{};
-        if (ar_ptp_lab_get_config(&ptp_config) &&
-            ar_ptp_lab_get_timing_authority(&authority) &&
-            authority.clock_usable) {
-            if (ptp_config.role == AR_PTP_ROLE_LAB_SOURCE &&
-                ptp_config.bench_global_gm) {
-                if (ptp_config.clock_identity_override) {
-                    std::array<std::uint8_t, 8> identity{};
-                    std::copy_n(ptp_config.clock_identity, 8U, identity.begin());
-                    asdu.gm_identity = identity;
-                } else {
-                    asdu.gm_identity =
-                        ar::iec61850::time_sync::ptp_clock_identity_from_mac(source_mac);
-                }
-            } else if (ptp_config.role == AR_PTP_ROLE_TIME_RECEIVER &&
-                       authority.source_selected) {
-                std::array<std::uint8_t, 8> identity{};
-                std::copy_n(authority.selected_source_clock_identity, 8U, identity.begin());
-                asdu.gm_identity = identity;
-            }
-        }
-    }
-#endif
+    // The deployed device capability rejects SmvOpts synchSourceId=true.
+    // Never append optional [9] gmIdentity when SCL declares it absent.
+    // Future support must be explicitly compiled/validated from SCL and
+    // backed by an independently identified reference clock source.
 
     SampledValuesFrame frame;
     frame.destination = MacAddress{std::span<const std::uint8_t>{profile.destination_mac}};
