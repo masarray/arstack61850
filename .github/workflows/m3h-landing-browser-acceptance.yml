@@ -45,7 +45,7 @@ jobs:
               await Promise.all([page.locator('.brand img').evaluate(el=>el.decode()),page.locator('.hero-visual img').evaluate(el=>el.decode())]);
               const data=await page.evaluate(()=>{
                 const buttons=[...document.querySelectorAll('a[data-asset="windows"],a[data-asset="portable"],a[data-asset="firmware"]')];
-                const releaseLink=/^https:\/\/github\.com\/masarray\/arstack61850\/releases\/(latest|download\/[^/]+\/[^/]+)$/;
+                const releaseLink=/^https:\/\/github\.com\/masarray\/arstack61850\/releases\/(latest|tag\/[^/]+|download\/[^/]+\/[^/]+)$/;
                 return {title:document.title, width:document.documentElement.clientWidth,scroll:document.documentElement.scrollWidth,
                   latest:document.body.textContent.includes('M3.H.3') || document.body.textContent.includes('processbus-sim-m3h3-20261025'),benchmark:document.body.textContent.includes('4,705,090') && document.body.textContent.includes('M3.H.3') && document.body.textContent.includes('Three virtual Merging Units'), bodyPreview:document.body.textContent.slice(0,170),
                   buttons:buttons.length, linksValid:buttons.every(el=>releaseLink.test(el.href)), anyVisible:buttons.some(el=>{const r=el.getBoundingClientRect();return r.width>0&&r.height>0}),
