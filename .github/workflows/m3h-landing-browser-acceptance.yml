@@ -44,14 +44,16 @@ jobs:
                 const buttons=[...document.querySelectorAll('a[data-asset="windows"],a[data-asset="portable"],a[data-asset="firmware"]')];
                 const releaseLink=/^https:\/\/github\.com\/masarray\/arstack61850\/releases\/(latest|download\/[^/]+\/[^/]+)$/;
                 return {title:document.title, width:document.documentElement.clientWidth,scroll:document.documentElement.scrollWidth,
-                  latest:document.body.textContent.includes('M3.H.3') || document.body.textContent.includes('processbus-sim-m3h3-20261025'),benchmark:document.body.textContent.includes('4,705,090') && document.body.textContent.includes('M3.H.3') && document.body.textContent.includes('Next: multiple virtual Merging Units'), bodyPreview:document.body.textContent.slice(0,170),
+                  latest:document.body.textContent.includes('M3.H.3') || document.body.textContent.includes('processbus-sim-m3h3-20261025'),benchmark:document.body.textContent.includes('4,705,090') && document.body.textContent.includes('M3.H.3') && document.body.textContent.includes('Three virtual Merging Units'), bodyPreview:document.body.textContent.slice(0,170),
                   buttons:buttons.length, linksValid:buttons.every(el=>releaseLink.test(el.href)), anyVisible:buttons.some(el=>{const r=el.getBoundingClientRect();return r.width>0&&r.height>0}),
                   linuxReady:!!document.querySelector('[data-asset="linux"]'),
+                  heroDownloads:[...document.querySelectorAll('.hero-downloads a')].map(el=>({label:el.textContent.trim(),href:el.href,visible:el.getBoundingClientRect().width>0&&el.getBoundingClientRect().height>0})),
                   og:!!document.querySelector('meta[property="og:title"]')};
               });
               console.log(width,JSON.stringify(data));
               await page.screenshot({path:'evidence/m3h-'+width+'.png',fullPage:true});
               if(!data.latest||!data.benchmark||!data.og||data.buttons!==4||!data.anyVisible||!data.linksValid||!data.linuxReady)throw new Error('MISSING_LATEST_RELEASE_LINKS_'+width);
+              if(data.heroDownloads.length!==2||!data.heroDownloads.every(x=>x.visible)||data.heroDownloads[0].label!=='Download for Windows'||data.heroDownloads[1].label!=='Download for Linux'||!/ARStack-Studio-win-x64-setup\.zip$/.test(data.heroDownloads[0].href)||!/ARStack-Studio-linux-x86_64\.AppImage$/.test(data.heroDownloads[1].href))throw new Error('HERO_DIRECT_PLATFORM_DOWNLOADS_'+width);
               if(data.scroll>data.width+2)throw new Error('HORIZONTAL_OVERFLOW_'+width+':'+data.scroll+'>'+data.width);
               await page.close();
             }
