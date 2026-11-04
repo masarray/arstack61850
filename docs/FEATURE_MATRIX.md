@@ -1,6 +1,6 @@
 # ARStack61850 — Feature and verification matrix
 
-**Latest public Process Bus release: [M3.H stable laboratory edition](https://github.com/masarray/arstack61850/releases/latest) (24 October 2026).** For the quickest overview of what you can use today, start with [Getting Started](GETTING_STARTED.md). The detailed table below also covers lower-level libraries and developer features.
+**Latest public Process Bus release: [Dual Firmware Stable](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-dual-stable-20261105) (5 November 2026).** For the quickest overview of what you can use today, start with [Getting Started](GETTING_STARTED.md). The detailed table below also covers lower-level libraries and developer features.
 
 Status terms are intentionally conservative:
 
@@ -55,8 +55,8 @@ Status terms are intentionally conservative:
 | Sampled Values | PDU / Ethernet encode-decode | Offline-tested | Process-bus work remains separate from MMS control evidence. |
 | Sampled Values | Caller-owned bounded encode path | Offline-tested | `encode_into(span)` avoids fresh frame-buffer allocation in steady-state publisher design. |
 | Sampled Values | Autonomous ESP32-P4 4I+4V Ethernet publisher | **M3.H.3 official stable / on-wire capture** | 4,705,090 SV frames in 19 min 36 s at 3,999.886 fps with no missing, duplicate, reorder or malformed frames. Internal PTP SOURCE produced 3,528 PTP frames; received SV carried smpSynch=2. Closing Studio does not stop the powered board; reconnect adopts live state. |
-| Desktop product | ARStack Studio / Process Bus Simulator M3.H.3 | **Official stable lab release** | Windows Setup / Portable, Linux AppImage and matched ESP32-P4 firmware, 4I+4V editing, SV/PTP traffic injection for relay/BCU bench simulation, fail-closed LAN handling, Studio disconnect/reconnect adoption. [Official release](releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md). |
-| SCL | Engineering import and supported single-stream SV profile deploy | **Current bounded single-stream capability** | Host SCL/CID/SCD/IID read/import, normalization, diagnostics and deployment for supported 4I+4V DataSet layouts. **Next:** multiple streams on one ESP32-P4 and SCL-driven virtual MU selection (not yet in stable M3.H.3). [Next phase](PROCESS_BUS_MULTI_SV_SCL_NEXT_PHASE.md). |
+| Desktop product | ARStack Studio / Dual Firmware Stable | **Public stable package** | Windows Setup ZIP/EXE, Portable ZIP, Linux x86_64 AppImage and revision-aware pre-v3/v3.x firmware catalog. v3.x image retains engineering-preview hardware qualification. 4I+4V SV and simulated GPS-style PTP GM, board-state adoption and SCL support. [Current release](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-dual-stable-20261105). |
+| SCL | Engineering import and three-virtual-MU group control | **M4 software integrated / extended wire validation pending** | SCL/CID/SCD/IID profile import and supported 4I+4V deployment; three-virtual-MU configuration, board readback and group START/STOP with shared PTP/sample timebase. Sustained 3 × 4,000 fps on-wire and v3.x physical acceptance remain separate. [Engineering roadmap](PROCESS_BUS_MULTI_SV_SCL_NEXT_PHASE.md). |
 | COMTRADE | CFG/DAT read support | Offline-tested | ASCII/BINARY/BINARY32/FLOAT32 and mapping foundations are implemented. |
 | PCAP | Read/write/evidence support | Live-proven for C5 evidence | Npcap loopback captures were reconciled with JSON Write lists and retained SHA-256 hashes. |
 | Embedded | `ARIEC61850::embedded_core` boundary | Offline-tested | Host-only services excluded by dedicated build profile. |
@@ -94,4 +94,4 @@ C1-C5 provide a guarded production control path plus a live evidence harness. Th
 
 ## Next parity direction
 
-The next gaps are association-loss and contention evidence for control, remaining MMS file-service parity and fault-record workflows, mutable SCL export/reconstruction, deterministic IED simulator/server integration, and broader application/UI parity. The current SV/PTP public lab release is **M3.H**. Historical v0.1.0 evidence remains documented independently; future profile expansion and external interoperability observations are tracked as separate engineering efforts.
+The next gaps are association-loss and contention evidence for control, remaining MMS file-service parity and fault-record workflows, mutable SCL export/reconstruction, deterministic IED simulator/server integration, and broader application/UI parity. The current public stable is **Dual Firmware Stable**; the M3.H.3 capture remains historical single-stream evidence. Historical v0.1.0 evidence remains documented independently; future profile expansion and external interoperability observations are tracked as separate engineering efforts.
