@@ -5,6 +5,14 @@ on:
     branches: [main]
     paths:
       - 'index.html'
+      - 'assets/screenshots/arstack-studio-windows.png'
+      - 'assets/favicon.ico'
+      - 'assets/favicon-96x96.png'
+      - 'assets/apple-touch-icon.png'
+      - 'assets/site.webmanifest'
+      - 'assets/web-app-manifest-192x192.png'
+      - 'assets/web-app-manifest-512x512.png'
+      - 'scripts/check_site_visual_assets.py'
       - '.github/workflows/m3h-project-pages-publish.yml'
   workflow_dispatch:
 
@@ -47,10 +55,15 @@ jobs:
           grep -Fq 'ARStack-Studio-win-x64-setup.zip' index.html
           grep -Fq 'firmware-catalog.json' index.html
           grep -Fq 'PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md' index.html
+          python3 scripts/check_site_visual_assets.py
           mkdir -p _site
           cp index.html _site/index.html
-          test -s assets/screenshots/arstack-studio-windows.png
           mkdir -p _site/assets/screenshots
+          for asset in favicon.ico favicon-96x96.png apple-touch-icon.png site.webmanifest web-app-manifest-192x192.png web-app-manifest-512x512.png; do
+            test -s "assets/$asset"
+            cp "assets/$asset" "_site/assets/$asset"
+          done
+          test -s assets/screenshots/arstack-studio-windows.png
           cp assets/screenshots/arstack-studio-windows.png _site/assets/screenshots/arstack-studio-windows.png
           touch _site/.nojekyll
       - uses: actions/configure-pages@v5
@@ -76,7 +89,12 @@ jobs:
                  grep -Fq 'Download for Linux' /tmp/arstack-live.html &&
                  grep -Fq '4,705,090' /tmp/arstack-live.html &&
                  grep -Fq 'processbus-sim-dual-stable-20261105' /tmp/arstack-live.html; then
-                echo 'PASS: latest-release links deployed on the public product URL'
+                for asset in assets/web-app-manifest-192x192.png assets/web-app-manifest-512x512.png assets/favicon-96x96.png assets/screenshots/arstack-studio-windows.png; do
+                  published="/tmp/arstack-live-$(basename "$asset")"
+                  curl --fail --location --silent --show-error "https://masarray.github.io/arstack61850/$asset?build=$GITHUB_SHA" -o "$published"
+                  cmp --silent "$asset" "$published" || { echo "FAIL: published image differs from repository $asset" >&2; exit 1; }
+                done
+                echo 'PASS: latest release links, original identity files and native screenshot live on project Pages'
                 exit 0
               fi
             fi
