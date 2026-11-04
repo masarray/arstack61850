@@ -45,6 +45,22 @@ struct SmpSynchDecision final {
 };
 
 /**
+ * Resolve the explicitly selected simulated PTP SOURCE's SV sync state.
+ * A simulated GPS-class GM is a first-class test-set feature: 2 is valid
+ * only while both its PTP TX evidence and the SV sample/MAC phase are
+ * qualified. Unqualified sources cannot advertise global sync. The caller
+ * retains the RECEIVER discipline path independently.
+ */
+[[nodiscard]] constexpr std::optional<SmpSynchValue> resolve_emulated_gm_smp_synch(
+    const bool sample_phase_mac_qualified,
+    const bool simulated_global_gm_ready) noexcept {
+    if (!sample_phase_mac_qualified) return std::nullopt;
+    return simulated_global_gm_ready
+        ? SmpSynchValue::global_synchronized
+        : SmpSynchValue::local_synchronized;
+}
+
+/**
  * Resolve what the SV publisher is allowed to advertise in smpSynch.
  *
  * AUTO is deliberately conservative: until a future clock-discipline/lock
