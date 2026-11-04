@@ -230,10 +230,12 @@ void sampled_values_codec_handles_multiple_asdus_and_rejects_malformed_input() {
               pdu, encoded_with_layout, insufficient_layout).success());
 
     auto patched = encoded_with_layout;
-    CHECK(layouts[0].sample_count.value_size == 1U);
-    CHECK(layouts[1].sample_count.value_size == 1U);
-    patched[layouts[0].sample_count.value_offset] = 122U;
-    patched[layouts[1].sample_count.value_offset] = 123U;
+    CHECK(layouts[0].sample_count.value_size == 2U);
+    CHECK(layouts[1].sample_count.value_size == 2U);
+    patched[layouts[0].sample_count.value_offset] = 0U;
+    patched[layouts[0].sample_count.value_offset + 1U] = 122U;
+    patched[layouts[1].sample_count.value_offset] = 0U;
+    patched[layouts[1].sample_count.value_offset + 1U] = 123U;
     SampledValuesPdu patched_decoded;
     CHECK(SampledValuesPduCodec::try_decode(patched, patched_decoded));
     CHECK(patched_decoded.asdus.size() == 2U);
