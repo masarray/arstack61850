@@ -47,6 +47,7 @@ public:
             {"retry after unverified STOP cannot probe ROM without renewed consent", unverifiedFirmwareRetryNeverProbesRom()},
             {"slow firmware STOP suspends ordinary health teardown, resumes afterward", maintenanceStopDoesNotTriggerHealthDisconnect()},
             {"firmware STOP proof readbacks survive M4 exclusive retirement", maintenanceProofReadbackSurvivesM4Retirement()},
+            {"M4 group STOP ACK preserves existing firmware-quiescence SHOW/SVLIFE proof", m4MaintenanceStopUsesFirmwareProof()},
             {"real timed-out firmware subprocess retires before COM release", firmwareWorkerTimeoutAwaitsProcessExit()},
             {"current identity -> READY without recovery", currentIdentityNeverRecovers()},
             {"legacy identity -> firmware update", legacyIdentityOffersUpdate()},
@@ -219,6 +220,31 @@ private:
         return restartedCleanly && !unexpectedTerminal && terminalCount == 2;
     }
 
+
+    static bool m4MaintenanceStopUsesFirmwareProof() {
+        Fixture f;
+        if (!f.profileReady) return false;
+        seedVerified(f, identity(), QStringLiteral("COM7"), false);
+        auto& d = f.device;
+        d.ioWorkerReady_ = true;
+        d.m4GroupSession_ = d.sessionGeneration_;
+        d.m4GroupBoot_ = d.identity_.bootId;
+        d.m4GroupStage_ = DeviceController::M4GroupStage::awaiting_stop_ack;
+        d.m4GroupInFlight_.clear();
+        d.operatorStopPending_ = true;
+        d.firmwareQuiescenceActive_ = true;
+        d.firmwareQuiescenceSession_ = d.sessionGeneration_;
+        d.firmwareQuiescenceBoot_ = d.identity_.bootId;
+        d.processLine(QStringLiteral("STOP accepted: SV transmission suppressed"));
+        const bool routed = d.firmwareSvStopAck_ && !d.firmwareSvStoppedReadback_ &&
+            d.m4GroupStage_ == DeviceController::M4GroupStage::uncertain &&
+            !d.operatorStopPending_ && !d.m4GroupTimer_.isActive();
+        d.processLine(QStringLiteral("SVLIFE state=STOPPED stop_cause=OPERATOR_STOP stop_seq=1"));
+        const bool verified = d.firmwareSvStoppedReadback_ &&
+            !d.firmwareQuiescenceVerified(); // PTP still needs separate STOP proof
+        d.endFirmwareQuiescence();
+        return routed && verified;
+    }
 
     static bool maintenanceProofReadbackSurvivesM4Retirement() {
         Fixture f;
@@ -2472,9 +2498,16 @@ private:
             d.m4GroupStage_ != DeviceController::M4GroupStage::running_confirmed ||
             !d.running() || d.m4GroupStarting()) return false;
         d.m4GroupStage_ = DeviceController::M4GroupStage::awaiting_stop_readback;
+        d.operatorStopPending_ = true;
         if (!d.processM4GroupLine(state(0)) ||
             d.m4GroupStage_ != DeviceController::M4GroupStage::confirmed_stopped ||
-            d.running() || !d.m4GroupStartAllowed()) return false;
+            d.running() || !d.m4GroupStartAllowed() ||
+            d.operatorStopPending_) return false;
+        d.m4GroupStage_ = DeviceController::M4GroupStage::awaiting_start_readback;
+        d.operatorStopPending_ = true;
+        if (!d.processM4GroupLine(state(1)) || !d.running() || d.operatorStopPending_)
+            return false;
+        d.operatorStopPending_ = false;
         d.m4GroupStage_ = DeviceController::M4GroupStage::awaiting_start_readback;
         if (!d.processM4GroupLine(state(1, 3)) ||
             d.m4GroupStage_ != DeviceController::M4GroupStage::uncertain ||

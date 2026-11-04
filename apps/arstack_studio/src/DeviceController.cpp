@@ -991,6 +991,21 @@ bool DeviceController::processM4GroupLine(const QString& line) {
     if (m4GroupStage_ == M4GroupStage::awaiting_stop_ack &&
         line.contains(QStringLiteral("STOP accepted: SV transmission suppressed"))) {
         if (!m4GroupInFlight_.isEmpty()) return true;
+        // The firmware maintenance supervisor already owns STOP ACK ->
+        // fresh SHOW/SVLIFE -> PTP STOP proof. Never hijack that verified
+        // handoff with M4SHOW (which is forbidden during quiescence).
+        if (firmwareQuiescenceActive_) {
+            m4GroupTimer_.stop();
+            m4GroupInFlight_.clear();
+            m4GroupStage_ = M4GroupStage::uncertain;
+            m4GroupStatus_ = QStringLiteral("Maintenance STOP ACK; waiting for firmware SV/PTP readbacks.");
+            emit m4DeploymentChanged();
+            return false; // let the EXISTING firmware STOP handler own ACK/SHOW
+        }
+        if (line.contains(QStringLiteral("fail-closed runtime"), Qt::CaseInsensitive)) {
+            failM4Group(QStringLiteral("Runtime fail-safe STOP is not an operator STOP ACK."));
+            return false;
+        }
         m4GroupStage_ = M4GroupStage::awaiting_stop_readback;
         m4GroupInFlight_ = QStringLiteral("M4SHOW");
         if (!sendCommand(m4GroupInFlight_))
@@ -1028,7 +1043,9 @@ bool DeviceController::processM4GroupLine(const QString& line) {
         m4GroupStatus_ = stopping
             ? QStringLiteral("3-MU STOPPED confirmed by board; wire capture remains independent.")
             : QStringLiteral("3-MU RUNNING confirmed by board; 12kfps PCAP acceptance PENDING.");
-        setRunning(!stopping);
+        if (!stopping) operatorStopPending_ = false; // stale prior STOP must not mask the next PHY incident
+        setRunning(!stopping); // classify a verified STOP with its operator latch intact
+        if (stopping) operatorStopPending_ = false;
         emit m4DeploymentChanged();
         return true;
     }
