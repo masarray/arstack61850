@@ -1,72 +1,69 @@
 # Your first IEC 61850 Process Bus experiment
 
-This guide takes you from installing Studio to injecting real IEC 61850 Sampled Values and PTP traffic into an isolated engineering bench. Use the packets to explore process-bus subscriber settings on a relay, BCU or analyzer.
+Use ARStack Studio to generate real Ethernet Sampled Values (SV) and simulated GPS-style PTP Grandmaster traffic with a compatible ESP32-P4 board on an **isolated engineering network**.
 
-**You will learn how to:** open ARStack Studio, generate a 4-current + 4-voltage waveform, start real SV traffic from an ESP32-P4, and inspect PTP alongside SV.
+**Current release:** [Process Bus Simulator — Dual Firmware Stable](https://github.com/masarray/arstack61850/releases/tag/processbus-sim-dual-stable-20261105). Studio supports Windows and Linux x86_64; paired revision-aware ESP32-P4 firmware is published alongside it.
 
 ## What you need
 
-- A Windows 10/11 x64 PC with [ARStack Studio](https://github.com/masarray/arstack61850/releases/latest).
-- For **real Ethernet output**: a compatible ESP32-P4 Ethernet development board, USB data cable, Ethernet cables and an isolated Ethernet switch or direct lab connection.
-- Optional: Wireshark or another SV/PTP analyzer.
+- Windows 10/11 x64 or Linux x86_64, plus [ARStack Studio](https://masarray.github.io/arstack61850/).
+- For **real Ethernet output**: a compatible ESP32-P4 Ethernet board, USB data cable, Ethernet cable and an isolated test network.
+- Optional: Wireshark or an SV/PTP-capable analyzer, relay or BCU subscribed to your stream.
 
-You can install and explore the desktop software before purchasing or connecting a board.
+You can explore Studio without a board. Transmitting real SV and PTP Ethernet frames requires a powered ESP32-P4.
 
 ## Step 1 — Install Studio
 
-1. Open the [latest stable release](https://github.com/masarray/arstack61850/releases/latest).
-2. Download the **Windows Setup EXE**. Choose the Portable ZIP if you prefer not to install.
-3. Open ARStack Studio.
+1. **Windows:** [Download Setup ZIP](https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-win-x64-setup.zip), extract it and run the installer inside. The release also offers Windows Portable ZIP and a direct Setup EXE.
+2. **Linux x86_64:** [Download AppImage](https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-linux-x86_64.AppImage), mark it executable (chmod +x) and run it.
+3. Open Studio. Use desktop software and board firmware from the **same release**. A Studio upgrade does not automatically reflash the board.
 
-M3.H.3 official Setup includes desktop dependencies and **matching board firmware**. Flash only the image bundled with the same release; older Studio/firmware versions are not interchangeable.
+See the [installation guide](INSTALL.md).
 
 ## Step 2 — Connect the ESP32-P4
 
-1. Connect the board over **USB data** (not a charge-only cable).
-2. Connect the board's Ethernet port to your **isolated test network**.
-3. In Studio, connect to the detected serial device. Follow the displayed device identity and firmware status.
+1. Connect the board over USB **data** (not a charging-only cable).
+2. Connect the board Ethernet port to your **isolated lab network**.
+3. Connect Studio to the detected serial device and check its identity and firmware status.
 
-Do not connect the SV publisher or PTP source to an operating substation LAN.
+**Do not connect the publisher or PTP source to a live/energized substation process bus.**
 
-## Step 3 — Install the matched firmware
+## Step 3 — Install revision-matched firmware
 
-1. In Studio, open **Configuration → Firmware**.
-2. Select the ESP32-P4 device and use **Verify ESP32-P4**.
-3. Choose **Install / Recover** to install the firmware provided with this Studio release.
-4. Allow the board to restart, then reconnect from Studio and confirm device recognition.
+1. Open **Configuration → Firmware** in Studio.
+2. Use **Verify ESP32-P4** to identify the board.
+3. Install/recover firmware from the **same stable release**, using the matching **pre-v3** or **v3.x** image.
+4. Restart/reconnect as instructed and verify the recognized board identity.
 
-Installing a newer Windows application does **not** update the board firmware automatically. Use the firmware packaged with that release.
+The v3.x image is part of the dual-firmware package but retains **engineering-preview physical qualification**. Do not present historical pre-v3 traffic acceptance as v3.x evidence.
 
-## Step 4 — Generate Sampled Values
+## Step 4 — Generate Sampled Values and PTP
 
-1. Select **4I+4V Quick Start**.
-2. Deploy the supported publisher profile while the output is stopped.
-3. Choose **PTP SOURCE / internal laboratory grandmaster** and **SMPSYNCH AUTO**.
-4. Set current and voltage magnitudes and phase angles in Studio.
-5. Press **Start**. The ESP32-P4 sends the real-time SV stream directly from its Ethernet hardware.
-6. Press **Stop** when finished. PTP SOURCE can remain active across SV STOP/START.
+1. Select built-in **4I+4V Quick Start**, or import a supported SCL/SCD/CID/IID engineering profile.
+2. Deploy the supported stream configuration while output is stopped.
+3. Select simulated **PTP SOURCE / INTERNAL_GM_ONLY** and **SMPSYNCH AUTO** for the intended lab profile.
+4. Set current/voltage magnitudes and phase angles, then press **Start**.
+5. Press **Stop** when finished. PTP SOURCE can remain active across SV stop/start.
 
-The official M3.H.3 lab profile sends 4 current and 4 voltage values at nominal 4,000 SV frames per second. SV is generated on the powered ESP32-P4; closing Studio leaves it running until operator STOP, an Ethernet down/failure, or loss of board power. On reopening, Studio adopts the board state rather than restarting SV.
+The historic M3.H.3 single-stream test used four current and four voltage values at nominal 4,000 SV frames per second. The powered board publishes autonomously; if Studio closes, it continues while board power and Ethernet remain available, until operator stop or a fault. Reopened Studio adopts the live board state.
 
-## Step 5 — View your Ethernet traffic
+## Step 5 — Inspect real Ethernet traffic
 
-With the PC capture interface connected to the relevant lab segment or switch mirror (or a relay/BCU test-port subscriber configured for the stream):
+Connect your analyzer to the correct lab segment or mirrored switch port:
 
-- Filter **Sampled Values:** `eth.type == 0x88ba`
-- Filter **PTP:** `eth.type == 0x88f7`
-- Watch the SV `smpCnt` increase and wrap from `3999` to `0`.
-- Inspect `svID`, `APPID`, quality fields, and the PTP Announce/Sync/Follow_Up messages.
+- SV display filter: `eth.type == 0x88ba`
+- PTP display filter: `eth.type == 0x88f7`
+- Inspect APPID, svID, multicast MAC, VLAN/PCP, smpCnt, confRev, quality and PTP Announce/Sync/Follow_Up.
+- Ensure the subscriber expects the identity and layout actually published by Studio.
 
-**Engineer tip:** if a relay/BCU or capture tool does not display values, first compare its expected APPID, multicast MAC, svID, VLAN/PCP and input network interface to the Studio stream settings. A normal switch may not mirror multicast to the PC NIC; use the intended capture port or mirrored lab port.
+A normal switch might not forward all multicast packets to the PC port; use the appropriate capture port.
 
-## Try something different
+## SCL and multiple virtual Merging Units
 
-Adjust voltage/current amplitude or phase and observe changes in the subscriber. Open a compatible SCL/CID/SCD/IID engineering file and select a supported 4I+4V publisher profile. **Coming next:** concurrent Multi-SV and multi-Merging-Unit stream selection from SCL on one ESP32-P4 — [roadmap](PROCESS_BUS_MULTI_SV_SCL_NEXT_PHASE.md).
+**M4 software now includes SCL-driven three-virtual-MU configuration and group START/STOP** with a shared PTP/sample timebase. This is **integrated software**, not merely a future plan. Sustained **3 × 4,000 fps aggregate physical wire-load acceptance** and broader v3.x board/PHY qualification remain separate verification tasks.
 
-## Need help?
+See the [Multi-SV engineering roadmap](PROCESS_BUS_MULTI_SV_SCL_NEXT_PHASE.md) and [SCL troubleshooting](SCL_TROUBLESHOOTING.md).
 
-Check the [installation guide](INSTALL.md) or [support guide](../SUPPORT.md). For an SCL import where SV ID or MAC address does not appear, follow the [SCL troubleshooting guide](SCL_TROUBLESHOOTING.md). If a device will not connect, share the Studio version and the displayed error.
+## Support and verification
 
-Want to publish observations from another IEC 61850 tool or device? See the [community testing guide](COMMUNITY_TESTING.md).
-
-For the M3.H.3 on-wire SV/PTP capture and exact shipped profile, see the [official release record](releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md).
+[Installation](INSTALL.md) · [Support](../SUPPORT.md) · [Community testing](COMMUNITY_TESTING.md) · [Historical single-stream M3.H.3 evidence](releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md)
