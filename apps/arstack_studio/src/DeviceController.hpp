@@ -83,6 +83,8 @@ class DeviceController : public QObject {
     Q_PROPERTY(QString m4DeployedHash READ m4DeployedHash NOTIFY m4DeploymentChanged)
     Q_PROPERTY(bool m4ScenarioApplying READ m4ScenarioApplying NOTIFY m4DeploymentChanged)
     Q_PROPERTY(bool m4ScenariosVerified READ m4ScenariosVerified NOTIFY m4DeploymentChanged)
+    Q_PROPERTY(bool m4GroupStarting READ m4GroupStarting NOTIFY m4DeploymentChanged)
+    Q_PROPERTY(QString m4GroupStatus READ m4GroupStatus NOTIFY m4DeploymentChanged)
     Q_PROPERTY(bool m4BoardInspecting READ m4BoardInspecting NOTIFY m4BoardChanged)
     Q_PROPERTY(QString m4ReconnectMode READ m4ReconnectMode NOTIFY m4ReconnectModeChanged)
     Q_PROPERTY(QString m4BoardRosterHash READ m4BoardRosterHash NOTIFY m4ReconnectModeChanged)
@@ -200,6 +202,17 @@ public:
     [[nodiscard]] QString m4DeployedHash() const { return m4DeployedHash_; }
     [[nodiscard]] bool m4ScenarioApplying() const noexcept { return m4ScenarioApplying_ || m4ScenarioRetiring_; }
     [[nodiscard]] bool m4ScenariosVerified() const noexcept { return m4ScenariosVerified_; }
+    [[nodiscard]] bool m4GroupStarting() const noexcept {
+        return m4GroupStage_ == M4GroupStage::awaiting_start_ack ||
+            m4GroupStage_ == M4GroupStage::awaiting_start_readback ||
+            m4GroupStage_ == M4GroupStage::awaiting_stop_ack ||
+            m4GroupStage_ == M4GroupStage::awaiting_stop_readback;
+    }
+    [[nodiscard]] bool m4GroupStartAllowed() const noexcept {
+        return m4GroupStage_ == M4GroupStage::idle ||
+            m4GroupStage_ == M4GroupStage::confirmed_stopped;
+    }
+    [[nodiscard]] QString m4GroupStatus() const { return m4GroupStatus_; }
     [[nodiscard]] bool m4BoardInspecting() const noexcept { return m4BoardInspecting_; }
     [[nodiscard]] QVariantList m4BoardSnapshots() const { return m4BoardSnapshots_; }
     [[nodiscard]] QString m4BoardStatus() const { return m4BoardStatus_; }
@@ -290,6 +303,9 @@ public:
     virtual bool start();
     // Single validated, bounded FIFO transaction. START is always last.
     bool startWithScenario(const QVariantMap& scenario);
+    // Explicit M4 operator START: exact SCD draft, 3 committed MU banks,
+    // selected firmware roster and fresh board readback are mandatory.
+    bool startMultiSvGroup(const QVariantList& drafts);
     bool applyLiveScenario(const QVariantMap& scenario);
     bool stop();
     virtual bool zero();
@@ -419,6 +435,10 @@ private:
     };
 
     enum class ScenarioStage { idle, awaiting_commit, awaiting_readback, awaiting_start_ack };
+    enum class M4GroupStage {
+        idle, awaiting_start_ack, awaiting_start_readback, running_confirmed,
+        awaiting_stop_ack, awaiting_stop_readback, confirmed_stopped, uncertain
+    };
 
     enum class BinaryProfileStage {
         idle,
@@ -474,6 +494,8 @@ private:
     void cancelM4Scenarios(const QString& reason);
     bool dispatchM4ScenarioStep();
     bool processM4ScenarioLine(const QString& line);
+    bool processM4GroupLine(const QString& line);
+    void failM4Group(const QString& why);
     bool processM4BoardLine(const QString& line);
     bool processM4ReconnectLine(const QString& line);
     void resetM4Reconnect(const QString& mode);
@@ -567,6 +589,14 @@ private:
     bool m4ScenarioApplying_{false};
     bool m4ScenarioRetiring_{false};
     bool m4ScenariosVerified_{false};
+    M4GroupStage m4GroupStage_{M4GroupStage::idle};
+    QTimer m4GroupTimer_;
+    QString m4GroupInFlight_;
+    QString m4GroupBoot_;
+    QString m4GroupRoster_;
+    QString m4GroupStatus_{QStringLiteral("M4 group START requires verified roster and 3 MU banks")};
+    quint64 m4GroupToken_{0};
+    quint64 m4GroupSession_{0};
     bool m4ScenarioDispatching_{false};
     std::unique_ptr<M4ThreeMuBoardReadback> m4BoardReadback_;
     QTimer m4BoardTimer_;

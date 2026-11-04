@@ -256,6 +256,15 @@ void testThreeMuScenarioApply() {
     check(tx.verified() && tx.generation(0) == 6 &&
           tx.generation(1) == 7 && tx.generation(2) == 8,
           "three independently committed MCU generations");
+    check(tx.matchesDrafts(drafts) && tx.hash(0) != 0U &&
+          tx.hash(1) != 0U && tx.hash(2) != 0U,
+          "3 current editor hashes must match firmware verified banks");
+    auto changed = drafts;
+    auto mutated = changed.at(1).toMap();
+    mutated[QStringLiteral("hz")] = 61.0;
+    changed[1] = mutated;
+    check(!tx.matchesDrafts(changed), "edited MU2 must invalidate group start");
+    check(!tx.matchesDrafts(invalid), "missing MU3 must invalidate group start");
     M4ThreeMuScenarioApply rejected;
     check(rejected.start(drafts, kBoot), "negative fixture started");
     const auto first = applyStep(rejected, 1);

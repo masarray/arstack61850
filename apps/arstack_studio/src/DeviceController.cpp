@@ -164,6 +164,13 @@ DeviceController::DeviceController(QObject* parent) : QObject(parent) {
         if (m4BoardInspecting_) cancelM4Board(
             QStringLiteral("3-MU board inspection timed out; no snapshot adopted."));
     });
+    m4GroupTimer_.setSingleShot(true);
+    m4GroupTimer_.setInterval(7000);
+    connect(&m4GroupTimer_, &QTimer::timeout, this, [this] {
+        if (m4GroupStarting()) failM4Group(QStringLiteral(
+            "M4 START/STOP readback timed out; board output is UNCONFIRMED. "
+            "Use explicit STOP and fresh board diagnostics before retry."));
+    });
     m4ScenarioTimer_.setSingleShot(true);
     m4ScenarioTimer_.setInterval(7000);
     connect(&m4ScenarioTimer_, &QTimer::timeout, this, [this] {
@@ -453,6 +460,11 @@ void DeviceController::connectWorkerSignals() {
             m4BoardInFlight_.clear();
             m4BoardTimer_.start();
         }
+        if (m4GroupStarting() && generation == m4GroupSession_ &&
+            command == m4GroupInFlight_) {
+            m4GroupInFlight_.clear();
+            m4GroupTimer_.start();
+        }
         if (m4Deploying_ && generation == m4SessionGeneration_ &&
             command == m4InFlightCommand_) {
             // Worker has actually written the UART bytes; only now are
@@ -482,6 +494,8 @@ void DeviceController::connectWorkerSignals() {
             cancelM4(QStringLiteral("M4 serial command rejected: ") + message);
         if (m4ScenarioApplying_)
             cancelM4Scenarios(QStringLiteral("Per-MU serial command rejected: ") + message);
+        if (m4GroupStarting())
+            failM4Group(QStringLiteral("M4 group command rejected by serial owner: ") + message);
         if (scenarioStage_ != ScenarioStage::idle)
             failScenarioStart(QStringLiteral("SV scenario serial command rejected: ") + message);
         if (profileDeploying_) {
@@ -515,6 +529,8 @@ void DeviceController::connectWorkerSignals() {
             cancelM4(QStringLiteral("M4 transport failure: ") + message);
         if (m4ScenarioApplying_)
             cancelM4Scenarios(QStringLiteral("Per-MU transport failure: ") + message);
+        if (m4GroupStarting())
+            failM4Group(QStringLiteral("M4 group transport error: ") + message);
         if (scenarioStage_ != ScenarioStage::idle)
             failScenarioStart(QStringLiteral("SV transaction transport error: ") + message);
         setError(message);
@@ -829,6 +845,12 @@ void DeviceController::handlePortClosed(const QString& portName) {
     profileArmed_ = false;
     profileWasReused_ = false;
     resetM4Reconnect(QStringLiteral("LEGACY"));
+    // A USB disconnect never sends STOP; local group confirmation is revoked.
+    m4GroupTimer_.stop();
+    m4GroupInFlight_.clear();
+    m4GroupStage_ = M4GroupStage::idle;
+    m4GroupStatus_ = QStringLiteral("USB disconnected: board output unknown until fresh readback");
+    emit m4DeploymentChanged();
     cancelM4Board(QStringLiteral("Port closed; board MU snapshot revoked."));
     cancelM4Scenarios(QStringLiteral("Port closed; per-MU readback invalid."));
     m4ScenarioRetiring_ = false;
@@ -862,6 +884,154 @@ bool DeviceController::start() {
     // A bare START bypasses the 4I+4V scenario snapshot and may reuse stale firmware state.
     // Until firmware-applied transaction ACK is implemented, never expose this shortcut.
     setError(QStringLiteral("Bare START refused: a fresh 4I+4V scenario is required."));
+    return false;
+}
+
+void DeviceController::failM4Group(const QString& why) {
+    m4GroupTimer_.stop();
+    m4GroupInFlight_.clear();
+    m4GroupStage_ = M4GroupStage::uncertain;
+    m4GroupStatus_ = why;
+    emit m4DeploymentChanged();
+    setError(why);
+}
+
+bool DeviceController::startMultiSvGroup(const QVariantList& drafts) {
+    const bool admitted = connected_ && deviceVerified_ && ioWorkerReady_ &&
+        identity_.bootId.size() == 16 && sessionGeneration_ != 0 &&
+        !running_ && m4GroupStartAllowed() && m4Ready_ && m4ScenariosVerified_ &&
+        !m4Deploying_ && !m4ScenarioApplying_ && !m4ScenarioRetiring_ &&
+        !m4BoardInspecting_ && !profileDeploying_ &&
+        scenarioStage_ == ScenarioStage::idle && !ptpStarting() &&
+        !firmwareQuiescenceActive_ &&
+        ptpEthernetLink_ == QStringLiteral("UP") &&
+        m4ReconnectMode_ == QStringLiteral("SELECTED") &&
+        m4ReconnectBoot_ == identity_.bootId &&
+        m4ReconnectStreamMask_ == 0x07U &&
+        m4ReconnectRosterLines_.size() == 3 &&
+        !m4DeployedHash_.isEmpty() &&
+        m4ReconnectRosterHash_.compare(m4DeployedHash_, Qt::CaseInsensitive) == 0 &&
+        identity_.capabilities.contains(QStringLiteral("MULTISV-GROUPSTART-V1"),
+                                       Qt::CaseInsensitive) &&
+        m4Scenarios_.matchesDrafts(drafts);
+    if (!admitted) {
+        setError(QStringLiteral("M4START refused: exact SCD/board roster, "
+            "3 freshly applied MU banks, unchanged editor drafts, link UP, "
+            "idle serial session and group-capable firmware required."));
+        return false;
+    }
+    const quint64 generated = QRandomGenerator::global()->generate64();
+    const quint64 token = generated != 0U ? generated : 1U;
+    QStringList terms{QStringLiteral("M4START"), QString::number(token),
+                      identity_.bootId, m4DeployedHash_};
+    for (int i = 0; i < 3; ++i) {
+        terms << QString::number(static_cast<qulonglong>(m4Scenarios_.generation(i)))
+              << QString::number(static_cast<qulonglong>(m4Scenarios_.hash(i)), 16)
+                     .rightJustified(16, QLatin1Char('0')).toUpper();
+    }
+    const QString command = terms.join(QLatin1Char(' '));
+    // ESP32-P4 line buffer is 192 bytes including NUL. Rejection is local;
+    // never truncate an authorization transaction or transmit a partial proof.
+    if (command.size() >= 192) return false;
+    m4GroupToken_ = token;
+    m4GroupBoot_ = identity_.bootId;
+    m4GroupRoster_ = m4DeployedHash_;
+    m4GroupSession_ = sessionGeneration_;
+    m4GroupInFlight_ = command;
+    m4GroupStage_ = M4GroupStage::awaiting_start_ack;
+    m4GroupStatus_ = QStringLiteral("M4START sent; waiting for board ACK and authoritative RUNNING readback");
+    emit m4DeploymentChanged();
+    if (!sendCommandBatch({command}, false, true)) {
+        failM4Group(QStringLiteral("M4START could not reserve the existing serial worker."));
+        return false;
+    }
+    m4GroupTimer_.start();
+    return true;
+}
+
+bool DeviceController::processM4GroupLine(const QString& line) {
+    if (!m4GroupStarting()) return false;
+    if (m4GroupSession_ != sessionGeneration_ ||
+        m4GroupBoot_ != identity_.bootId || !connected_ || !deviceVerified_) {
+        failM4Group(QStringLiteral("M4 group proof invalidated by boot/session change."));
+        return true;
+    }
+    const auto extract = [&line](const QString& key) -> QString {
+        const QRegularExpression re(QStringLiteral("(?:^|\\s)") +
+            QRegularExpression::escape(key) + QStringLiteral("=([^\\s]+)"));
+        return re.match(line).captured(1);
+    };
+    if (m4GroupStage_ == M4GroupStage::awaiting_start_ack &&
+        line.contains(QStringLiteral("M4START rejected"))) {
+        if (!m4GroupInFlight_.isEmpty()) return true;
+        failM4Group(QStringLiteral("Firmware rejected M4START: ") + line.right(160));
+        return true;
+    }
+    if (m4GroupStage_ == M4GroupStage::awaiting_start_ack &&
+        line.contains(QStringLiteral("M4START accepted "))) {
+        if (!m4GroupInFlight_.isEmpty()) return true;
+        bool tokOk = false, bootOk = false, hashOk = false, maskOk = false;
+        const auto token = extract(QStringLiteral("token")).toULongLong(&tokOk);
+        const auto boot = extract(QStringLiteral("boot")).toULongLong(&bootOk, 16);
+        const auto roster = extract(QStringLiteral("roster")).toULongLong(&hashOk, 16);
+        const auto mask = extract(QStringLiteral("mask")).toUInt(&maskOk);
+        if (!tokOk || token != m4GroupToken_ || !bootOk ||
+            boot != m4GroupBoot_.toULongLong(nullptr, 16) || !hashOk ||
+            roster != m4GroupRoster_.toULongLong(nullptr, 16) || !maskOk || mask != 7U) {
+            failM4Group(QStringLiteral("M4START ACK token/boot/roster/mask mismatch."));
+            return true;
+        }
+        m4GroupStage_ = M4GroupStage::awaiting_start_readback;
+        m4GroupInFlight_ = QStringLiteral("M4SHOW");
+        if (!sendCommand(m4GroupInFlight_)) {
+            failM4Group(QStringLiteral("M4START accepted but board state cannot be read back."));
+        } else m4GroupTimer_.start();
+        return true;
+    }
+    if (m4GroupStage_ == M4GroupStage::awaiting_stop_ack &&
+        line.contains(QStringLiteral("STOP accepted: SV transmission suppressed"))) {
+        if (!m4GroupInFlight_.isEmpty()) return true;
+        m4GroupStage_ = M4GroupStage::awaiting_stop_readback;
+        m4GroupInFlight_ = QStringLiteral("M4SHOW");
+        if (!sendCommand(m4GroupInFlight_))
+            failM4Group(QStringLiteral("STOP ACK received but board STOPPED readback unavailable."));
+        else m4GroupTimer_.start();
+        return true;
+    }
+    if ((m4GroupStage_ == M4GroupStage::awaiting_start_readback ||
+         m4GroupStage_ == M4GroupStage::awaiting_stop_readback) &&
+        line.contains(QStringLiteral("M4STATE "))) {
+        if (!m4GroupInFlight_.isEmpty()) return true;
+        bool tokOk=false, bootOk=false, hashOk=false, genOk=false;
+        bool selectedOk=false, maskOk=false, runningOk=false;
+        const auto token=extract(QStringLiteral("token")).toULongLong(&tokOk);
+        const auto boot=extract(QStringLiteral("boot")).toULongLong(&bootOk,16);
+        const auto roster=extract(QStringLiteral("roster")).toULongLong(&hashOk,16);
+        const auto gen=extract(QStringLiteral("generation")).toULongLong(&genOk);
+        const auto selected=extract(QStringLiteral("selected")).toUInt(&selectedOk);
+        const auto mask=extract(QStringLiteral("mask")).toUInt(&maskOk);
+        const auto running=extract(QStringLiteral("running")).toUInt(&runningOk);
+        const bool stopping=m4GroupStage_ == M4GroupStage::awaiting_stop_readback;
+        if (!tokOk || (!stopping && token != m4GroupToken_) ||
+            !bootOk || boot != m4GroupBoot_.toULongLong(nullptr,16) ||
+            !hashOk || roster != m4GroupRoster_.toULongLong(nullptr,16) ||
+            !genOk || gen != m4ReconnectRosterGeneration_ ||
+            !selectedOk || selected != 1U || !maskOk || mask != 7U ||
+            !runningOk || running != (stopping ? 0U : 1U)) {
+            failM4Group(QStringLiteral("M4 board state readback rejected: boot/roster/epoch/mask/RUNNING mismatch."));
+            return true;
+        }
+        m4GroupTimer_.stop();
+        m4GroupInFlight_.clear();
+        m4GroupStage_ = stopping ? M4GroupStage::confirmed_stopped :
+                                 M4GroupStage::running_confirmed;
+        m4GroupStatus_ = stopping
+            ? QStringLiteral("3-MU STOPPED confirmed by board; wire capture remains independent.")
+            : QStringLiteral("3-MU RUNNING confirmed by board; 12kfps PCAP acceptance PENDING.");
+        setRunning(!stopping);
+        emit m4DeploymentChanged();
+        return true;
+    }
     return false;
 }
 
@@ -992,6 +1162,28 @@ bool DeviceController::submitScenario(const QVariantMap& scenario, const bool st
     return true;
 }
 bool DeviceController::stop() {
+    const bool groupStop = m4GroupStarting() ||
+        (m4ReconnectMode_ == QStringLiteral("SELECTED") &&
+         (running_ || m4GroupStage_ == M4GroupStage::uncertain ||
+          m4GroupStage_ == M4GroupStage::running_confirmed));
+    if (groupStop) {
+        // Retire not-yet-written exclusive M4START before priority STOP.
+        if (ioWorker_ != nullptr && ioThread_.isRunning()) {
+            DeviceIoWorker* const worker = ioWorker_;
+            const quint64 generation = sessionGeneration_;
+            static_cast<void>(QMetaObject::invokeMethod(worker, [worker, generation] {
+                worker->retireExclusiveCommands(generation);
+            }, Qt::QueuedConnection));
+        }
+        m4GroupTimer_.start();
+        m4GroupStage_ = M4GroupStage::awaiting_stop_ack;
+        m4GroupSession_ = sessionGeneration_;
+        m4GroupBoot_ = identity_.bootId;
+        m4GroupRoster_ = m4ReconnectRosterHash_;
+        m4GroupInFlight_ = QStringLiteral("STOP");
+        m4GroupStatus_ = QStringLiteral("Explicit STOP sent; verifying board STOPPED readback");
+        emit m4DeploymentChanged();
+    }
     cancelM4Board(QStringLiteral("Operator STOP: board MU snapshots must be inspected again."));
     if (m4ScenarioApplying_) cancelM4Scenarios(QStringLiteral("Explicit STOP cancelled per-MU CFG transaction."));
     if (m4Deploying_) cancelM4(QStringLiteral("M4 upload cancelled by explicit operator STOP."));
@@ -1001,7 +1193,9 @@ bool DeviceController::stop() {
         .arg(sessionGeneration_).arg(identity_.bootId)
         .arg(running_ ? 1 : 0).arg(scenarioStage_ != ScenarioStage::idle ? 1 : 0));
     resetScenarioStart();
-    return sendCommand(QStringLiteral("STOP"));
+    const bool sent = sendCommand(QStringLiteral("STOP"));
+    if (!sent && groupStop) failM4Group(QStringLiteral("M4 priority STOP was not accepted by serial worker."));
+    return sent;
 }
 bool DeviceController::zero() { return sendCommand(QStringLiteral("ZERO")); }
 
@@ -1284,7 +1478,8 @@ bool DeviceController::applyMultiSvScenarios(const QVariantList& drafts) {
     if (m4BoardInspecting_) return false;
     cancelM4Board(QStringLiteral("M4 scenario changed; previous bank snapshot stale."));
     if (!connected_ || !deviceVerified_ || !ioWorkerReady_ || !m4Ready_ ||
-        m4Deploying_ || m4ScenarioApplying_ || m4ScenarioRetiring_ || running_ || ptpStarting() ||
+        !m4GroupStartAllowed() || m4Deploying_ || m4ScenarioApplying_ ||
+        m4ScenarioRetiring_ || running_ || ptpStarting() ||
         profileDeploying_ || scenarioStage_ != ScenarioStage::idle ||
         identity_.bootId.size() != 16 || sessionGeneration_ == 0) {
         setError(QStringLiteral("Three-MU CFG requires verified selected ARM3 roster, "
@@ -2744,6 +2939,7 @@ void DeviceController::processLine(const QString& rawLine) {
     appendLog(QStringLiteral("←"), line);
     if (processM4Line(line)) return;
     if (processM4ScenarioLine(line)) return;
+    if (processM4GroupLine(line)) return;
     if (processM4BoardLine(line)) return;
     if (processM4ReconnectLine(line)) return;
 

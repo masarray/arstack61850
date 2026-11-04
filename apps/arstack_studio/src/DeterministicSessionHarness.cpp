@@ -83,6 +83,7 @@ public:
             {"M4 per-MU CFG STOP aborts serial queue without V1 START", m4PerMuScenarioStopGuard()},
             {"M4 timeout retires unsent exclusive CFG without unsolicited STOP", m4RetireExclusiveQueueWithoutStop()},
             {"M4 board inspection defers refresh but PTP STOP preempts it", m4BoardInspectionPtpSafetyPreempts()},
+            {"M4 group START/STOP requires exact boot/roster/token/mask RUNNING proof", m4GroupReadbackFailClosed()},
             {"M4 reconnect selected roster blocks legacy V1 sync and awaits read-only banks", m4ReconnectSelectedGate()},
             {"M4 reconnect uncertain roster never guesses legacy", m4ReconnectUnknownGate()},
             {"legacy bare SV START refuses stale eight-channel state", legacyBareStartFailsClosed()},
@@ -2448,6 +2449,49 @@ private:
         return deferred && !d.m4BoardInspecting_ && !d.m4BoardTimer_.isActive() &&
             d.m4BoardStatus().contains(QStringLiteral("STOP")) &&
             d.deferredPtpShow_ && d.m4BoardSnapshots_.isEmpty();
+    }
+
+    static bool m4GroupReadbackFailClosed() {
+        Fixture fixture;
+        if (!fixture.profileReady) return false;
+        seedVerified(fixture, identity(), QStringLiteral("COM7"), false);
+        auto& d = fixture.device;
+        d.m4GroupSession_ = d.sessionGeneration_;
+        d.m4GroupBoot_ = d.identity_.bootId;
+        d.m4GroupRoster_ = QStringLiteral("0123456789ABCDEF");
+        d.m4GroupToken_ = 42U;
+        d.m4ReconnectRosterGeneration_ = 5U;
+        const auto state = [&d](const int running, const unsigned mask = 7,
+                                const QString& boot = QString{}) {
+            return QStringLiteral("I (123) sv: M4STATE token=42 boot=%1 "
+                "roster=0123456789ABCDEF generation=5 selected=1 mask=%2 running=%3")
+                .arg(boot.isEmpty() ? d.m4GroupBoot_ : boot).arg(mask).arg(running);
+        };
+        d.m4GroupStage_ = DeviceController::M4GroupStage::awaiting_start_readback;
+        if (!d.processM4GroupLine(state(1)) ||
+            d.m4GroupStage_ != DeviceController::M4GroupStage::running_confirmed ||
+            !d.running() || d.m4GroupStarting()) return false;
+        d.m4GroupStage_ = DeviceController::M4GroupStage::awaiting_stop_readback;
+        if (!d.processM4GroupLine(state(0)) ||
+            d.m4GroupStage_ != DeviceController::M4GroupStage::confirmed_stopped ||
+            d.running() || !d.m4GroupStartAllowed()) return false;
+        d.m4GroupStage_ = DeviceController::M4GroupStage::awaiting_start_readback;
+        if (!d.processM4GroupLine(state(1, 3)) ||
+            d.m4GroupStage_ != DeviceController::M4GroupStage::uncertain ||
+            d.m4GroupStartAllowed()) return false;
+        d.m4GroupStage_ = DeviceController::M4GroupStage::awaiting_start_readback;
+        if (!d.processM4GroupLine(state(1, 7, QStringLiteral("DEADBEEFDEADBEEF"))) ||
+            d.m4GroupStage_ != DeviceController::M4GroupStage::uncertain) return false;
+        d.m4GroupStage_ = DeviceController::M4GroupStage::awaiting_start_ack;
+        d.m4GroupInFlight_.clear();
+        if (!d.processM4GroupLine(QStringLiteral(
+                "M4START accepted token=41 boot=%1 roster=0123456789ABCDEF mask=7")
+                    .arg(d.m4GroupBoot_)) ||
+            d.m4GroupStage_ != DeviceController::M4GroupStage::uncertain) return false;
+        d.m4GroupStage_ = DeviceController::M4GroupStage::awaiting_stop_readback;
+        if (!d.processM4GroupLine(state(1)) ||
+            d.m4GroupStage_ != DeviceController::M4GroupStage::uncertain) return false;
+        return true;
     }
 
     static bool m4ReconnectSelectedGate() {

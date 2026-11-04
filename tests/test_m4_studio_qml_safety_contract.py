@@ -43,5 +43,14 @@ class M4QmlSafetyContract(unittest.TestCase):
         self.assertIn("frequencyField.invalidInput = false", restore)
 
 
+    def test_m4_group_start_reuses_existing_editors_and_fail_closed_supervisor(self):
+        ribbon = (ROOT / "apps/arstack_studio/qml/WorkflowBar.qml").read_text(encoding="utf-8")
+        self.assertIn("controller.m4StartDrafts()", ribbon)
+        self.assertIn("smartSession.canStartMultiSv", ribbon)
+        self.assertIn("smartSession.requestStartMultiSv(drafts)", ribbon)
+        self.assertIn("m4Pages.saveCurrent(root.startScenarioSnapshot(false))", QML)
+        self.assertIn("3-MU START refused", ribbon)
+
+
 if __name__ == "__main__":
     unittest.main()

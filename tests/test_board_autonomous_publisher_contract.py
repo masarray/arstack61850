@@ -56,6 +56,17 @@ app_boot = eth.split('extern "C" void app_main(void)', 1)[1]
 assert app_boot.index("esp_eth_start(eth_handle)") < app_boot.index("live_control_initialize(")
 assert "SV-LAN-AUTONOMY-V1" in fw
 assert "SESSION-LEASE" not in fw
+# M4 must use a distinct, exact-3-bank command and the SAME publisher state.
+assert 'std::strcmp(command, "M4START") == 0' in fw
+assert "multi_profile_group_start_matches(roster, generations, hashes)" in fw
+assert "g_physical_link_up.load(std::memory_order_relaxed)" in fw.split(
+    'if (std::strcmp(command, "M4START") == 0)', 1)[1].split(
+    'if (std::strcmp(command, "M4SHOW") == 0)', 1)[0]
+assert "M4STATE token=" in fw
+multi = (root / "embedded/esp32p4_smv_injector/main/multi_profile_control.cpp").read_text()
+assert "g_mu_stream_gate.snapshot_mask() != 0x07U" in multi
+assert "sv_scenario_hash(bank) != hashes[i]" in multi
+assert "bank.generation != generations[i]" in multi
 assert "SV-LAN-AUTONOMY-V1" in device
 assert "SVBANK BEGIN generation=" in fw and "SVBANK END generation=" in fw
 assert "SVBANK BEGIN" in device and "SVBANK END" in device

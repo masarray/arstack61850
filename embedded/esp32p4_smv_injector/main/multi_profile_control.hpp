@@ -2,6 +2,7 @@
 #pragma once
 #include "ariec61850/sampled_values/compiled_device_profile.hpp"
 #include "ariec61850/sampled_values/live_signal_state.hpp"
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -18,6 +19,16 @@ multi_profile_signal_snapshot(std::size_t slot) noexcept;
 // One acquire snapshot at the start of each 250us batch. Bits 0/1/2 gate
 // canonical MU1/MU2/MU3 Ethernet submissions without resetting the grid.
 [[nodiscard]] std::uint8_t multi_profile_enabled_mask() noexcept;
+
+// Control-task readback: the selected immutable roster is the sole profile authority.
+[[nodiscard]] std::uint64_t multi_profile_roster_hash_if_selected() noexcept;
+[[nodiscard]] std::uint64_t multi_profile_roster_generation_if_selected() noexcept;
+// Requires three current bank generations + canonical hashes and all three TX bits.
+// No new publisher owner, no heap, no wire-time work.
+[[nodiscard]] bool multi_profile_group_start_matches(
+    std::uint64_t roster_hash,
+    const std::array<std::uint64_t, 3>& generations,
+    const std::array<std::uint64_t, 3>& hashes) noexcept;
 
 // Null means legacy V1 START. Non-null is the selected, validated, committed
 // 3-profile V2 roster. Never retain across STOP and a future control commit.

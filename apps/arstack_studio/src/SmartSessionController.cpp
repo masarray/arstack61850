@@ -210,6 +210,21 @@ bool SmartSessionController::canApplyMultiSvScenarios() const noexcept {
         profiles_->m4DraftSupported() &&
         device_->m4DeployedHash() == profiles_->m4ConfigurationHash();
 }
+bool SmartSessionController::canStartMultiSv() const noexcept {
+    return m4Mode_ && deviceControlAvailable() && profiles_ != nullptr &&
+        m4SclRosterMatch_ == QStringLiteral("MATCHED") &&
+        profiles_->m4DraftSupported() && !device_->running() &&
+        device_->m4Ready() && device_->m4ScenariosVerified() &&
+        device_->m4GroupStartAllowed() && !device_->m4Deploying() &&
+        !device_->m4ScenarioApplying() && !device_->m4BoardInspecting() &&
+        !device_->profileDeploying() && !device_->scenarioApplying() &&
+        !device_->ptpStarting() && device_->ptpEthernetLink() == QStringLiteral("UP") &&
+        device_->m4ReconnectMode() == QStringLiteral("SELECTED") &&
+        device_->m4DeployedHash() == profiles_->m4ConfigurationHash() &&
+        device_->capabilities().contains(QStringLiteral("MULTISV-GROUPSTART-V1"),
+                                          Qt::CaseInsensitive);
+}
+
 bool SmartSessionController::canInspectMultiSvBoard() const noexcept {
     // Explicit board inspection remains available after reconnect, including
     // autonomous RUNNING state, without selecting or deploying any GUI draft.
@@ -405,7 +420,8 @@ bool SmartSessionController::requestStop() {
     // STOP is a cancellation authority even before SV RUNNING telemetry: an
     // ACKed staging transaction may still be advancing toward START.
     if (!device_->running() && !device_->scenarioApplying() &&
-        !device_->m4Deploying() && !device_->m4ScenarioApplying()) return true;
+        !device_->m4Deploying() && !device_->m4ScenarioApplying() &&
+        !device_->m4GroupStarting()) return true;
     if (portOwner_ != PortOwner::deviceSession || updateRequested_) return false;
     return device_->stop();
 }
@@ -474,6 +490,13 @@ bool SmartSessionController::requestApplyMultiSvScenarios(const QVariantList& dr
     const bool started = device_->applyMultiSvScenarios(drafts);
     reconcile();
     return started;
+}
+
+bool SmartSessionController::requestStartMultiSv(const QVariantList& drafts) {
+    if (!canStartMultiSv() || drafts.size() != 3) return false;
+    const bool accepted = device_->startMultiSvGroup(drafts);
+    reconcile();
+    return accepted;
 }
 
 bool SmartSessionController::requestInspectMultiSvBoard() {

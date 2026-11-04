@@ -169,6 +169,33 @@ multi_profile_signal_snapshot(const std::size_t slot) noexcept {
 }
 
 
+std::uint64_t multi_profile_roster_hash_if_selected() noexcept {
+    return multi_profile_tx_roster_if_selected() != nullptr
+        ? g_multi.committed_hash() : 0U;
+}
+
+std::uint64_t multi_profile_roster_generation_if_selected() noexcept {
+    return multi_profile_tx_roster_if_selected() != nullptr
+        ? g_multi.generation() : 0U;
+}
+
+bool multi_profile_group_start_matches(
+    const std::uint64_t roster_hash,
+    const std::array<std::uint64_t, 3>& generations,
+    const std::array<std::uint64_t, 3>& hashes) noexcept {
+    if (roster_hash == 0U || multi_profile_roster_hash_if_selected() != roster_hash ||
+        g_multi.uploading() || g_mu_stream_gate.snapshot_mask() != 0x07U) return false;
+    for (std::size_t i = 0U; i < generations.size(); ++i) {
+        const auto bank = multi_profile_signal_snapshot(i);
+        if (generations[i] == 0U || hashes[i] == 0U ||
+            bank.generation != generations[i] ||
+            !ar::iec61850::sampled_values::SvLiveSignalBank::validate(bank) ||
+            ar::iec61850::sampled_values::sv_scenario_hash(bank) != hashes[i])
+            return false;
+    }
+    return true;
+}
+
 [[nodiscard]] bool parse_u64_token(const char* text, std::uint64_t& output,
                                    const int base) noexcept {
     if (!text || !*text || *text == '-') return false;

@@ -84,6 +84,8 @@ std::atomic<std::uint32_t> g_sv_stop_heartbeat_age_ms{0U};
 portMUX_TYPE g_control_lease_mux = portMUX_INITIALIZER_UNLOCKED;
 esp_timer_handle_t g_control_lease_timer{nullptr};
 std::uint64_t g_boot_id{0U};
+// Replay guard for explicit M4 starts; never a second publisher-state owner.
+std::uint64_t g_last_m4_start_token{0U};
 
 void wake_publisher() noexcept {
     const auto task = g_publisher_task.load(std::memory_order_acquire);
@@ -270,7 +272,7 @@ void print_identity() noexcept {
     const char* version = app != nullptr ? app->version : "unknown";
 #if CONFIG_AR_PTP_LAB_TX
     const char* capabilities =
-        "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-LAN-AUTONOMY-V1,SV-CONFIG-TXN-V1,PTP-P2,PTP-GM-BENCH-V1,PTP-POLICY-M3D-V1,SMPSYNCH-AUTO,PROFILE-BINARY-V1,PROFILE-REUSE-V1,MULTISV-CONFIG-STAGING-V2,MULTISV-TX-LAB-PREVIEW";
+        "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-LAN-AUTONOMY-V1,SV-CONFIG-TXN-V1,PTP-P2,PTP-GM-BENCH-V1,PTP-POLICY-M3D-V1,SMPSYNCH-AUTO,PROFILE-BINARY-V1,PROFILE-REUSE-V1,MULTISV-CONFIG-STAGING-V2,MULTISV-TX-LAB-PREVIEW,MULTISV-GROUPSTART-V1";
 #else
     const char* capabilities =
         "SMV-4I4V,PROFILE,LIVE-SETPOINTS,SV-LAN-AUTONOMY-V1,SV-CONFIG-TXN-V1,PROFILE-BINARY-V1,PROFILE-REUSE-V1,MULTISV-CONFIG-STAGING-V2";
@@ -750,7 +752,74 @@ void handle_line(char* line) noexcept {
         return;
     }
 
+    // Explicit 3-MU start is NEVER the legacy V1 CFG/START shortcut. All
+    // caller-supplied bank proofs are compared to fresh firmware snapshots.
+    if (std::strcmp(command, "M4START") == 0) {
+        std::uint64_t token{}, boot{}, roster{};
+        std::array<std::uint64_t, 3> generations{}, hashes{};
+        bool parsed = parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), token, 10) &&
+            parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), boot, 16) &&
+            parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), roster, 16);
+        for (std::size_t i = 0U; i < generations.size(); ++i) {
+            const bool gen_ok = parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), generations[i], 10);
+            const bool hash_ok = parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), hashes[i], 16);
+            parsed = parsed && gen_ok && hash_ok;
+        }
+        if (!parsed || has_extra_token(&save) || token == 0U ||
+            token == g_last_m4_start_token || boot != g_boot_id ||
+            g_running.load(std::memory_order_acquire) ||
+            !multi_profile_group_start_matches(roster, generations, hashes)) {
+            ESP_LOGE(kTag, "M4START rejected: boot/roster/3-bank proof or replay invalid");
+            return;
+        }
+        if (!arm_control_lease_if_fresh()) {
+            ESP_LOGE(kTag, "M4START rejected: live operator control-session HEARTBEAT required");
+            return;
+        }
+        bool armed = false;
+        portENTER_CRITICAL(&g_publisher_lifecycle_mux);
+        if (g_physical_link_up.load(std::memory_order_relaxed) &&
+            !g_running.load(std::memory_order_relaxed)) {
+            g_start_request.store(true, std::memory_order_release);
+            g_running.store(true, std::memory_order_release);
+            armed = true;
+        }
+        portEXIT_CRITICAL(&g_publisher_lifecycle_mux);
+        if (!armed) {
+            disarm_control_lease();
+            ESP_LOGE(kTag, "M4START rejected: Ethernet PHY DOWN or publisher already running");
+            return;
+        }
+        g_last_m4_start_token = token;
+        g_scenario_txn.reset();
+        profile_control_abort_staging();
+        wake_publisher();
+        ESP_LOGI(kTag, "M4START accepted token=%llu boot=%016llX roster=%016llX mask=7",
+                 static_cast<unsigned long long>(token),
+                 static_cast<unsigned long long>(boot),
+                 static_cast<unsigned long long>(roster));
+        return;
+    }
+    if (std::strcmp(command, "M4SHOW") == 0) {
+        if (has_extra_token(&save)) { ESP_LOGE(kTag, "M4SHOW takes no arguments"); return; }
+        const std::uint64_t roster = multi_profile_roster_hash_if_selected();
+        ESP_LOGI(kTag,
+            "M4STATE token=%llu boot=%016llX roster=%016llX generation=%llu selected=%u mask=%u running=%u",
+            static_cast<unsigned long long>(g_last_m4_start_token),
+            static_cast<unsigned long long>(g_boot_id),
+            static_cast<unsigned long long>(roster),
+            static_cast<unsigned long long>(multi_profile_roster_generation_if_selected()),
+            roster != 0U ? 1U : 0U,
+            static_cast<unsigned>(multi_profile_enabled_mask()),
+            g_running.load(std::memory_order_acquire) ? 1U : 0U);
+        return;
+    }
+
     if (std::strcmp(command, "START") == 0) {
+        if (multi_profile_tx_roster_if_selected() != nullptr) {
+            ESP_LOGE(kTag, "START rejected: selected M4 roster requires explicit M4START with 3 bank proofs");
+            return;
+        }
         std::uint64_t token{}, boot{}, hash{};
         if (!parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), token, 10) ||
             !parse_u64(strtok_r(nullptr, kTokenDelimiters.data(), &save), boot, 16) ||

@@ -27,7 +27,8 @@ SurfacePanel {
     // A RUNNING live CFG transaction is not a START. Keep 4I4V editors
     // interactive while firmware verifies it; new edits coalesce and drain.
     readonly property bool startQueued: Boolean(
-        startIntentPending || (ribbon.device && ribbon.device.scenarioApplying &&
+        startIntentPending || (ribbon.device && ribbon.device.m4GroupStarting) ||
+        (ribbon.device && ribbon.device.scenarioApplying &&
                                !ribbon.device.running))
     Timer {
         id: startIntentExpiry
@@ -341,7 +342,15 @@ SurfacePanel {
 
     function requestStart() {
         if (ribbon.m4DraftOnly) {
-            controller.showMessage("M4 draft pages are not deployed. START blocked until MULTISV deploy/readback is implemented.", true)
+            if (!smartSession.canStartMultiSv) {
+                controller.showMessage("3-MU START blocked: " + device.m4GroupStatus +
+                    ". Deploy the matching SCD and Apply all three MU banks first.", true)
+                return
+            }
+            const drafts = controller.m4StartDrafts()
+            if (!drafts || drafts.length !== 3 ||
+                !smartSession.requestStartMultiSv(drafts))
+                controller.showMessage("3-MU START refused: editor changed or board proof no longer current.", true)
             return
         }
         if (ribbon.injectionRunning || ribbon.startQueued) return
