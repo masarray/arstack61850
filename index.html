@@ -2,114 +2,155 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#07151d">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a131e">
   <meta name="robots" content="index,follow">
-  <title>ARStack61850 — IEC 61850 Process Bus Simulator & Engineering Lab</title>
-  <meta name="description" content="Open-source IEC 61850 engineering laboratory with Sampled Values, PTP simulation, real-time ESP32-P4 output and ARStack Studio. Download the latest verified release.">
+  <title>ARStack61850 — IEC 61850 Process Bus Simulator</title>
+  <meta name="description" content="ARStack Studio makes IEC 61850 process-bus testing accessible. Generate real Ethernet 4I+4V Sampled Values and simulated GPS-style PTP with ESP32-P4. Download for Windows or Linux.">
   <link rel="canonical" href="https://masarray.github.io/arstack61850/">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="ARStack61850 — Open-source IEC 61850 Process Bus Lab">
-  <meta property="og:description" content="Explore IEC 61850 Sampled Values generation, waveform control and PTP synchronization with ARStack Studio and ESP32-P4 Ethernet hardware.">
+  <meta property="og:site_name" content="ARStack61850">
+  <meta property="og:title" content="ARStack61850 — IEC 61850 Process Bus Simulator">
+  <meta property="og:description" content="Your IEC 61850 injection lab: SCL-driven SV simulation, PTP grandmaster emulation, real ESP32-P4 Ethernet output. Windows and Linux downloads.">
   <meta property="og:url" content="https://masarray.github.io/arstack61850/">
   <meta property="og:image" content="https://masarray.github.io/social-preview.svg">
   <meta name="twitter:card" content="summary_large_image">
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"ARStack Process Bus Simulator","softwareVersion":"Dual Firmware Stable Lab Release","applicationCategory":"DeveloperApplication","operatingSystem":"Windows 10/11; Linux when available; ESP32-P4 firmware","url":"https://masarray.github.io/arstack61850/","downloadUrl":"https://github.com/masarray/arstack61850/releases/latest","isAccessibleForFree":true,"description":"Open-source Public Stable laboratory IEC 61850 Sampled Values publisher and internal simulated PTP grandmaster lab tool."}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"ARStack Process Bus Simulator","applicationCategory":"EngineeringApplication","operatingSystem":"Windows 10/11 x64, Linux x86_64","url":"https://masarray.github.io/arstack61850/","downloadUrl":"https://github.com/masarray/arstack61850/releases/latest","isAccessibleForFree":true,"license":"https://github.com/masarray/arstack61850/blob/main/LICENSE","description":"Open-source IEC 61850 Sampled Values and PTP process-bus simulator with revision-aware ESP32-P4 firmware."}</script>
   <style>
-    :root{color-scheme:dark;--bg:#061017;--panel:#0c202c;--ink:#e6f6fe;--dim:#a1bbca;--cyan:#6bdafa;--lime:#8df2c9;--line:#244453;--max:1160px;font:16px/1.65 system-ui,-apple-system,Segoe UI,sans-serif}
-    *{box-sizing:border-box}body{margin:0;color:var(--ink);background:radial-gradient(circle at 82% 15%,#153c4d 0,transparent 32%),var(--bg)}
-    a{color:inherit}a:focus-visible{outline:2px solid var(--cyan);outline-offset:4px}
-    .shell{width:min(var(--max),calc(100% - 42px));margin:auto}.top{border-bottom:1px solid #21415288;background:#06121b9c}
-    .nav{display:flex;justify-content:space-between;align-items:center;gap:16px;min-height:76px}.brand{display:flex;align-items:center;gap:12px;font-weight:770;text-decoration:none;letter-spacing:.02em}.logo{display:grid;place-items:center;width:38px;height:38px;background:#0f4352;border:1px solid #398aa4;border-radius:9px;color:var(--cyan);font-size:22px}
-    .navlinks{display:flex;gap:22px;font-size:13px}.navlinks a{text-decoration:none;color:var(--dim)}.navlinks a:hover{color:var(--cyan)}
-    .hero{padding:94px 0 60px}.pill{display:inline-block;padding:5px 11px;border:1px solid #3b7183;border-radius:100px;color:var(--cyan);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
-    h1{max-width:960px;margin:23px 0 15px;font-size:clamp(43px,6.2vw,82px);line-height:1.04;letter-spacing:-.061em;font-weight:720}
-    h1 em{font-style:normal;color:var(--cyan)}.lead{max-width:780px;color:var(--dim);font-size:clamp(16px,1.9vw,20px)}.actionrow{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}
-    .btn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:10px 20px;border:1px solid #497488;border-radius:10px;text-decoration:none;font-size:13px;font-weight:700}
-    .btn.primary{background:var(--cyan);border-color:var(--cyan);color:#071824}.btn.secondary{background:#112f3f}.btn:hover{filter:brightness(1.13)}
-    .meta{margin-top:18px;color:#91abba;font-size:12px}.meta a{color:var(--cyan)}
-    .metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:13px;padding:20px 0 60px}
-    .metric{padding:22px;background:#0b1e2a;border:1px solid var(--line);border-radius:13px}.metric strong{display:block;color:var(--lime);font-size:clamp(24px,3vw,39px);line-height:1.1;letter-spacing:-.04em}.metric span{display:block;margin-top:8px;color:var(--dim);font-size:12px}
-    section.content{padding:20px 0 58px}h2{margin:0 0 14px;font-size:clamp(26px,3.5vw,39px);line-height:1.2;letter-spacing:-.035em}
-    .sectionintro{max-width:800px;color:var(--dim)}.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:22px}
-    .card{padding:24px;border:1px solid var(--line);border-radius:15px;background:#0b1d29}.card h3{margin:0 0 10px;font-size:18px}.card p{margin:0;color:var(--dim);font-size:13px}
-    .schematic{display:grid;grid-template-columns:1fr auto 1.2fr auto 1fr;align-items:center;gap:12px;margin:24px 0;padding:26px;border:1px solid #355968;border-radius:18px;background:linear-gradient(120deg,#0e2c3a,#0a1b26)}
-    .unit{padding:16px;border:1px solid #477b91;border-radius:12px;text-align:center;font-weight:760}.unit small{display:block;color:#a3bccb;font-size:11px;font-weight:400;margin-top:7px}.wire{height:2px;width:35px;background:var(--cyan);box-shadow:0 0 9px var(--cyan)}.streams{display:grid;gap:8px;text-align:center}.streams div{padding:10px;border:1px solid #356478;border-radius:9px;color:var(--cyan);font-size:13px;font-weight:700}
-    .footnote{padding:16px 19px;margin-top:22px;border-left:3px solid var(--cyan);background:#102633;color:#bfd4e0;font-size:13px}
-    .setup{counter-reset:step;display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin:23px 0}.step{padding:19px;background:#0b1e2a;border:1px solid var(--line);border-radius:12px;color:var(--dim);font-size:13px}.step::before{counter-increment:step;content:"0" counter(step);display:block;color:var(--cyan);font-size:19px;font-weight:800;margin-bottom:10px}.step b{display:block;color:var(--ink);margin-bottom:7px}
-    .downloads{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:22px}.download{display:flex;flex-direction:column;justify-content:space-between;gap:18px;padding:23px;border:1px solid #3a6372;border-radius:13px;background:#0c2432}.download h3{margin:0;font-size:18px}.download p{margin:6px 0 0;color:var(--dim);font-size:12px}.download a{color:var(--cyan);font-size:14px;font-weight:700}
-    .small{color:var(--dim);font-size:12px}.footer{border-top:1px solid var(--line);margin-top:25px;padding:30px 0;color:var(--dim);font-size:12px}.footer .shell{display:flex;justify-content:space-between;gap:20px}
-    @media(max-width:780px){.metrics{grid-template-columns:repeat(2,1fr)}.cards,.downloads{grid-template-columns:1fr}.setup{grid-template-columns:repeat(2,1fr)}.schematic{grid-template-columns:1fr;gap:12px}.wire{width:2px;height:25px;justify-self:center}.navlinks{gap:10px}.hero{padding-top:65px}}
-    @media(max-width:480px){.shell{width:min(var(--max),calc(100% - 26px))}.navlinks a:first-child{display:none}.metrics{gap:8px}.metric{padding:16px}.setup{grid-template-columns:1fr}.actionrow .btn{width:100%}.footer .shell{flex-direction:column}}
-    @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
-  .download[hidden]{display:none}.studio-preview{margin:22px 0 0;max-width:960px}.studio-preview img{width:100%;height:auto;display:block;border:1px solid #263147;border-radius:12px;background:#111827;box-shadow:0 10px 30px rgba(0,0,0,.18)}.studio-preview figcaption{font-size:12px;color:#94a3b8;padding:8px 0}
-</style>
+    :root{color-scheme:dark;--bg:#09121b;--surface:#101d29;--surface2:#132432;--ink:#eaf3f8;--muted:#95aab9;--aqua:#64d7e9;--blue:#50aef6;--line:#294252;--max:1140px;font:14px/1.7 Inter,"Segoe UI",system-ui,sans-serif}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;min-width:320px;color:var(--ink);background:radial-gradient(ellipse 68% 520px at 80% 2%,#16384a80,transparent 78%),radial-gradient(ellipse 30% 280px at 4% 36%,#122e3d66,transparent 82%),var(--bg)}
+    a{color:inherit}a:focus-visible{outline:2px solid var(--aqua);outline-offset:4px}.wrap{width:min(var(--max),calc(100% - 48px));margin-inline:auto}.skip{position:absolute;top:-100px;left:16px;z-index:50;background:var(--aqua);color:#082131;padding:7px 12px}.skip:focus{top:10px}
+    .top{background:#09141dcf;border-bottom:1px solid #2540519c}.nav{min-height:66px;display:flex;align-items:center;justify-content:space-between;gap:16px}.brand{text-decoration:none;display:inline-flex;align-items:center;gap:10px;font-size:16px;font-weight:660;letter-spacing:-.35px;white-space:nowrap}.brand strong{font-weight:650;color:var(--aqua)}.brand .mark{display:grid;place-items:center;width:30px;height:30px;border:1px solid #2d6075;background:linear-gradient(155deg,#153c50,#0b1c2a);border-radius:8px;font-size:20px;color:var(--aqua)}.navlinks{display:flex;align-items:center;gap:26px;font-size:12px;color:#adbfca}.navlinks a{text-decoration:none;transition:color .15s}.navlinks a:hover{color:#fff}.nav-github{border:1px solid #355161;padding:7px 12px;border-radius:7px}
+    .hero{padding:64px 0 46px}.hero-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(380px,.91fr);gap:48px;align-items:center}.eyebrow{color:var(--aqua);font-size:11px;letter-spacing:1.65px;text-transform:uppercase;display:flex;align-items:center;gap:8px}.dot{width:7px;height:7px;border-radius:50%;background:#4de2ac;box-shadow:0 0 11px #4de2ac65;flex:none}h1{font-size:clamp(34px,4.3vw,52px);font-weight:600;line-height:1.16;letter-spacing:-1.75px;max-width:660px;margin:19px 0 20px}h1 em{font-style:normal;color:var(--aqua)}.lead{font-size:14px;line-height:1.9;color:#b4c6d1;max-width:590px}.lead strong{font-weight:600;color:#eef8fd}
+    .actionrow{display:flex;flex-wrap:wrap;gap:11px;margin:27px 0 14px}.btn{min-height:45px;display:inline-flex;align-items:center;justify-content:center;gap:10px;padding:11px 17px;border-radius:7px;text-decoration:none;font-size:12.5px;font-weight:650;border:1px solid #476577;transition:transform .15s,filter .15s,background .15s}.btn:hover{transform:translateY(-2px);filter:brightness(1.1)}.btn svg{width:19px;height:19px;flex:none}.btn.primary{background:linear-gradient(180deg,#81e6f5,#45bddb);color:#061b29;border-color:#78ddec;box-shadow:inset 0 1px #d7faff33,0 6px 20px #002b483c}.btn.secondary{background:#162938;color:#e5f5fb}.under-actions{font-size:11.5px;color:#8ca7b5}.under-actions a{color:#b3dff0;text-underline-offset:3px}
+    .hero-visual{position:relative;min-width:0}.hero-visual:before{content:"";position:absolute;inset:18px -15px -16px 15px;border-radius:18px;background:linear-gradient(150deg,#24739628,transparent 60%);filter:blur(16px);pointer-events:none}.monitor{position:relative;background:linear-gradient(150deg,#142636,#0e1a25 85%);border:1px solid #355364;border-radius:13px;box-shadow:0 24px 60px #020a10a8,0 1px #7ab2ca10 inset;overflow:hidden}.monitor-top{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 15px;border-bottom:1px solid #2b4252;background:#182b3a;font-size:11px;color:#b9cbd6}.dots{display:flex;gap:5px}.dots span{width:7px;height:7px;border:1px solid #496171;border-radius:50%}.monitor-top .right{color:#75dfad;letter-spacing:.3px}.monitor-body{padding:19px}.monitor-label{display:flex;align-items:center;justify-content:space-between;color:#91aebf;font-size:10px;letter-spacing:1.25px;text-transform:uppercase}.monitor-label b{font-size:10px;letter-spacing:0;font-weight:600;color:#7ed8ee}.topology{display:grid;grid-template-columns:1fr 22px 1fr 22px 1fr;align-items:center;gap:5px;margin:18px 0}.node{min-width:0;text-align:center;background:#102a3a;border:1px solid #36586b;border-radius:7px;padding:13px 5px 10px;font-size:12px;font-weight:600}.node span{display:block;margin-top:3px;font-size:9px;font-weight:450;color:#98afbd}.node.accent{border-color:#419ab5;background:linear-gradient(145deg,#164052,#132c3c)}.connector{height:1px;background:#4a8fa4;position:relative}.connector:after{content:"";position:absolute;right:0;top:-3px;border-top:3.5px solid transparent;border-bottom:3.5px solid transparent;border-left:6px solid #4a8fa4}.stream-chips{display:flex;gap:7px;flex-wrap:wrap}.chip{background:#122c39;border:1px solid #2f5666;border-radius:5px;padding:4px 8px;color:#9adbea;font-size:10px}.wave{margin:16px 0 12px;width:100%;height:auto;display:block;background:#0b1823;border:1px solid #243c4c;border-radius:7px}.monitor-footer{display:flex;justify-content:space-between;gap:10px;color:#91afbf;font-size:10px}.monitor-footer b{font-weight:620;color:#8fe2c4}
+    .evidence{border-top:1px solid #284050;border-bottom:1px solid #284050;background:#0b1b26a8}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));padding:23px 0;gap:0}.metric{padding:0 20px;border-right:1px solid #2a4655}.metric:first-child{padding-left:0}.metric:last-child{border:0}.metric strong{display:block;color:#d6f1f9;font-size:clamp(18px,2.1vw,26px);letter-spacing:-.55px;font-weight:600;line-height:1.35;font-variant-numeric:tabular-nums}.metric span{display:block;margin-top:4px;color:#94acbc;font-size:11px;line-height:1.5}.metrics-note{color:#829dab;font-size:10px;padding-bottom:16px}
+    .section{padding:71px 0 0}.sectionhead{display:flex;justify-content:space-between;gap:20px;align-items:end;margin-bottom:25px}.kicker{color:#73c7df;text-transform:uppercase;letter-spacing:1.65px;font-size:10px;margin-bottom:9px}h2{font-size:clamp(24px,2.6vw,32px);letter-spacing:-.65px;line-height:1.26;font-weight:600;margin:0 0 12px}.intro{max-width:730px;color:var(--muted);font-size:13px;line-height:1.8;margin:0}.sectionlink{font-size:12px;white-space:nowrap;color:#9cdeee;text-underline-offset:4px}
+    .cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.card{padding:23px 21px;background:linear-gradient(150deg,#132635,#0e1c28);border:1px solid #2b4555;border-radius:10px}.card-num{font-size:11px;color:#6cbdd5;letter-spacing:1px}.card h3{font-size:15px;font-weight:600;letter-spacing:-.1px;margin:14px 0 7px}.card p{font-size:12px;color:#9eb4c1;line-height:1.8;margin:0}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}.panel{background:#10212f;border:1px solid #2d4556;border-radius:10px;padding:23px}.panel h3{font-size:15px;font-weight:600;margin:0 0 11px}.panel p{font-size:12px;line-height:1.8;color:#a5bdc8;margin:0 0 14px}.panel .link{color:#83d6e7;font-size:12px;text-decoration:none}.panel .link:hover{text-decoration:underline}.tagline{margin:0 0 12px;font-size:11px;color:#78d5c4}.panel-list{list-style:none;margin:0;padding:0;display:grid;gap:9px}.panel-list li{font-size:12px;color:#b3c7d1}.panel-list li:before{content:"✓";display:inline-block;margin-right:10px;color:#69dbc0}
+    .studio-frame{margin:0;background:#10212e;border:1px solid #2b4757;border-radius:11px;padding:10px;box-shadow:0 18px 46px #02091050}.studio-frame img{width:100%;max-height:585px;object-fit:contain;display:block;border-radius:5px;background:#0d1621}.studio-frame figcaption{font-size:11px;color:#87a1b1;padding:10px 5px 3px}.setup{counter-reset:step;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:25px 0 14px}.step{padding:20px;background:#102330;border:1px solid #2d4858;border-radius:9px;color:#98acba;font-size:12px;line-height:1.7}.step:before{counter-increment:step;content:"0" counter(step);display:block;font-size:18px;color:#70d1e9;font-weight:650;margin-bottom:10px}.step b{display:block;font-size:13px;color:#eaf5fa;font-weight:600;margin-bottom:6px}.notice{border-left:2px solid #5ba4bc;color:#afc6d1;padding:9px 16px;margin-top:19px;font-size:12px;background:#12263370}
+    .downloads{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:24px}.download{background:linear-gradient(150deg,#132635,#0d1b28);border:1px solid #315061;border-radius:10px;padding:22px;display:flex;flex-direction:column;gap:16px}.download .detail{font-size:11px;color:#9bb3c0;margin:3px 0 0}.download h3{font-size:15px;font-weight:600;margin:0}.download a{font-size:12px;color:#91e1f0;font-weight:600;text-decoration:none;align-self:start}.download a:hover{text-decoration:underline}.small{font-size:11px;color:#89a3b2;line-height:1.8;margin-top:14px}.small a{color:#a8ddec}.footer{margin-top:70px;border-top:1px solid #273d4c;padding:27px 0 31px;color:#88a1ae;font-size:11px}.footer-inner{display:flex;flex-wrap:wrap;justify-content:space-between;gap:13px}.footer-links{display:flex;flex-wrap:wrap;gap:17px}.footer-links a{text-decoration:none}.footer-links a:hover{color:var(--aqua)}
+    @media(max-width:950px){.hero-grid{grid-template-columns:minmax(0,1fr);gap:28px}.hero-copy{max-width:720px}.hero-visual{max-width:650px;width:100%}.navlinks{gap:15px}}
+    @media(max-width:700px){.wrap{width:calc(100% - 32px)}.hero{padding:44px 0 38px}.section{padding-top:52px}.metrics{grid-template-columns:repeat(2,1fr);row-gap:16px}.metric:nth-child(2){border:0}.metric:nth-child(3){padding-left:0}.cards{grid-template-columns:1fr}.two-col{grid-template-columns:1fr}.setup{grid-template-columns:repeat(2,1fr)}.sectionhead{display:block}.sectionlink{display:inline-block;margin-top:16px}.navlinks a:not(.nav-github){display:none}}
+    @media(max-width:440px){.hero{padding-top:38px}.brand{font-size:14px}.nav-github{padding:6px 9px}.hero h1{font-size:34px;letter-spacing:-1.2px}.actionrow{flex-direction:column;align-items:stretch}.btn{width:100%}.monitor-body{padding:12px}.node{font-size:10px}.node span{font-size:8px}.metrics{padding:20px 0}.metric{padding:0 10px}.metric strong{font-size:17px}.setup,.downloads{grid-template-columns:1fr}.footer-inner{display:block}.footer-links{margin-top:12px}}
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.btn,.navlinks a{transition:none}}
+  </style>
 </head>
 <body>
-  <header class="top"><div class="shell nav"><a class="brand" href="https://masarray.github.io/"><span class="logo">∿</span>MasArray / ARStack</a><nav class="navlinks" aria-label="Product navigation"><a href="#features">Features</a><a href="#evidence">Lab results</a><a href="#downloads">Download</a><a href="https://github.com/masarray/arstack61850">Source ↗</a></nav></div></header>
-  <main>
-    <section class="shell hero"><span class="pill" data-latest-label>Dual Firmware stable · IEC 61850 engineering lab</span>
-      <h1>Your own <em>IEC 61850 Process Bus</em> lab.</h1>
-      <p class="lead">Need real IEC 61850 Process Bus packets for a relay, BCU or subscriber test? Use one affordable ESP32-P4 and <strong>ARStack Studio</strong> to inject configurable <strong>4I+4V Sampled Values</strong> alongside <strong>internal lab PTP SOURCE traffic</strong> over Ethernet. Test signals, compare stream settings and troubleshoot on an isolated bench—without a full Merging Unit test rack.</p>
-      <div class="actionrow"><a class="btn primary" data-asset="windows" href="https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-win-x64-setup.zip">Download Windows Setup ZIP ↓</a><a class="btn secondary" href="#downloads">All release assets</a><a class="btn secondary" href="https://github.com/masarray/arstack61850/releases/latest">Read release notes ↗</a></div>
-      <div class="meta">Free and open source · Windows Studio + matched ESP32-P4 firmware · <a href="https://github.com/masarray/arstack61850/releases/latest">Latest verified release</a></div>
-    </section>
-    <div class="shell metrics" id="evidence" aria-label="M3.H.3 independent real-Ethernet SV capture benchmark"><div class="metric"><strong>4,705,090</strong><span>Ethernet SV frames captured</span></div><div class="metric"><strong>3,999.886</strong><span>Actual SV frames per second</span></div><div class="metric"><strong>19m 36s</strong><span>Independent SV wire-capture span</span></div><div class="metric"><strong>0</strong><span>Missing / duplicate / reorder / malformed SV</span></div></div>
-    <section class="shell content" id="features"><h2>Real network traffic. Controllable lab scenarios.</h2><p class="sectionintro">A native Windows engineering surface controls an embedded real-time publisher. The sample clock and Ethernet transmission run autonomously on the powered ESP32-P4—not from a Windows application timer. Closing and reopening Studio preserves the board state.</p>
-      <div class="cards"><article class="card"><h3>Real SV traffic for relay &amp; BCU labs</h3><p>Generate 4 current + 4 voltage channels, configurable amplitude/phase, one ASDU and nominal 4,000 SV frames/s. Use the Ethernet stream as an engineering test input; match APPID, MAC, VLAN and svID to the subscriber.</p></article><article class="card"><h3>SV + PTP lab simulation</h3><p>Publish real Layer-2 SV together with PTP Announce, Sync and Follow_Up from an internal laboratory SOURCE. Inspect signal timing, sample counters and smpSynch from capture tools.</p></article><article class="card"><h3>Control, capture, reconnect</h3><p>Start from Studio, close it while the powered board keeps publishing, then reopen Studio to adopt the active board state. Tune 4I+4V waveforms and capture the packets you inject.</p></article></div>
-      <div class="schematic" aria-label="Process bus simulator topology"><div class="unit">ARStack Studio<small>Windows setup · autonomous board state</small></div><span class="wire" aria-hidden="true"></span><div class="unit">ESP32-P4 Ethernet<small>EMAC hardware timestamp + 4 kHz SV grid</small></div><span class="wire" aria-hidden="true"></span><div class="streams"><div>PTP · Announce / Sync / Follow_Up</div><div>SV · 4I+4V · smpSynch AUTO</div></div></div>
-      <p class="small">M3.H.3 on-wire lab capture: <strong>4,705,090 SV frames over 19 min 36 s</strong>, 3,999.886 fps, zero missing/duplicate/reordered/malformed SV; 3,528 PTP packets observed and smpSynch=2 on the received stream. <a href="https://github.com/masarray/arstack61850/blob/main/docs/releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md">View the engineering capture results</a>.</p>
-    </section>
-    <section class="shell content" id="roadmap"><h2>Next: multiple virtual Merging Units from one board.</h2><p class="sectionintro">ARStack is built for practical digital-substation engineers. Our next priority is <strong>Multi-SV on one ESP32-P4</strong> plus <strong>SCL-driven Merging Unit simulation</strong>: open an SCD/CID/IID, select supported SV streams and deploy their identities and DataSet layouts without building a rack of physical MUs.</p><div class="cards"><article class="card"><h3>Multiple SV publishers</h3><p>One ESP32-P4, multiple independently configured SV streams, each with its own identity and sample counter.</p></article><article class="card"><h3>SCL file-based configuration</h3><p>Choose Merging Unit streams from IEC 61850 engineering files and map supported DataSet leaves to generated waveforms.</p></article><article class="card"><h3>Engineer-first workflow</h3><p>Open file → select stream(s) → assign values → Start → observe real traffic in a relay/BCU test network.</p></article></div><p class="small">M4 software supports SCL-driven virtual MU streams on one ESP32-P4; extended three-stream physical load acceptance is still being gathered. The M3.H.3 measurements above refer to the historical single-stream release. <a href="https://github.com/masarray/arstack61850/blob/main/docs/PROCESS_BUS_MULTI_SV_SCL_NEXT_PHASE.md">See the engineering roadmap</a>.</p></section>
-    <section class="shell content" id="studio-preview"><h2>See ARStack Studio in action.</h2><p class="sectionintro">Configure IEC 61850 waveform scenarios, inspect phasors, and prepare process-bus experiments in one native desktop workspace.</p>
-      <figure class="studio-preview"><img src="assets/screenshots/arstack-studio-windows.png" alt="ARStack Studio Windows engineering interface with 4I+4V signal controls, voltage and current phasors and waveform preview" width="960" height="680" loading="lazy" decoding="async"><figcaption>Real Windows Qt application screenshot · 960 × 680</figcaption></figure>
-    </section>
-    <section class="shell content" id="getting-started"><h2>First packet in four steps.</h2><div class="setup"><div class="step"><b>Install Studio</b>Use Windows Setup or Portable; both include the matched firmware and flashing tool.</div><div class="step"><b>Flash ESP32-P4</b>Connect USB OTG and install the matching firmware from the release.</div><div class="step"><b>Select lab timing</b>Use PTP SOURCE / INTERNAL_GM_ONLY and smpSynch AUTO on an isolated Ethernet LAN.</div><div class="step"><b>Start and capture</b>Run 4I+4V, then inspect SV 0x88BA and PTP 0x88F7 in ARSAS, DigSubAnalyzer or Wireshark.</div></div><p class="footnote">Safety boundary: Never attach the lab PTP GM or SV publisher to a live substation process bus. Use an isolated test LAN or VLAN. ARStack is an <strong>open-source IEC 61850 engineering lab tool</strong>; no external GPS or protection relay is needed for the basic simulation.</p></section>
-    <section class="shell content" id="downloads"><h2>Download the latest release.</h2><p class="sectionintro">Prefer the Windows Setup ZIP, extract it and run the installer. Portable ZIP requires no installation; select revision-matched ESP32-P4 firmware from the latest release catalog. Downloads update automatically when a new verified release is published.</p>
-      <div class="downloads"><article class="download"><div><h3>Windows Setup ZIP</h3><p>Windows x64 · extract ZIP, run the stable Setup EXE</p></div><a data-asset="windows" href="https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-win-x64-setup.zip">Setup ZIP ↗</a></article>
-        <article class="download"><div><h3>Portable ZIP</h3><p>Windows x64 · run without a separate installation</p></div><a data-asset="portable" href="https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-win-x64-portable.zip">Portable ZIP ↗</a></article>
-        <article class="download"><div><h3>ESP32-P4 Dual Firmware</h3><p>Choose pre-v3 or v3.x using the Studio revision-aware catalog</p></div><a data-asset="firmware" href="https://github.com/masarray/arstack61850/releases/latest">Revision-matched images ↗</a></article>
-        <article class="download" id="linux-download"><div><h3>Linux AppImage</h3><p>Linux x86_64 · single-file desktop app</p></div><a data-asset="linux" href="https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-linux-x86_64.AppImage">AppImage ↗</a></article></div>
-      <p class="small">Build-specific checksums and metadata are provided on the release page: <a href="https://github.com/masarray/arstack61850/releases/latest">SHA256SUMS.txt</a> · <a href="https://github.com/masarray/arstack61850/releases/latest">firmware-manifest.json</a> · <a href="https://github.com/masarray/arstack61850/blob/main/docs/releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md">M3.H.3 measured benchmark</a>.</p></section>
-  </main>
-  <footer class="footer"><div class="shell"><span>© 2026 MasArray · Open-source IEC 61850 engineering experiments</span><span><a href="https://masarray.github.io/">MasArray Portal</a> · <a href="https://github.com/masarray/arstack61850">GitHub source</a> · <a href="https://github.com/masarray/arstack61850/releases/latest">Latest release</a> · <a href="https://github.com/masarray/arstack61850/blob/main/docs/community/README.md">Community experiments ↗</a></span></div></footer>
-
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="wrap nav">
+  <a class="brand" href="https://masarray.github.io/" aria-label="MasArray home"><span class="mark" aria-hidden="true">∿</span><span>ARStack<strong>61850</strong></span></a>
+  <nav class="navlinks" aria-label="Main navigation"><a href="#features">Features</a><a href="#roadmap">SCL &amp; Multi-MU</a><a href="#evidence">Bench evidence</a><a href="#downloads">Downloads</a><a class="nav-github" href="https://github.com/masarray/arstack61850">GitHub ↗</a></nav>
+</div></header>
+<main id="main">
+  <section class="wrap hero" id="top">
+    <div class="hero-grid">
+      <div class="hero-copy">
+        <div class="eyebrow"><span class="dot" aria-hidden="true"></span><span data-latest-label>Dual Firmware Stable · IEC 61850 engineering</span></div>
+        <h1>A process bus lab.<br><em>Without the test rack.</em></h1>
+        <p class="lead"><strong>ARStack Studio</strong> puts real IEC 61850 Sampled Values and PTP Ethernet traffic on your test network using an affordable ESP32-P4. Simulate a Merging Unit, configure 4I+4V waveforms and experiment with SCL-defined stream profiles—right from your desktop.</p>
+        <div class="actionrow hero-downloads" aria-label="Download ARStack Studio for your operating system">
+          <a class="btn primary" data-asset="windows" href="https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-win-x64-setup.zip" aria-label="Download for Windows, Setup ZIP">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M2 3.8 11 2.5v8.7H2V3.8Zm10.5-1.5L22 1v10.2h-9.5V2.3ZM2 12.7h9V21l-9-1.3v-7Zm10.5 0H22V23l-9.5-1.3v-9Z"/></svg><span>Download for Windows</span>
+          </a>
+          <a class="btn secondary" data-asset="linux" href="https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-linux-x86_64.AppImage" aria-label="Download for Linux, AppImage">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="11.2" rx="5.3" ry="8.3" stroke="currentColor" stroke-width="1.45"/><ellipse cx="12" cy="5.3" rx="3" ry="3.15" fill="currentColor" fill-opacity=".22"/><circle cx="10.6" cy="5" r=".8" fill="currentColor"/><circle cx="13.4" cy="5" r=".8" fill="currentColor"/><path d="m10.7 7.2 1.3 1.3 1.3-1.3-1.3-.45-1.3.45Z" fill="currentColor"/><path d="M9 17.4c-2 .4-3.5 1.8-3.5 3.1 0 1.2 4.7 1 6.5-1.2m3-1.9c2 .4 3.5 1.8 3.5 3.1 0 1.2-4.7 1-6.5-1.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span>Download for Linux</span>
+          </a>
+        </div>
+        <div class="under-actions">Windows x64 · Setup ZIP &nbsp; / &nbsp; Linux x86_64 · AppImage &nbsp; · &nbsp; <a href="https://github.com/masarray/arstack61850/releases/latest">Release notes &amp; checksums ↗</a></div>
+      </div>
+      <div class="hero-visual" aria-label="Schematic of ARStack Studio controlling an ESP32-P4 to output IEC 61850 SV and PTP streams">
+        <div class="monitor">
+          <div class="monitor-top"><span class="dots" aria-hidden="true"><span></span><span></span><span></span></span><span>ARStack Studio / Process Bus</span><span class="right">● LAB READY</span></div>
+          <div class="monitor-body">
+            <div class="monitor-label"><span>PROCESS BUS TOPOLOGY</span><b>REAL ETHERNET OUTPUT</b></div>
+            <div class="topology"><div class="node">ARStack Studio<span>Waveform &amp; SCL</span></div><span class="connector" aria-hidden="true"></span><div class="node accent">ESP32-P4<span>SV + PTP publisher</span></div><span class="connector" aria-hidden="true"></span><div class="node">IED / Analyzer<span>Lab subscriber</span></div></div>
+            <div class="stream-chips"><span class="chip">SV · 4I + 4V</span><span class="chip">PTP · Grandmaster emulation</span><span class="chip">SCL import</span></div>
+            <svg class="wave" viewBox="0 0 520 157" role="img" aria-label="Illustrative phase-offset sine waveforms from simulated current and voltage channels">
+              <defs><pattern id="grid" width="26" height="26" patternUnits="userSpaceOnUse"><path d="M26 0H0V26" fill="none" stroke="#223a4a" stroke-width=".65"/></pattern><clipPath id="clip"><rect width="520" height="157" rx="6"/></clipPath></defs>
+              <g clip-path="url(#clip)"><rect width="520" height="157" fill="url(#grid)"/><path d="M0 78.5H520" stroke="#3d5c6b" stroke-width=".8" stroke-dasharray="3 5"/><path d="M0 78 C19 28 36 26 55 77 S92 132 111 78 149 26 167 78 204 132 223 78 261 26 279 78 316 132 335 78 373 26 391 78 428 132 447 78 484 26 520 78" stroke="#6fdded" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M0 104 C19 119 38 112 55 78 S91 37 111 55 148 120 167 104 204 36 223 55 260 120 279 104 316 36 335 55 372 120 391 104 428 36 447 55 484 120 520 104" stroke="#a9c7fa" stroke-width="1.7" fill="none" stroke-linecap="round"/><path d="M0 50 C18 56 36 96 55 108 S92 95 111 50 149 56 167 108 204 95 223 50 261 56 279 108 316 95 335 50 373 56 391 108 428 95 447 50 484 56 520 108" stroke="#86e1b8" stroke-width="1.7" fill="none" stroke-linecap="round"/></g>
+            </svg>
+            <div class="monitor-footer"><span>IEC 61850 · SV 0x88BA · PTP 0x88F7</span><b>4,000 fps · nominal single stream</b></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <div class="evidence" id="evidence"><div class="wrap">
+    <div class="metrics" aria-label="Historical M3.H.3 independent single-stream wire capture">
+      <div class="metric"><strong>4,705,090</strong><span>SV Ethernet frames captured</span></div>
+      <div class="metric"><strong>3,999.886</strong><span>Observed frames per second</span></div>
+      <div class="metric"><strong>19m 36s</strong><span>Continuous on-wire capture</span></div>
+      <div class="metric"><strong>0</strong><span>Missing / duplicate / malformed frames</span></div>
+    </div>
+    <div class="metrics-note">Historical M3.H.3 single-stream lab benchmark — not a three-stream or v3.x qualification claim. <a href="https://github.com/masarray/arstack61850/blob/main/docs/releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md">View capture evidence ↗</a></div>
+  </div></div>
+  <section class="wrap section" id="features">
+    <div class="sectionhead"><div><div class="kicker">What you can build</div><h2>Real packets. Repeatable engineering scenarios.</h2><p class="intro">From live electrical waveforms to protocol identifiers, ARStack gives you direct control of the process-bus traffic your lab subscribers see.</p></div></div>
+    <div class="cards">
+      <article class="card"><div class="card-num">01 / SAMPLED VALUES</div><h3>Simulated Merging Unit output</h3><p>Configure four current and four voltage channels with amplitude, phase and quality. Publish real IEC 61850 SV multicast Ethernet traffic using the ESP32-P4.</p></article>
+      <article class="card"><div class="card-num">02 / TIME SYNCHRONIZATION</div><h3>GPS-style PTP Grandmaster emulation</h3><p>Generate PTP Announce, Sync and Follow_Up on the wire with the simulation timebase and inspect sample synchronization in the lab. No external GPS receiver needed.</p></article>
+      <article class="card"><div class="card-num">03 / ENGINEERING WORKFLOW</div><h3>SCL identities and Studio control</h3><p>Import supported SCD, SCL, CID or IID files, deploy supported SV profiles, tune waveforms, START/STOP, capture and reconnect without resetting the powered board.</p></article>
+    </div>
+  </section>
+  <section class="wrap section" id="roadmap">
+    <div class="sectionhead"><div><div class="kicker">Latest software progress</div><h2>Three virtual Merging Units. One ESP32-P4.</h2><p class="intro">M4 software includes SCL-driven three-virtual-MU configuration and group START/STOP with shared sample/PTP timing. The publicly shipped dual-firmware stable package carries these integrated controls, while sustained 3 × 4,000 fps on-wire load acceptance and v3.x hardware qualification are still being collected.</p></div><a class="sectionlink" href="https://github.com/masarray/arstack61850/blob/main/docs/PROCESS_BUS_MULTI_SV_SCL_NEXT_PHASE.md">Implementation details ↗</a></div>
+    <div class="two-col">
+      <div class="panel"><div class="tagline">AVAILABLE IN CURRENT SOFTWARE</div><h3>SCL-driven virtual MU workspace</h3><ul class="panel-list"><li>Supported SV stream and DataSet import</li><li>Per-stream APPID, svID, MAC, VLAN and confRev</li><li>Three-MU group control and board-state readback</li><li>Unified timing source for simulated SV + PTP</li></ul></div>
+      <div class="panel"><div class="tagline">VERIFICATION BOUNDARY</div><h3>Dual firmware, revision-aware provisioning</h3><p>The stable Studio release offers separate firmware images for ESP32-P4 pre-v3 and v3.x silicon and a matching firmware catalog. v3.x board support remains an engineering preview pending broader physical acceptance.</p><a class="link" href="https://github.com/masarray/arstack61850/releases/latest">See supported packages and release notes ↗</a></div>
+    </div>
+  </section>
+  <section class="wrap section" id="studio-preview">
+    <div class="sectionhead"><div><div class="kicker">Desktop engineering workspace</div><h2>Configure and observe from ARStack Studio.</h2><p class="intro">Work with waveform controls, phasor views, stream configuration, firmware management and on-wire observations in a native desktop application.</p></div></div>
+    <figure class="studio-frame"><img src="assets/screenshots/arstack-studio-windows.png" alt="Actual ARStack Studio Windows Qt desktop interface showing engineering controls, phasors and waveform views" width="960" height="680" loading="lazy" decoding="async"><figcaption>Actual Windows Qt Studio screenshot captured by the native GUI test.</figcaption></figure>
+  </section>
+  <section class="wrap section" id="getting-started">
+    <div class="sectionhead"><div><div class="kicker">Fast onboarding</div><h2>From download to first Ethernet packet.</h2><p class="intro">Try the Studio interface without hardware, then attach a compatible ESP32-P4 to transmit real traffic.</p></div><a class="sectionlink" href="https://github.com/masarray/arstack61850/blob/main/docs/GETTING_STARTED.md">First-run guide ↗</a></div>
+    <div class="setup"><div class="step"><b>Install Studio</b>Extract the Windows Setup ZIP or run the Linux x86_64 AppImage.</div><div class="step"><b>Connect your board</b>Use USB data and an isolated Ethernet test network.</div><div class="step"><b>Load matching firmware</b>Install the release-paired pre-v3 or v3.x image from Studio.</div><div class="step"><b>Start SV + PTP</b>Use 4I+4V Quick Start and a simulated PTP source, then capture the packets.</div></div>
+    <div class="notice">Lab-only network boundary: do not connect this publisher or simulated PTP Grandmaster to an energized or production substation process bus. Firmware must match the Studio release.</div>
+  </section>
+  <section class="wrap section" id="downloads">
+    <div class="sectionhead"><div><div class="kicker">Latest public stable</div><h2>Choose your ARStack Studio package.</h2><p class="intro">Windows Setup ZIP is recommended for easier browser downloads. Linux AppImage is available directly. Both are sourced from the public stable release; firmware artifacts are published alongside them.</p></div><a class="sectionlink" href="https://github.com/masarray/arstack61850/releases/latest">All release assets ↗</a></div>
+    <div class="downloads">
+      <article class="download"><div><h3>Windows · Setup ZIP</h3><p class="detail">Windows 10/11 x64 · Extract ZIP, run the included installer</p></div><a data-asset="windows" href="https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-win-x64-setup.zip">Download Setup ZIP ↗</a></article>
+      <article class="download"><div><h3>Linux · AppImage</h3><p class="detail">Linux x86_64 · chmod +x, then run the AppImage</p></div><a data-asset="linux" href="https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-linux-x86_64.AppImage">Download AppImage ↗</a></article>
+      <article class="download"><div><h3>Windows · Portable ZIP</h3><p class="detail">Windows x64 · Launch without installing</p></div><a data-asset="portable" href="https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-win-x64-portable.zip">Download Portable ZIP ↗</a></article>
+      <article class="download"><div><h3>ESP32-P4 · Firmware</h3><p class="detail">Pre-v3 &amp; v3.x images · Revision-aware release catalog</p></div><a data-asset="firmware" href="https://github.com/masarray/arstack61850/releases/latest">Browse matched firmware ↗</a></article>
+    </div>
+    <p class="small">Also published: direct Windows Setup EXE, SHA256SUMS.txt, firmware-manifest.json and release-provenance.json. Windows Setup ZIP avoids direct-EXE download friction but does not bypass Windows security checks for unsigned installers. <a href="https://github.com/masarray/arstack61850/blob/main/docs/INSTALL.md">Installation help ↗</a></p>
+  </section>
+</main>
+<footer class="footer"><div class="wrap footer-inner"><span>© 2026 MasArray · ARStack61850 · GPL-3.0 · Open-source engineering tools</span><span class="footer-links"><a href="https://masarray.github.io/">MasArray products</a><a href="https://github.com/masarray/arstack61850">Source</a><a href="https://github.com/masarray/arstack61850/blob/main/SUPPORT.md">Support</a><a href="https://github.com/masarray/arstack61850/releases/latest">Releases</a></span></div></footer>
 <script>
-/* Public release cards track GitHub's latest stable release, not a pinned tag. */
+/* Keep static, verified stable asset URLs usable if GitHub's API is offline or rate limited.
+   Upgrade asset URLs only when the latest *stable* release contains a matching asset. */
 (async function syncLatestRelease(){
-  const fallback='https://github.com/masarray/arstack61850/releases/latest';
-  try {
-    const response=await fetch('https://api.github.com/repos/masarray/arstack61850/releases/latest',
-      {headers:{Accept:'application/vnd.github+json'}});
-    if(!response.ok) return;
+  try{
+    const response=await fetch('https://api.github.com/repos/masarray/arstack61850/releases/latest',{headers:{Accept:'application/vnd.github+json'}});
+    if(!response.ok)return;
     const release=await response.json();
-    if(release.draft || release.prerelease || !Array.isArray(release.assets)) return;
+    if(release.draft||release.prerelease||!Array.isArray(release.assets))return;
     const assets=release.assets;
-    const find=(re)=>assets.find(x=>re.test(x.name) &&
-      typeof x.browser_download_url==='string' &&
-      x.browser_download_url.startsWith('https://github.com/masarray/arstack61850/releases/download/'));
-    const resolved={
-      windows:find(/(?:win|windows).*setup\.zip$/i) || find(/(?:win|windows).*setup\.exe$/i),
-      portable:find(/(?:win|windows).*portable\.zip$/i),
-      firmware:assets.some(x=>x.name==='firmware-catalog.json') ? null : find(/firmware.*\.bin$/i),
-      linux:find(/linux.*\.AppImage$/i)
+    const find=re=>assets.find(asset=>re.test(asset.name)&&typeof asset.browser_download_url==='string'&&asset.browser_download_url.startsWith('https://github.com/masarray/arstack61850/releases/download/'));
+    const selected={
+      windows:find(/(?:win|windows).*setup\.zip$/i)||find(/(?:win|windows).*setup\.exe$/i),
+      linux:find(/linux.*\.AppImage$/i),
+      portable:find(/(?:win|windows).*portable\.zip$/i)
     };
-    for(const [key,asset] of Object.entries(resolved)){
-      document.querySelectorAll('[data-asset="'+key+'"]').forEach(link=>{
-        link.href=asset ? asset.browser_download_url : fallback;
-        if(!asset) link.title='View available files in the latest release';
+    for(const [key,asset] of Object.entries(selected)){
+      document.querySelectorAll('a[data-asset="'+key+'"]').forEach(link=>{
+        if(asset){link.href=asset.browser_download_url;}
+        else{link.href=release.html_url;link.title='See available packages for this stable release';}
       });
     }
-    document.querySelectorAll('[data-asset="windows"]').forEach(link=>{
-      const preferredZip=resolved.windows && /setup\.zip$/i.test(resolved.windows.name);
-      link.textContent=link.classList.contains('btn')
-        ? (preferredZip ? 'Download Windows Setup ZIP ↓' : 'Download Windows Setup ZIP ↓')
-        : (preferredZip ? 'Setup ZIP ↗' : 'Setup EXE ↗');
-    });
-    if(resolved.linux) document.getElementById('linux-download').hidden=false;
+    document.querySelectorAll('a[data-asset="firmware"]').forEach(link=>{link.href=release.html_url;});
     const label=document.querySelector('[data-latest-label]');
-    if(label) label.textContent='Latest stable release · '+release.tag_name;
-  }catch(_error){/* Offline or rate-limited: the release overview links remain valid. */}
+    if(label)label.textContent='Latest stable · '+release.tag_name;
+    const win=selected.windows;
+    if(win&&/setup\.exe$/i.test(win.name)){
+      document.querySelectorAll('a[data-asset="windows"]').forEach(link=>{if(!link.classList.contains('btn'))link.textContent='Download Setup EXE ↗';link.setAttribute('aria-label','Download for Windows, Setup EXE');});
+    }
+  }catch(_error){/* Stable published fallback links remain usable. */}
 })();
 </script>
-</body></html>
+</body>
+</html>
