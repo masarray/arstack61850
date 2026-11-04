@@ -6,12 +6,7 @@ on:
     paths:
       - 'index.html'
       - 'assets/screenshots/arstack-studio-windows.png'
-      - 'assets/favicon.ico'
-      - 'assets/favicon-96x96.png'
-      - 'assets/apple-touch-icon.png'
-      - 'assets/site.webmanifest'
-      - 'assets/web-app-manifest-192x192.png'
-      - 'assets/web-app-manifest-512x512.png'
+      - 'assets/studio_icon/**'
       - 'scripts/check_site_visual_assets.py'
       - '.github/workflows/m3h-project-pages-publish.yml'
   workflow_dispatch:
@@ -58,10 +53,10 @@ jobs:
           python3 scripts/check_site_visual_assets.py
           mkdir -p _site
           cp index.html _site/index.html
-          mkdir -p _site/assets/screenshots
-          for asset in favicon.ico favicon-96x96.png apple-touch-icon.png site.webmanifest web-app-manifest-192x192.png web-app-manifest-512x512.png; do
-            test -s "assets/$asset"
-            cp "assets/$asset" "_site/assets/$asset"
+          mkdir -p _site/assets/screenshots _site/assets/studio_icon
+          for asset in android-chrome-192x192.png android-chrome-512x512.png favicon.ico favicon-16x16.png favicon-32x32.png apple-touch-icon.png site.webmanifest; do
+            test -s "assets/studio_icon/$asset"
+            cp "assets/studio_icon/$asset" "_site/assets/studio_icon/$asset"
           done
           test -s assets/screenshots/arstack-studio-windows.png
           cp assets/screenshots/arstack-studio-windows.png _site/assets/screenshots/arstack-studio-windows.png
@@ -87,14 +82,15 @@ jobs:
                  grep -Fq 'data-asset="linux"' /tmp/arstack-live.html &&
                  grep -Fq 'Download for Windows' /tmp/arstack-live.html &&
                  grep -Fq 'Download for Linux' /tmp/arstack-live.html &&
+                 grep -Fq 'assets/studio_icon/android-chrome-192x192.png' /tmp/arstack-live.html &&
                  grep -Fq '4,705,090' /tmp/arstack-live.html &&
                  grep -Fq 'processbus-sim-dual-stable-20261105' /tmp/arstack-live.html; then
-                for asset in assets/web-app-manifest-192x192.png assets/web-app-manifest-512x512.png assets/favicon-96x96.png assets/screenshots/arstack-studio-windows.png; do
+                for asset in assets/studio_icon/android-chrome-192x192.png assets/studio_icon/android-chrome-512x512.png assets/studio_icon/favicon.ico assets/studio_icon/favicon-16x16.png assets/studio_icon/favicon-32x32.png assets/studio_icon/apple-touch-icon.png assets/studio_icon/site.webmanifest assets/screenshots/arstack-studio-windows.png; do
                   published="/tmp/arstack-live-$(basename "$asset")"
                   curl --fail --location --silent --show-error "https://masarray.github.io/arstack61850/$asset?build=$GITHUB_SHA" -o "$published"
                   cmp --silent "$asset" "$published" || { echo "FAIL: published image differs from repository $asset" >&2; exit 1; }
                 done
-                echo 'PASS: latest release links, original identity files and native screenshot live on project Pages'
+                echo 'PASS: latest release links, original Studio icon family, manifest, and native Qt screenshot live on project Pages'
                 exit 0
               fi
             fi
