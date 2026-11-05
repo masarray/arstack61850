@@ -26,6 +26,7 @@ OTHER = (
     f"{ICON_ROOT}/apple-touch-icon.png",
     f"{ICON_ROOT}/site.webmanifest",
 )
+LAB_PHOTO = "assets/photos/arstack-esp32-p4-lab-demo.webp"
 errors: list[str] = []
 
 for path, expected in REQUIRED_PNG.items():
@@ -45,9 +46,20 @@ for path in OTHER:
     if not (ROOT / path).is_file() or (ROOT / path).stat().st_size == 0:
         errors.append(f"Missing canonical Studio identity asset: {path}")
 
+# Verify that the contributed real board photo is a local, committed WebP.
+photo_path = ROOT / LAB_PHOTO
+if not photo_path.is_file() or photo_path.stat().st_size < 15000:
+    errors.append(f"Missing or implausibly small hardware demo photo: {LAB_PHOTO}")
+else:
+    webp_header = photo_path.read_bytes()[:16]
+    if webp_header[:4] != b"RIFF" or webp_header[8:12] != b"WEBP":
+        errors.append(f"Hardware demo photo is not a WebP image: {LAB_PHOTO}")
+
 required_html = [
     rf'<a class="brand"[^>]*>\s*<img src="{ICON_ROOT}/android-chrome-192x192.png"',
     r'<figure class="hero-visual" id="studio-preview">',
+    r'<section class="wrap section" id="hardware-lab">',
+    r'<img src="assets/photos/arstack-esp32-p4-lab-demo.webp"',
     r'<img src="assets/screenshots/arstack-studio-windows.png"',
     rf'<link rel="icon"[^>]*href="{ICON_ROOT}/favicon.ico"',
     rf'<link rel="icon"[^>]*href="{ICON_ROOT}/favicon-16x16.png"',
@@ -69,6 +81,12 @@ for wrong in ('assets/favicon.ico', 'assets/favicon-96x96.png',
 
 if HTML.count('<img src="assets/screenshots/arstack-studio-windows.png"') != 1:
     errors.append("Native screenshot must appear exactly once")
+if HTML.count('<img src="assets/photos/arstack-esp32-p4-lab-demo.webp"') != 1:
+    errors.append("Hardware demonstration photo must appear exactly once")
+if "https://www.waveshare.com/product/iot-communication/wired-comm-converter/esp32-p4-eth.htm" not in HTML:
+    errors.append("Official global board listing link is missing")
+if "https://docs.waveshare.com/ESP32-P4-ETH" not in HTML:
+    errors.append("Official board documentation link is missing")
 
 manifest_path = ROOT / ICON_ROOT / "site.webmanifest"
 if manifest_path.is_file():
