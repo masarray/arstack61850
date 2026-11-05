@@ -30,6 +30,16 @@ Use **ARStack Studio** and one affordable **ESP32-P4 Ethernet board** to generat
 
 *Screenshot captured directly from the Windows Qt application by the native GUI test.*
 
+## Real ESP32-P4 Ethernet lab setup
+
+![Real Waveshare ESP32-P4-ETH series board connected to USB-C and an RJ45 Ethernet cable, held in front of an engineering waveform workspace](assets/photos/arstack-esp32-p4-lab-demo.webp)
+
+*Real hardware setup photo contributed to the project: an ESP32-P4-ETH-series development board connected over USB and Ethernet with a waveform workspace in the background. This illustrates the bench setup; standards compliance and SV/PTP timing claims are supported by the separate [packet-capture benchmark](docs/releases/PROCESSBUS_AUTONOMOUS_M3H3_OFFICIAL_20261025.md), not by the photograph.*
+
+**Want to see or buy a board?** [Waveshare official ESP32-P4-ETH product page (including the ESP32-P4-ETH-M option)](https://www.waveshare.com/product/iot-communication/wired-comm-converter/esp32-p4-eth.htm) · [Waveshare board documentation and revision guidance](https://docs.waveshare.com/ESP32-P4-ETH) · [Getting started](docs/GETTING_STARTED.md).
+
+The ESP32-P4-ETH-M is the version with pre-soldered pin headers. Confirm your actual chip revision in Studio before flashing the **matched firmware**: pre-v3 is supported by historical lab evidence, while v3.x physical compatibility remains an **engineering preview**. Run SV/PTP only on isolated test Ethernet.
+
 ## Get started in minutes
 
 1. **Download Studio** for [Windows (Setup ZIP)](https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-win-x64-setup.zip) or [Linux x86_64 (AppImage)](https://github.com/masarray/arstack61850/releases/download/processbus-sim-dual-stable-20261105/ARStack-Studio-linux-x86_64.AppImage). Extract the Windows ZIP and run the installer inside, or mark the Linux AppImage executable and launch it. Windows Portable ZIP and direct EXE are also available.

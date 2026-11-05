@@ -3,9 +3,9 @@ name: ARStack Latest Stable Landing Browser and Mobile Acceptance
 on:
   push:
     branches: [main]
-    paths: ['index.html', 'assets/screenshots/arstack-studio-windows.png', 'assets/studio_icon/**', 'scripts/check_site_visual_assets.py', '.github/workflows/m3h-landing-browser-acceptance.yml']
+    paths: ['index.html', 'assets/screenshots/arstack-studio-windows.png', 'assets/photos/arstack-esp32-p4-lab-demo.webp', 'assets/studio_icon/**', 'scripts/check_site_visual_assets.py', '.github/workflows/m3h-landing-browser-acceptance.yml']
   pull_request:
-    paths: ['index.html', 'assets/screenshots/arstack-studio-windows.png', 'assets/studio_icon/**', 'scripts/check_site_visual_assets.py', '.github/workflows/m3h-landing-browser-acceptance.yml']
+    paths: ['index.html', 'assets/screenshots/arstack-studio-windows.png', 'assets/photos/arstack-esp32-p4-lab-demo.webp', 'assets/studio_icon/**', 'scripts/check_site_visual_assets.py', '.github/workflows/m3h-landing-browser-acceptance.yml']
   workflow_dispatch:
 
 permissions:
@@ -43,6 +43,8 @@ jobs:
               const response=await page.goto('http://127.0.0.1:4173/',{waitUntil:'domcontentloaded',timeout:30000});
               if(response.status()!==200)throw new Error('LIVE_HTTP_'+response.status());
               await Promise.all([page.locator('.brand img').evaluate(el=>el.decode()),page.locator('.hero-visual img').evaluate(el=>el.decode())]);
+              await page.locator('.lab-photo img').scrollIntoViewIfNeeded();
+              await page.locator('.lab-photo img').evaluate(el=>el.decode());
               const data=await page.evaluate(()=>{
                 const buttons=[...document.querySelectorAll('a[data-asset="windows"],a[data-asset="portable"],a[data-asset="firmware"]')];
                 const releaseLink=/^https:\/\/github\.com\/masarray\/arstack61850\/releases\/(latest|tag\/[^/]+|download\/[^/]+\/[^/]+)$/;
@@ -53,6 +55,8 @@ jobs:
                   heroDownloads:[...document.querySelectorAll('.hero-downloads a')].map(el=>({label:el.textContent.trim(),href:el.href,visible:el.getBoundingClientRect().width>0&&el.getBoundingClientRect().height>0})),
                   officialBrand:(()=>{const el=document.querySelector('.brand img');return el?.naturalWidth===192&&el.getAttribute('src')==='assets/studio_icon/android-chrome-192x192.png'})(),
                   nativeScreenshot:(()=>{const el=document.querySelector('.hero-visual img');return el?.naturalWidth===960&&el?.naturalHeight===680&&el.getAttribute('src')==='assets/screenshots/arstack-studio-windows.png'})(),
+                  realBenchPhoto:(()=>{const el=document.querySelector('.lab-photo img');return el?.naturalWidth===960&&el?.naturalHeight===713&&el.getAttribute('src')==='assets/photos/arstack-esp32-p4-lab-demo.webp'})(),
+                  officialBoardLink:!!document.querySelector('a[href="https://www.waveshare.com/product/iot-communication/wired-comm-converter/esp32-p4-eth.htm"]'),
                   studioFavicons:[...document.querySelectorAll('link[rel="icon"],link[rel="apple-touch-icon"],link[rel="manifest"]')].every(el=>el.getAttribute('href').startsWith('assets/studio_icon/')),
                   studioSocialImage:document.querySelector('meta[property="og:image"]')?.content?.endsWith('/assets/studio_icon/android-chrome-512x512.png')===true,
                   noPaintedMock:!document.querySelector('.monitor,.wave'),
@@ -62,7 +66,7 @@ jobs:
               await page.screenshot({path:'evidence/m3h-'+width+'.png',fullPage:true});
               if(!data.latest||!data.benchmark||!data.og||data.buttons!==4||!data.anyVisible||!data.linksValid||!data.linuxReady)throw new Error('MISSING_LATEST_RELEASE_LINKS_'+width);
               if(data.heroDownloads.length!==2||!data.heroDownloads.every(x=>x.visible)||data.heroDownloads[0].label!=='Download for Windows'||data.heroDownloads[1].label!=='Download for Linux'||!/ARStack-Studio-win-x64-setup\.zip$/.test(data.heroDownloads[0].href)||!/ARStack-Studio-linux-x86_64\.AppImage$/.test(data.heroDownloads[1].href))throw new Error('HERO_DIRECT_PLATFORM_DOWNLOADS_'+width);
-              if(!data.officialBrand||!data.nativeScreenshot||!data.noPaintedMock||!data.studioFavicons||!data.studioSocialImage)throw new Error('NONCANONICAL_STUDIO_ICON_OR_MOCK_SCREEN_'+width);
+              if(!data.officialBrand||!data.nativeScreenshot||!data.realBenchPhoto||!data.officialBoardLink||!data.noPaintedMock||!data.studioFavicons||!data.studioSocialImage)throw new Error('NONCANONICAL_STUDIO_ICON_OR_MOCK_SCREEN_'+width);
               if(data.scroll>data.width+2)throw new Error('HORIZONTAL_OVERFLOW_'+width+':'+data.scroll+'>'+data.width);
               await page.close();
             }
