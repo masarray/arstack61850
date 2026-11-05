@@ -42,7 +42,9 @@ jobs:
               const page=await browser.newPage({viewport:{width,height:900},deviceScaleFactor:1});
               const response=await page.goto('http://127.0.0.1:4173/',{waitUntil:'domcontentloaded',timeout:30000});
               if(response.status()!==200)throw new Error('LIVE_HTTP_'+response.status());
-              await Promise.all([page.locator('.brand img').evaluate(el=>el.decode()),page.locator('.hero-visual img').evaluate(el=>el.decode()),page.locator('.lab-photo img').evaluate(el=>el.decode())]);
+              await Promise.all([page.locator('.brand img').evaluate(el=>el.decode()),page.locator('.hero-visual img').evaluate(el=>el.decode())]);
+              await page.locator('.lab-photo img').scrollIntoViewIfNeeded();
+              await page.locator('.lab-photo img').evaluate(el=>el.decode());
               const data=await page.evaluate(()=>{
                 const buttons=[...document.querySelectorAll('a[data-asset="windows"],a[data-asset="portable"],a[data-asset="firmware"]')];
                 const releaseLink=/^https:\/\/github\.com\/masarray\/arstack61850\/releases\/(latest|tag\/[^/]+|download\/[^/]+\/[^/]+)$/;
