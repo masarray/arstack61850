@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'index.html'
+      - 'googlec34c43149eef6100.html'
       - 'assets/screenshots/arstack-studio-windows.png'
       - 'assets/photos/arstack-esp32-p4-lab-demo.webp'
       - 'assets/studio_icon/**'
@@ -56,6 +57,8 @@ jobs:
           python3 scripts/check_site_visual_assets.py
           mkdir -p _site
           cp index.html _site/index.html
+          grep -Fxq 'google-site-verification: googlec34c43149eef6100.html' googlec34c43149eef6100.html
+          cp googlec34c43149eef6100.html _site/googlec34c43149eef6100.html
           mkdir -p _site/assets/screenshots _site/assets/studio_icon _site/assets/photos
           for asset in android-chrome-192x192.png android-chrome-512x512.png favicon.ico favicon-16x16.png favicon-32x32.png apple-touch-icon.png site.webmanifest; do
             test -s "assets/studio_icon/$asset"
